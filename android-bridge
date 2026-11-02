@@ -1,0 +1,311 @@
+#!/system/bin/sh
+# PocketUFW Android UI boundary. ONE su process per user operation.
+# Machine-readable output only; never interpret packet counters as threats.
+# This script runs from the APK's private engine directory.
+set -u
+
+[ "$#" -ge 1 ] || exit 2
+ACTION="$1"
+case "$ACTION" in
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh)
+    [ "$#" -eq 1 ] || exit 2 ;;
+  set-ports)
+    [ "$#" -eq 4 ] || exit 2
+    PORT4="$2"; PORT6="$3"; SCOPE="$4"
+    case "$SCOPE" in experimental|committed) : ;; *) exit 2 ;; esac
+    for port in "$PORT4" "$PORT6"; do
+      case "$port" in
+        none) : ;;
+        0|0*|*[!0-9]*|'') exit 2 ;;
+        *) [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 2 ;;
+      esac
+    done ;;
+  use-auto)
+    [ "$#" -eq 1 ] || exit 2 ;;
+  *) exit 2 ;;
+esac
+[ "$(id -u)" = 0 ] || { echo 'root=DENIED'; exit 3; }
+
+case "$0" in
+  */*) BASE=$(dirname "$0") ;;
+  *) exit 2 ;;
+esac
+ENGINE="$BASE/pocketufw"
+BOOT="$BASE/bootctl"
+CONFIG="$BASE/udp-config"
+[ -r "$ENGINE" ] && [ -r "$BOOT" ] && [ -r "$CONFIG" ] || exit 4
+
+# A verified saved choice takes precedence over automatic Tailscale discovery.
+# This is app-owned device-protected data, removed by Android on uninstall.
+read_config() {
+  policy=$(sh "$CONFIG" read 2>/dev/null) || return 1
+  case "$policy" in
+    mode=AUTOMATIC) MODE=AUTOMATIC; SAVED4=none; SAVED6=none ;;
+    mode=COMMITTED*)
+      MODE=COMMITTED
+      SAVED4=$(printf '%s\n' "$policy" | sed -n 's/^udp4=//p')
+      SAVED6=$(printf '%s\n' "$policy" | sed -n 's/^udp6=//p')
+      [ -n "$SAVED4" ] && [ -n "$SAVED6" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Read-only helper; the engine verifies the live rule grammar and hooks first.
+read_live_ports() {
+  live_ports=$(sh "$ENGINE" get-ports 2>/dev/null) || return 1
+  OLD4=$(printf '%s\n' "$live_ports" | sed -n 's/^udp4=//p')
+  OLD6=$(printf '%s\n' "$live_ports" | sed -n 's/^udp6=//p')
+  [ -n "$OLD4" ] && [ -n "$OLD6" ]
+}
+
+restore_config() {
+  if [ "$ORIGINAL_MODE" = COMMITTED ]; then
+    sh "$CONFIG" write "$ORIGINAL4" "$ORIGINAL6" >/dev/null 2>&1
+  else
+    sh "$CONFIG" clear >/dev/null 2>&1
+  fi
+}
+
+outcome='NONE'
+message=''
+created_now=0
+previous_boot='UNKNOWN'
+
+# The Quick Settings tile must determine the *live* state before toggling.
+# Never toggle from a remembered color or a missing/ambiguous kernel report.
+case "$ACTION" in
+  toggle|toggle-restore)
+    requested="$ACTION"
+    live=$(sh "$ENGINE" verify 2>/dev/null) || :
+    case "$live" in
+      ACTIVE) ACTION=disable ;;
+      INACTIVE)
+        if [ "$requested" = toggle-restore ]; then ACTION=enable-restore
+        else ACTION=enable; fi
+        ;;
+      *)
+        ACTION=inspect
+        outcome='FAILED'
+        message='Cannot toggle: live firewall state is degraded or unknown. Open the app.'
+        ;;
+    esac
+    ;;
+esac
+
+case "$ACTION" in
+  inspect) ;;
+  enable|enable-restore)
+    if ! read_config; then
+      outcome='FAILED'
+      message='Saved UDP policy is unavailable or invalid; firewall not modified.'
+    else
+      set -- enable
+      if [ "$MODE" = AUTOMATIC ]; then
+        set -- "$@" --auto-tailscale
+      else
+        [ "$SAVED4" = none ] || set -- "$@" --tailscale-udp4 "$SAVED4"
+        [ "$SAVED6" = none ] || set -- "$@" --tailscale-udp6 "$SAVED6"
+      fi
+    if sh "$ENGINE" "$@" >/dev/null 2>&1; then
+      created_now=1
+      if [ "$ACTION" = enable-restore ]; then
+        if sh "$BOOT" enable >/dev/null 2>&1; then
+          outcome='SUCCESS'
+          message='Firewall enabled; boot restoration resumed.'
+        else
+          outcome='FAILED'
+          message='Firewall enabled, but boot restoration could not be rearmed.'
+        fi
+      else
+        outcome='SUCCESS'
+        message='Firewall enabled.'
+      fi
+    else
+      outcome='FAILED'
+      message='Cannot enable firewall. Check other rules or VPN configuration.'
+    fi
+    fi
+    ;;
+  disable)
+    # Remember whether the user opted into boot restoration so Kotlin can
+    # honor that preference after a temporary tile or Home-switch OFF.
+    previous_boot=$(sh "$BOOT" status 2>/dev/null) || previous_boot='UNKNOWN'
+    previous_boot=${previous_boot#boot=}
+    # The off switch must also disarm any Magisk boot hook.
+    if ! sh "$BOOT" disable >/dev/null 2>&1; then
+      outcome='FAILED'
+      message='Boot restoration could not be disabled; firewall left unchanged.'
+    elif sh "$ENGINE" disable >/dev/null 2>&1; then
+      outcome='SUCCESS'
+      message='Firewall disabled; boot restoration removed.'
+    else
+      outcome='FAILED'
+      message='Could not remove all firewall rules; inspect status.'
+    fi
+    ;;
+  boot-enable)
+    if sh "$BOOT" enable >/dev/null 2>&1; then
+      outcome='SUCCESS'
+      message='Magisk boot restoration enabled.'
+    else
+      outcome='FAILED'
+      message='Cannot enable boot restoration. Ensure firewall is active.'
+    fi
+    ;;
+  boot-disable)
+    if sh "$BOOT" disable >/dev/null 2>&1; then
+      outcome='SUCCESS'
+      message='Boot restoration disabled; live firewall unchanged.'
+    else
+      outcome='FAILED'
+      message='Could not remove the boot hook; inspect status.'
+    fi
+    ;;
+  vpn-refresh)
+    if ! read_config; then
+      outcome='FAILED'
+      message='Saved UDP policy is invalid; automatic refresh refused.'
+    elif [ "$MODE" = COMMITTED ]; then
+      outcome='FAILED'
+      message='Committed UDP exceptions are active. Use the Status editor to change them or return to automatic detection.'
+    elif sh "$ENGINE" refresh >/dev/null 2>&1; then
+      outcome='SUCCESS'
+      message='Verified Tailscale listener exceptions refreshed.'
+    else
+      outcome='FAILED'
+      message='VPN exceptions could not be refreshed; inspect firewall state.'
+    fi
+    ;;
+  set-ports)
+    if ! read_config || ! read_live_ports; then
+      outcome='FAILED'
+      message='Current firewall or saved configuration cannot be verified; no changes made.'
+    else
+      ORIGINAL_MODE="$MODE"; ORIGINAL4="$SAVED4"; ORIGINAL6="$SAVED6"
+      if ! sh "$ENGINE" set-ports --udp4 "$PORT4" --udp6 "$PORT6" >/dev/null 2>&1; then
+        outcome='FAILED'
+        message='UDP update failed. Inspect the existing firewall exceptions.'
+      elif [ "$SCOPE" = experimental ]; then
+        outcome='SUCCESS'
+        message='Experimental UDP exceptions applied only to live rules. Saved settings are unchanged.'
+      elif ! sh "$CONFIG" write "$PORT4" "$PORT6" >/dev/null 2>&1; then
+        sh "$ENGINE" set-ports --udp4 "$OLD4" --udp6 "$OLD6" >/dev/null 2>&1 || :
+        outcome='FAILED'
+        message='Could not save committed UDP exceptions; attempted to restore previous live ports.'
+      else
+        current_boot=$(sh "$BOOT" status 2>/dev/null) || current_boot='boot=UNKNOWN'
+        if [ "$current_boot" != boot=ENABLED ] && [ "$current_boot" != boot=DISABLED ] &&
+           [ "$current_boot" != boot=UNSUPPORTED ]; then
+          restore_config || :
+          sh "$ENGINE" set-ports --udp4 "$OLD4" --udp6 "$OLD6" >/dev/null 2>&1 || :
+          outcome='FAILED'
+          message='Magisk boot state cannot be verified; committed configuration was rolled back.'
+        elif [ "$current_boot" = boot=ENABLED ] && ! sh "$BOOT" enable >/dev/null 2>&1; then
+          restore_config || :
+          sh "$ENGINE" set-ports --udp4 "$OLD4" --udp6 "$OLD6" >/dev/null 2>&1 || :
+          sh "$BOOT" enable >/dev/null 2>&1 || :
+          outcome='FAILED'
+          message='Boot snapshot could not be updated; rollback attempted. Inspect saved and live rules.'
+        else
+          outcome='SUCCESS'
+          message='Committed UDP exceptions saved for future firewall sessions and Magisk restoration.'
+        fi
+      fi
+    fi
+    ;;
+  use-auto)
+    # Even an invalid regular saved file may be reset after a verified live
+    # Tailscale refresh. Symlinks/unsafe files remain protected by udp-config.
+    if ! read_live_ports; then
+      outcome='FAILED'
+      message='Current firewall or saved configuration cannot be verified; no changes made.'
+    elif ! sh "$ENGINE" refresh >/dev/null 2>&1; then
+      outcome='FAILED'
+      message='Cannot verify automatic Tailscale listeners. Committed settings unchanged.'
+    elif ! sh "$CONFIG" clear >/dev/null 2>&1; then
+      sh "$ENGINE" set-ports --udp4 "$OLD4" --udp6 "$OLD6" >/dev/null 2>&1 || :
+      outcome='FAILED'
+      message='Could not clear committed UDP settings; prior live ports restoration attempted.'
+    else
+      outcome='SUCCESS'
+      message='Automatic verified Tailscale detection restored; committed UDP settings cleared.'
+    fi
+    ;;
+esac
+
+# 'activity' verifies both kernel rule families before reading their counters.
+# It also reports INACTIVE/DEGRADED. Do not run 'verify' a second time on
+# every dashboard opening. Fall back to it only if counter collection fails.
+snapshot=$(sh "$ENGINE" activity 2>/dev/null) || :
+state=$(printf '%s\n' "$snapshot" | sed -n 's/^state=//p')
+case "$state" in
+  ACTIVE|INACTIVE|DEGRADED) : ;;
+  *)
+    state=$(sh "$ENGINE" verify 2>/dev/null) || :
+    case "$state" in ACTIVE|INACTIVE|DEGRADED) : ;; *) state='UNKNOWN' ;; esac
+    snapshot=''
+    ;;
+esac
+boot=$(sh "$BOOT" status 2>/dev/null) || :
+case "$boot" in
+  boot=ENABLED|boot=DISABLED|boot=UNSUPPORTED|boot=DEGRADED|boot=CONFLICT) : ;;
+  *) boot='boot=UNKNOWN' ;;
+esac
+
+# Never report a successful action without verifying its postcondition.
+if [ "$outcome" = 'SUCCESS' ]; then
+  case "$ACTION" in
+    enable) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
+    enable-restore) [ "$state" = ACTIVE ] && [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
+    disable) [ "$state" = INACTIVE ] && [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
+    boot-enable) [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
+    boot-disable) [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
+    vpn-refresh|set-ports|use-auto) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
+  esac
+  if [ "$outcome" = 'FAILED' ]; then
+    message='Operation postcondition not verified; inspect firewall state.'
+  fi
+fi
+
+# If enabling installed only some rules, perform the existing best-effort
+# rollback, then re-audit. Never silently claim protection.
+if [ "$ACTION" = enable ] && [ "$created_now" = 1 ] &&
+   [ "$outcome" = FAILED ] && [ "$state" != ACTIVE ]; then
+  sh "$ENGINE" disable >/dev/null 2>&1 || :
+  snapshot=''
+  state=$(sh "$ENGINE" verify 2>/dev/null) || :
+  case "$state" in ACTIVE|INACTIVE|DEGRADED) : ;; *) state='UNKNOWN' ;; esac
+fi
+
+if ! read_config; then
+  MODE=DEGRADED; SAVED4=none; SAVED6=none
+fi
+echo 'root=GRANTED'
+echo "config_mode=$MODE"
+echo "committed_udp4=$SAVED4"
+echo "committed_udp6=$SAVED6"
+echo "previous_boot=$previous_boot"
+echo "operation=$outcome"
+echo "message=$message"
+echo "state=$state"
+echo "$boot"
+
+if [ "$state" = ACTIVE ]; then
+  # These counters were measured by the same verified 'activity' command.
+  # A degraded or incomplete response must never become a fabricated zero.
+  if [ -n "$snapshot" ]; then
+    printf '%s\n' "$snapshot" | grep -E '^ipv[46]_(blocked|blocked_bytes|established_replies)=[0-9]+$' || :
+  fi
+fi
+
+# Get an exact read-only snapshot of our live kernel rules in the SAME root
+# session, even if a chain is degraded but still readable. A missing READY
+# marker means the report is incomplete; Android must not present it as proof.
+if [ "$state" = ACTIVE ] || [ "$state" = DEGRADED ]; then
+  report=$(sh "$BASE/rules-report" 2>/dev/null) || report=''
+  if [ "$(printf '%s\n' "$report" | tail -n 1)" = 'rules_report=READY' ]; then
+    printf '%s\n' "$report"
+  else
+    echo 'rules_report=UNAVAILABLE'
+  fi
+fi

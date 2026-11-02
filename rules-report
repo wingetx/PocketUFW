@@ -1,0 +1,51 @@
+#!/system/bin/sh
+# Read-only kernel firewall rules for the optional PocketUFW Status screen.
+# This command NEVER edits rules. Report is valid only with a final READY line.
+set -eu
+
+[ "$(id -u)" = 0 ] || exit 3
+
+# Filter and bound lines to avoid accidentally returning other Android chains
+# or emitting an unbounded report that could stall a UI pipe.
+emit_rules() {
+  kind="$1"
+  fam="$2"
+  listing="$3"
+  max="$4"
+  printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" '
+    $1 == "-A" {
+      if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
+                                  /-j POCKETUFW_IN/)) next
+      if (kind == "main" && $2 != "POCKETUFW_IN") next
+      if (kind == "vpn" && $2 != "POCKETUFW_TS") next
+      n++
+      if (n > max || length($0) > 190) exit 9
+      printf "%s%s_%02d=%s\n", kind, fam, n, $0
+    }
+  '
+}
+
+emit_family() {
+  fam="$1"
+  ipt="$2"
+
+  # All reads must succeed. No special-case or invented default policies.
+  input=$("$ipt" -w -S INPUT 2>/dev/null) || return 1
+  main=$("$ipt" -w -S POCKETUFW_IN 2>/dev/null) || return 1
+  vpn=$("$ipt" -w -S POCKETUFW_TS 2>/dev/null) || return 1
+
+  case "$main" in *'-N POCKETUFW_IN'*) : ;; *) return 1 ;; esac
+  case "$vpn" in *'-N POCKETUFW_TS'*) : ;; *) return 1 ;; esac
+
+  policy=$(printf '%s\n' "$input" | awk '$1 == "-P" && $2 == "INPUT" {print $3; exit}')
+  case "$policy" in ACCEPT|DROP|REJECT) : ;; *) return 1 ;; esac
+  printf 'input_policy%s=%s\n' "$fam" "$policy"
+  emit_rules hook "$fam" "$input" 6 || return 1
+  emit_rules main "$fam" "$main" 12 || return 1
+  emit_rules vpn "$fam" "$vpn" 3 || return 1
+}
+
+# The final marker is mandatory: earlier partial output is never a report.
+emit_family 4 iptables || exit 4
+emit_family 6 ip6tables || exit 4
+printf 'rules_report=READY\n'

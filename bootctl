@@ -1,0 +1,113 @@
+#!/system/bin/sh
+# PocketUFW experimental Magisk boot restoration controller.
+# Installs only PocketUFW-owned files under /data/adb/pocketufw and
+# one nonblocking late_start hook under /data/adb/service.d.
+set -eu
+umask 077
+
+STORE='/data/adb/pocketufw'
+HOOK='/data/adb/service.d/pocketufw.sh'
+MARKER="$STORE/boot.enabled"
+SIGNATURE='# PocketUFW boot hook v1'
+[ "$#" -ge 1 ] || { echo 'bootctl: command required' >&2; exit 1; }
+CMD="$1"
+SELF_DIR=$(dirname "$0")
+
+say() { printf '%s\n' "$*"; }
+fail() { say "pocketufw boot: $*" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || fail 'root required'
+case "$CMD" in status|enable|disable) : ;; *) fail 'use status, enable, or disable' ;; esac
+
+owned_hook() {
+  [ -f "$HOOK" ] && [ ! -L "$HOOK" ] &&
+    grep -qxF "$SIGNATURE" "$HOOK"
+}
+
+# Never overwrite unrelated scripts or follow preexisting symlinks.
+safe_paths() {
+  [ ! -L "$STORE" ] || fail 'Refusing symlink at boot data directory'
+  [ ! -e "$STORE" ] || [ -d "$STORE" ] || fail 'Boot data path is not a directory'
+  if [ -e "$HOOK" ] || [ -L "$HOOK" ]; then
+    owned_hook || fail 'Boot hook path belongs to something else'
+  fi
+  for name in pocketufw vpn-probe udp-config boot.enabled .pocketufw.stage .vpn-probe.stage .udp-config.stage .boot.enabled.stage; do
+    [ ! -L "$STORE/$name" ] || fail 'Refusing symlink in boot data'
+    [ ! -d "$STORE/$name" ] || fail 'Refusing directory in boot data'
+  done
+  [ ! -L "$HOOK.stage" ] || fail 'Refusing symlink at hook staging path'
+}
+
+supported() {
+  command -v magisk >/dev/null 2>&1 &&
+    [ -d /data/adb/service.d ] &&
+    [ -r "$SELF_DIR/pocketufw" ] &&
+    [ -r "$SELF_DIR/vpn-probe" ] &&
+    [ -r "$SELF_DIR/udp-config" ] &&
+    [ -r "$SELF_DIR/boot-service" ]
+}
+
+case "$CMD" in
+  status)
+    if [ -L "$STORE" ] || [ -L "$HOOK" ]; then
+      say 'boot=CONFLICT'
+    elif [ -e "$HOOK" ] && ! owned_hook; then
+      say 'boot=CONFLICT'
+    elif owned_hook; then
+      if [ -f "$MARKER" ] &&
+         [ -f "$STORE/pocketufw" ] &&
+         [ -f "$STORE/vpn-probe" ]; then
+        say 'boot=ENABLED'
+      else
+        say 'boot=DEGRADED'
+      fi
+    elif [ -e "$MARKER" ]; then
+      say 'boot=DEGRADED'
+    elif supported; then
+      say 'boot=DISABLED'
+    else
+      say 'boot=UNSUPPORTED'
+    fi
+    ;;
+  enable)
+    supported || fail 'Magisk late-start boot scripts not available'
+    safe_paths
+    verify=$(sh "$SELF_DIR/pocketufw" verify 2>/dev/null) ||
+      fail 'Enable the firewall and verify both families first'
+    [ "$verify" = 'ACTIVE' ] ||
+      fail 'Enable the firewall before configuring boot restoration'
+
+    mkdir -p "$STORE" || fail 'Cannot create root-owned boot directory'
+    chmod 700 "$STORE"
+    for name in pocketufw vpn-probe udp-config; do
+      cp "$SELF_DIR/$name" "$STORE/.$name.stage" ||
+        fail "Cannot stage $name"
+      chmod 700 "$STORE/.$name.stage"
+    done
+    cp "$SELF_DIR/boot-service" "$HOOK.stage" ||
+      fail 'Cannot stage Magisk boot hook'
+    chmod 700 "$HOOK.stage"
+    # Install files before enabling the hook. The marker is written last.
+    mv -f "$STORE/.pocketufw.stage" "$STORE/pocketufw"
+    mv -f "$STORE/.vpn-probe.stage" "$STORE/vpn-probe"
+    mv -f "$STORE/.udp-config.stage" "$STORE/udp-config"
+    mv -f "$HOOK.stage" "$HOOK"
+    printf 'enabled\n' > "$STORE/.boot.enabled.stage"
+    chmod 600 "$STORE/.boot.enabled.stage"
+    mv -f "$STORE/.boot.enabled.stage" "$MARKER"
+    owned_hook && [ -f "$MARKER" ] ||
+      fail 'Boot hook not verified'
+    say 'boot=ENABLED'
+    ;;
+  disable)
+    safe_paths
+    # Disarm at the service entrypoint first, then remove its own files.
+    if owned_hook; then rm -f "$HOOK" || fail 'Unable to remove boot hook'; fi
+    if [ -d "$STORE" ]; then
+      rm -f "$MARKER" "$STORE/pocketufw" "$STORE/vpn-probe" "$STORE/udp-config" ||
+        fail 'Unable to remove PocketUFW boot data'
+      rm -f "$STORE/.pocketufw.stage" "$STORE/.vpn-probe.stage" "$STORE/.udp-config.stage" "$STORE/.boot.enabled.stage"
+      rmdir "$STORE" 2>/dev/null || :
+    fi
+    say 'boot=DISABLED'
+    ;;
+esac

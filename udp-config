@@ -1,0 +1,60 @@
+#!/system/bin/sh
+# Root-only bridge between app-owned device-protected data and boot restoration.
+# The file is app-private (deleted on uninstall) and available before unlock.
+# Never evaluate configuration content as shell code.
+set -eu
+umask 077
+DIR="${POCKETUFW_CONFIG_DIR:-/data/user_de/0/io.github.pocketufw.alpha/files}"
+FILE="$DIR/udp-committed.conf"
+STAGE="$DIR/.udp-committed.stage.$$"
+
+fail() { echo "udp-config: $*" >&2; exit 1; }
+valid_port() {
+  case "$1" in
+    none) return 0 ;;
+    ''|0|0*|*[!0-9]*) return 1 ;;
+    *) [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ] ;;
+  esac
+}
+safe() {
+  [ -d "$DIR" ] && [ ! -L "$DIR" ] || fail 'Device-protected app data unavailable or unsafe'
+  [ ! -L "$FILE" ] && { [ ! -e "$FILE" ] || [ -f "$FILE" ]; } || fail 'Unsafe saved configuration'
+}
+read_values() {
+  safe
+  if [ ! -f "$FILE" ]; then
+    echo 'mode=AUTOMATIC'
+    return 0
+  fi
+  [ "$(wc -l < "$FILE")" -eq 2 ] || fail 'Invalid saved configuration length'
+  line4=$(sed -n '1p' "$FILE") || fail 'Unable to read saved IPv4 port'
+  line6=$(sed -n '2p' "$FILE") || fail 'Unable to read saved IPv6 port'
+  case "$line4" in udp4=*) p4=${line4#udp4=} ;; *) fail 'Invalid IPv4 configuration field' ;; esac
+  case "$line6" in udp6=*) p6=${line6#udp6=} ;; *) fail 'Invalid IPv6 configuration field' ;; esac
+  valid_port "$p4" && valid_port "$p6" || fail 'Invalid saved UDP port'
+  printf 'mode=COMMITTED\nudp4=%s\nudp6=%s\n' "$p4" "$p6"
+}
+[ "$#" -ge 1 ] || fail 'Command required'
+command="$1"; shift
+case "$command" in
+  read)
+    [ "$#" -eq 0 ] || fail 'No arguments to read'
+    read_values ;;
+  write)
+    [ "$#" -eq 2 ] || fail 'Two UDP ports required'
+    valid_port "$1" && valid_port "$2" || fail 'Invalid UDP port (use none or 1..65535)'
+    safe
+    [ ! -e "$STAGE" ] && [ ! -L "$STAGE" ] || fail 'Staging path already exists'
+    trap 'rm -f "$STAGE"' 0
+    printf 'udp4=%s\nudp6=%s\n' "$1" "$2" > "$STAGE" || fail 'Cannot write staged configuration'
+    chmod 600 "$STAGE" || fail 'Cannot secure staged configuration'
+    mv -f "$STAGE" "$FILE" || fail 'Cannot commit configuration'
+    trap - 0
+    read_values ;;
+  clear)
+    [ "$#" -eq 0 ] || fail 'No arguments to clear'
+    safe
+    rm -f "$FILE" || fail 'Cannot clear committed configuration'
+    read_values ;;
+  *) fail 'Allowed commands: read, write, clear' ;;
+esac

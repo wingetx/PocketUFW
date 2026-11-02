@@ -1,0 +1,533 @@
+#!/system/bin/sh
+# PocketUFW v0.1.0 - EXPERIMENTAL. Rooted Android, iptables legacy.
+# Dedicated INPUT chains only. Never changes default policies, OUTPUT or FORWARD.
+set -eu
+
+VERSION='0.1.0-dev'
+CHAIN='POCKETUFW_IN'
+TSCHAIN='POCKETUFW_TS'
+# Android interface wildcard syntax supported by iptables (-i wlan+, etc.).
+IFACES='wlan+ rmnet+ v4-rmnet+'
+TS4=''
+TS6=''
+AUTO_TS=0
+UDP4_SET=0
+UDP6_SET=0
+CMD=''
+DRY_RUN=0
+IPT4="${POCKETUFW_IPTABLES4:-iptables}"
+IPT6="${POCKETUFW_IPTABLES6:-ip6tables}"
+
+say() { printf '%s\n' "$*"; }
+fail() { say "pocketufw: $*" >&2; exit 1; }
+usage() {
+  cat <<'USAGE'
+PocketUFW 0.1.0-dev | EXPERIMENTAL, not for unattended deployment
+
+Usage:
+  pocketufw doctor
+  pocketufw status
+  pocketufw verify
+  pocketufw activity     # machine-readable live rule counters
+  pocketufw verbose      # human-readable status and kernel counters
+  pocketufw plan [--auto-tailscale | --tailscale-udp4 PORT --tailscale-udp6 PORT]
+  pocketufw enable [--auto-tailscale | --tailscale-udp4 PORT --tailscale-udp6 PORT]
+  pocketufw refresh
+  pocketufw get-ports  # read current verified UDP listeners
+  pocketufw set-ports --udp4 PORT|none --udp6 PORT|none  # session-only advanced UDP exceptions
+  pocketufw disable
+
+Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+.
+No boot persistence. --auto-tailscale verifies ports on enable; refresh
+rechecks Tailscale's verified UDP listeners without restarting the firewall.
+Continuous monitoring of subsequent port changes is NOT implemented yet.
+Do not use alongside AFWall+'s custom inbound filtering.
+USAGE
+}
+check_port() {
+  case "$1" in ''|*[!0-9]*) fail 'UDP ports must be integers from 1 to 65535';; esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ] || fail 'UDP ports must be 1..65535'
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    doctor|status|verify|activity|verbose|plan|enable|refresh|get-ports|set-ports|disable)
+      [ -z "$CMD" ] || fail 'Specify one command'; CMD="$1"; shift ;;
+    --udp4|--udp6)
+      opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port or none"
+      case "$1" in
+        none) port='' ;;
+        0|0*|*[!0-9]*) fail 'Manual UDP exception must be none or a decimal port 1..65535 without leading zeros' ;;
+        *) check_port "$1"; port="$1" ;;
+      esac
+      if [ "$opt" = --udp4 ]; then TS4="$port"; UDP4_SET=1
+      else TS6="$port"; UDP6_SET=1; fi
+      shift ;;
+    --auto-tailscale)
+      AUTO_TS=1; shift ;;
+    --tailscale-udp4|--tailscale-udp6)
+      opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port"
+      check_port "$1"
+      if [ "$opt" = '--tailscale-udp4' ]; then TS4="$1"; else TS6="$1"; fi
+      shift ;;
+    -h|--help|help) usage; exit 0 ;;
+    --version) say "$VERSION"; exit 0 ;;
+    *) fail "Unknown argument: $1" ;;
+  esac
+done
+[ -n "$CMD" ] || { usage; exit 1; }
+if [ "$CMD" = set-ports ]; then
+  [ "$UDP4_SET" -eq 1 ] && [ "$UDP6_SET" -eq 1 ] ||
+    fail 'set-ports requires both --udp4 and --udp6 (use none to close one)'
+  [ "$AUTO_TS" -eq 0 ] || fail 'Manual ports cannot be combined with --auto-tailscale'
+else
+  [ "$UDP4_SET" -eq 0 ] && [ "$UDP6_SET" -eq 0 ] ||
+    fail '--udp4/--udp6 apply only to set-ports'
+fi
+if [ "$CMD" != 'enable' ] && [ "$CMD" != 'plan' ] && [ "$CMD" != 'set-ports' ] &&
+   { [ -n "$TS4" ] || [ -n "$TS6" ] || [ "$AUTO_TS" -eq 1 ]; }; then
+  fail 'Tailscale port options only apply to enable and plan'
+fi
+if [ "$AUTO_TS" -eq 1 ] && { [ -n "$TS4" ] || [ -n "$TS6" ]; }; then
+  fail 'Choose automatic detection OR manually specified Tailscale ports'
+fi
+
+fw4() { if [ "$DRY_RUN" -eq 1 ]; then printf '%s' "$IPT4 -w"; printf ' %s' "$@"; printf '\n'; else "$IPT4" -w "$@"; fi; }
+fw6() { if [ "$DRY_RUN" -eq 1 ]; then printf '%s' "$IPT6 -w"; printf ' %s' "$@"; printf '\n'; else "$IPT6" -w "$@"; fi; }
+root_needed() {
+  [ "$(id -u)" -eq 0 ] || fail 'Requires root (run with su -c or sudo in Termux)'
+}
+prereqs() {
+  command -v "$IPT4" >/dev/null 2>&1 || fail 'iptables command not found'
+  command -v "$IPT6" >/dev/null 2>&1 || fail 'ip6tables command not found'
+}
+chain_exists4() { "$IPT4" -w -S "$CHAIN" >/dev/null 2>&1; }
+chain_exists6() { "$IPT6" -w -S "$CHAIN" >/dev/null 2>&1; }
+ts_exists4() { "$IPT4" -w -S "$TSCHAIN" >/dev/null 2>&1; }
+ts_exists6() { "$IPT6" -w -S "$TSCHAIN" >/dev/null 2>&1; }
+afwall_active() { "$IPT4" -w -S OUTPUT 2>/dev/null | grep -q -- '-A OUTPUT -j afwall'; }
+
+resolve_tailscale_ports() {
+  [ "$AUTO_TS" -eq 1 ] || return 0
+  root_needed
+  # Resolve probe relative to the PocketUFW CLI, never search arbitrary directories.
+  case "$0" in
+    */*) script_path="$0" ;;
+    *) script_path=$(command -v "$0") || fail 'Cannot locate PocketUFW CLI' ;;
+  esac
+  case "$script_path" in */*) probe_dir=${script_path%/*} ;; *) probe_dir=. ;; esac
+  [ -r "$probe_dir/vpn-probe" ] || fail 'vpn-probe not installed alongside PocketUFW'
+  discovered=$(sh "$probe_dir/vpn-probe") || fail 'Tailscale port discovery failed; no firewall rules changed'
+  TS4=$(printf '%s\n' "$discovered" | sed -n 's/^tailscale_udp4=//p')
+  TS6=$(printf '%s\n' "$discovered" | sed -n 's/^tailscale_udp6=//p')
+  [ -z "$TS4" ] || check_port "$TS4"
+  [ -z "$TS6" ] || check_port "$TS6"
+}
+
+# The only chain we own is POCKETUFW_IN in the IPv4 and IPv6 filter tables.
+# Existing Android rules run first; only physical interfaces are hooked.
+build_rules() {
+  fw4 -N "$CHAIN"
+  fw6 -N "$CHAIN"
+  fw4 -N "$TSCHAIN"
+  fw6 -N "$TSCHAIN"
+  fw4 -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  fw6 -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  # IPv6 control traffic is necessary for router/neighbor discovery and PMTU.
+  fw4 -A "$CHAIN" -p icmp -j ACCEPT
+  fw6 -A "$CHAIN" -p ipv6-icmp -j ACCEPT
+  fw4 -A "$CHAIN" -m conntrack --ctstate INVALID -j DROP
+  fw6 -A "$CHAIN" -m conntrack --ctstate INVALID -j DROP
+  fw4 -A "$CHAIN" -p udp --sport 67 --dport 68 -j ACCEPT
+  fw6 -A "$CHAIN" -p udp --sport 547 --dport 546 -j ACCEPT
+  fw4 -A "$CHAIN" -p udp -d 224.0.0.251 --dport 5353 -j ACCEPT
+  fw6 -A "$CHAIN" -p udp -d ff02::fb --dport 5353 -j ACCEPT
+  # ESP may be needed by carrier IMS. Still filtered to physical INPUT hooks.
+  fw4 -A "$CHAIN" -p esp -j ACCEPT
+  fw6 -A "$CHAIN" -p esp -j ACCEPT
+  # Dedicated child chains let refresh replace verified ports without
+  # flushing the main inbound policy or existing connection state.
+  if [ -n "$TS4" ]; then fw4 -A "$TSCHAIN" -p udp --dport "$TS4" -j ACCEPT; fi
+  if [ -n "$TS6" ]; then fw6 -A "$TSCHAIN" -p udp --dport "$TS6" -j ACCEPT; fi
+  fw4 -A "$CHAIN" -j "$TSCHAIN"
+  fw6 -A "$CHAIN" -j "$TSCHAIN"
+  fw4 -A "$CHAIN" -j DROP
+  fw6 -A "$CHAIN" -j DROP
+}
+hooks_attach() {
+  for iface in $IFACES; do
+    fw4 -A INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN"
+    fw6 -A INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN"
+  done
+}
+remove_one_family() {
+  fam="$1"
+  if [ "$fam" = '4' ]; then
+    bin="$IPT4"
+  else
+    bin="$IPT6"
+  fi
+  for iface in $IFACES; do
+    # Delete only hooks that match our full signature, never other owners' rules.
+    while "$bin" -w -C INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN" >/dev/null 2>&1; do
+      "$bin" -w -D INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN" || break
+    done
+  done
+  if "$bin" -w -S "$CHAIN" >/dev/null 2>&1; then
+    "$bin" -w -F "$CHAIN"
+    "$bin" -w -X "$CHAIN"
+  fi
+  # Only after our parent chain is gone can its VPN child be deleted.
+  if "$bin" -w -S "$TSCHAIN" >/dev/null 2>&1; then
+    "$bin" -w -F "$TSCHAIN"
+    "$bin" -w -X "$TSCHAIN"
+  fi
+}
+cleanup() {
+  # Best-effort cleanup only for chains/hook signatures owned by PocketUFW.
+  remove_one_family 4 || :
+  remove_one_family 6 || :
+}
+
+verify_family() {
+  bin="$1"
+  family="$2"
+  "$bin" -w -S "$TSCHAIN" >/dev/null 2>&1 || return 1
+  rules=$("$bin" -w -S "$CHAIN") || return 1
+  # Check exact rule count so extra, unintended ACCEPT rules are not silently trusted.
+  rule_count=$(printf '%s\n' "$rules" | grep -c -- "^-A $CHAIN ") || return 1
+  [ "$rule_count" -eq 8 ] || return 1
+  # Membership alone cannot detect a reordered rule (and can falsely report
+  # ACTIVE when an earlier ACCEPT changes what reaches an intended DROP).
+  # Confirm the complete jump-target sequence, then check each rule's exact
+  # match with iptables -C below. -S formatting may normalize match options.
+  targets=$(printf '%s\n' "$rules" | awk -v chain="$CHAIN" '
+    $1 == "-A" && $2 == chain {
+      if ($(NF-1) != "-j") exit 2
+      printf "%s ", $NF
+    }
+  ') || return 1
+  [ "$targets" = "ACCEPT ACCEPT DROP ACCEPT ACCEPT ACCEPT $TSCHAIN DROP " ] || return 1
+  # A well-formed parent is not protective if its VPN child has a broad
+  # ACCEPT. Accept only an empty child or one explicit UDP listener exception.
+  (current_tailscale_port "$bin" >/dev/null 2>&1) || return 1
+  for iface in $IFACES; do
+    "$bin" -w -C INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN" >/dev/null 2>&1 || return 1
+  done
+  # Kernel normalizes the order of ESTABLISHED,RELATED in -S output, so use
+  # netfilter's own semantic -C test instead of comparing rendered strings.
+  "$bin" -w -C "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1 || return 1
+  "$bin" -w -C "$CHAIN" -m conntrack --ctstate INVALID -j DROP >/dev/null 2>&1 || return 1
+  "$bin" -w -C "$CHAIN" -p esp -j ACCEPT >/dev/null 2>&1 || return 1
+  "$bin" -w -C "$CHAIN" -j "$TSCHAIN" >/dev/null 2>&1 || return 1
+  if [ "$family" -eq 4 ]; then
+    "$bin" -w -C "$CHAIN" -p icmp -j ACCEPT >/dev/null 2>&1 || return 1
+    "$bin" -w -C "$CHAIN" -p udp --sport 67 --dport 68 -j ACCEPT >/dev/null 2>&1 || return 1
+    "$bin" -w -C "$CHAIN" -p udp -d 224.0.0.251 --dport 5353 -j ACCEPT >/dev/null 2>&1 || return 1
+  else
+    "$bin" -w -C "$CHAIN" -p ipv6-icmp -j ACCEPT >/dev/null 2>&1 || return 1
+    "$bin" -w -C "$CHAIN" -p udp --sport 547 --dport 546 -j ACCEPT >/dev/null 2>&1 || return 1
+    "$bin" -w -C "$CHAIN" -p udp -d ff02::fb --dport 5353 -j ACCEPT >/dev/null 2>&1 || return 1
+  fi
+  [ "$(printf '%s\n' "$rules" | tail -n 1)" = "-A $CHAIN -j DROP" ] || return 1
+}
+
+# Read-only kernel packet counters. We count only our own DROP targets, not
+# Android/OEM drops, and deliberately don't infer attacks from these packets.
+# These counters start over whenever PocketUFW rules are reinstalled or reset.
+read_counters() {
+  ipt="$1"
+  listing=$("$ipt" -w -L "$CHAIN" -n -v -x) || return 1
+  printf '%s\n' "$listing" | awk '
+    NR == 1 && $1 != "Chain" { exit 2 }
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 == "DROP" {
+      blocked += $1; bytes += $2; drop_rules++
+    }
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 == "ACCEPT" &&
+      /ctstate/ && /ESTABLISHED/ && /RELATED/ {
+      replies += $1; established_rules++
+    }
+    END {
+      if (drop_rules != 2 || established_rules != 1) exit 3
+      printf "%.0f %.0f %.0f\n", blocked, bytes, replies
+    }
+  '
+}
+
+collect_counters() {
+  if ! chain_exists4 && ! chain_exists6 && ! ts_exists4 && ! ts_exists6; then
+    if [ "$CMD" = 'verbose' ]; then say 'Status: inactive'; return 3; fi
+    say 'state=INACTIVE'
+    return 3
+  fi
+  if ! verify_family "$IPT4" 4 || ! verify_family "$IPT6" 6; then
+    if [ "$CMD" = 'verbose' ]; then say 'Status: degraded (rules or hooks missing)'; else say 'state=DEGRADED'; fi
+    return 4
+  fi
+  count4=$(read_counters "$IPT4") || fail 'Cannot read IPv4 counters; not claiming a measurement'
+  count6=$(read_counters "$IPT6") || fail 'Cannot read IPv6 counters; not claiming a measurement'
+  set -- $count4
+  blocked4="$1"; bytes4="$2"; replies4="$3"
+  set -- $count6
+  blocked6="$1"; bytes6="$2"; replies6="$3"
+  return 0
+}
+
+# Examine only our child chain. The allowed grammar is exactly zero or one
+# UDP ACCEPT rule: if an unexpected rule appears, refuse to edit it.
+current_tailscale_port() {
+  ipt="$1"
+  rules=$("$ipt" -w -S "$TSCHAIN") || return 1
+  selected=''
+  while IFS= read -r line; do
+    case "$line" in
+      "-N $TSCHAIN") continue ;;
+      "-A $TSCHAIN "*)
+        found=$(printf '%s\n' "$line" | sed -n -E "s/^-A $TSCHAIN -p udp (-m udp )?--dport ([0-9]+) -j ACCEPT$/\\2/p")
+        [ -n "$found" ] || return 2
+        check_port "$found"
+        [ -z "$selected" ] || return 2
+        selected="$found"
+        ;;
+      *) return 2 ;;
+    esac
+  done <<EOF
+$rules
+EOF
+  printf '%s\n' "$selected"
+}
+
+# Transactional per-family update. First add BOTH new exceptions, then remove
+# both obsolete exceptions. If any operation fails, restore the old exceptions
+# and delete only the rules that this refresh added.
+apply_verified_refresh() {
+  added4=0; added6=0; removed4=0; removed6=0; failed=0
+  if [ "$TS4" != "$old4" ] && [ -n "$TS4" ]; then
+    if "$IPT4" -w -A "$TSCHAIN" -p udp --dport "$TS4" -j ACCEPT; then
+      added4=1
+    else
+      failed=1
+    fi
+  fi
+  if [ "$failed" -eq 0 ] && [ "$TS6" != "$old6" ] && [ -n "$TS6" ]; then
+    if "$IPT6" -w -A "$TSCHAIN" -p udp --dport "$TS6" -j ACCEPT; then
+      added6=1
+    else
+      failed=1
+    fi
+  fi
+  if [ "$failed" -eq 0 ] && [ "$old4" != "$TS4" ] && [ -n "$old4" ]; then
+    if "$IPT4" -w -D "$TSCHAIN" -p udp --dport "$old4" -j ACCEPT; then
+      removed4=1
+    else
+      failed=1
+    fi
+  fi
+  if [ "$failed" -eq 0 ] && [ "$old6" != "$TS6" ] && [ -n "$old6" ]; then
+    if "$IPT6" -w -D "$TSCHAIN" -p udp --dport "$old6" -j ACCEPT; then
+      removed6=1
+    else
+      failed=1
+    fi
+  fi
+  [ "$failed" -eq 0 ] && return 0
+
+  say 'pocketufw: refresh failed; restoring previous UDP exceptions' >&2
+  restored=1
+  # Restore old ports FIRST to avoid an unnecessary connectivity gap.
+  if [ "$removed4" -eq 1 ]; then
+    "$IPT4" -w -A "$TSCHAIN" -p udp --dport "$old4" -j ACCEPT || restored=0
+  fi
+  if [ "$removed6" -eq 1 ]; then
+    "$IPT6" -w -A "$TSCHAIN" -p udp --dport "$old6" -j ACCEPT || restored=0
+  fi
+  if [ "$added4" -eq 1 ]; then
+    "$IPT4" -w -D "$TSCHAIN" -p udp --dport "$TS4" -j ACCEPT || restored=0
+  fi
+  if [ "$added6" -eq 1 ]; then
+    "$IPT6" -w -D "$TSCHAIN" -p udp --dport "$TS6" -j ACCEPT || restored=0
+  fi
+  if [ "$restored" -eq 0 ]; then
+    say 'pocketufw: WARNING: rollback command failed; manual rule inspection required' >&2
+    return 1
+  fi
+  restored4=$(current_tailscale_port "$IPT4") || {
+    say 'pocketufw: WARNING: IPv4 VPN exception state is ambiguous' >&2
+    return 1
+  }
+  restored6=$(current_tailscale_port "$IPT6") || {
+    say 'pocketufw: WARNING: IPv6 VPN exception state is ambiguous' >&2
+    return 1
+  }
+  if [ "$restored4" != "$old4" ] || [ "$restored6" != "$old6" ]; then
+    say 'pocketufw: WARNING: rollback verification failed' >&2
+  else
+    say 'pocketufw: previous verified ports restored' >&2
+  fi
+  return 1
+}
+
+case "$CMD" in
+  doctor)
+    root_needed
+    prereqs
+    say "PocketUFW $VERSION | read-only preflight"
+    say 'INPUT chain hooks:'
+    if chain_exists4 || chain_exists6; then say '  PocketUFW chain exists'; else say '  Not installed'; fi
+    if afwall_active; then say '  WARNING: AFWall+ is active; do NOT enable alongside its custom INPUT rules'; else say '  AFWall+ output hook not active'; fi
+    say '  Requires iptables legacy, conntrack, IPv6, root, and trusted network interfaces.'
+    say '  Assumed physical interfaces: wlan+, rmnet+, v4-rmnet+'
+    ;;
+  plan)
+    DRY_RUN=1
+    resolve_tailscale_ports
+    say '# DRY RUN ONLY - NOTHING EXECUTED'
+    build_rules
+    hooks_attach
+    ;;
+  status)
+    root_needed
+    prereqs
+    if chain_exists4 || chain_exists6; then
+      say 'PocketUFW: enabled or partially installed'
+      say '--- IPv4 ---'
+      "$IPT4" -w -S "$CHAIN" 2>/dev/null || true
+      "$IPT4" -w -S "$TSCHAIN" 2>/dev/null || true
+      say '--- IPv6 ---'
+      "$IPT6" -w -S "$CHAIN" 2>/dev/null || true
+      "$IPT6" -w -S "$TSCHAIN" 2>/dev/null || true
+    else
+      say 'PocketUFW: disabled'
+    fi
+    ;;
+  verify)
+    root_needed
+    prereqs
+    if ! chain_exists4 && ! chain_exists6 && ! ts_exists4 && ! ts_exists6; then
+      say 'INACTIVE'
+      exit 3
+    fi
+    if verify_family "$IPT4" 4 && verify_family "$IPT6" 6; then
+      say 'ACTIVE'
+    else
+      say 'DEGRADED'
+      exit 4
+    fi
+    ;;
+  activity|verbose)
+    root_needed
+    prereqs
+    collect_counters || exit $?
+    if [ "$CMD" = 'activity' ]; then
+      say 'state=ACTIVE'
+      say "ipv4_blocked=$blocked4"
+      say "ipv6_blocked=$blocked6"
+      say "ipv4_blocked_bytes=$bytes4"
+      say "ipv6_blocked_bytes=$bytes6"
+      say "ipv4_established_replies=$replies4"
+      say "ipv6_established_replies=$replies6"
+      say "hook_patterns=$IFACES"
+    else
+      say 'PocketUFW verbose status'
+      say 'Status: ACTIVE (own rules and hooks verified)'
+      say 'Incoming: deny unsolicited packets on configured physical interfaces'
+      say 'Outgoing: unchanged; Android and VPN policies still apply'
+      say "Interface hooks: $IFACES"
+      say "IPv4 blocked: $blocked4 packets ($bytes4 bytes)"
+      say "IPv6 blocked: $blocked6 packets ($bytes6 bytes)"
+      say "IPv4 established/related accepted: $replies4 packets"
+      say "IPv6 established/related accepted: $replies6 packets"
+      say 'Counters: kernel rule matches since install or counter reset'
+      say 'Limit: preceding Android/OEM rules and other interfaces are not covered by this proof'
+    fi
+    ;;
+  enable)
+    root_needed
+    prereqs
+    if afwall_active; then fail 'AFWall+ is active. Disable its firewall before using this standalone prototype.'; fi
+    resolve_tailscale_ports
+    if chain_exists4 || chain_exists6 || ts_exists4 || ts_exists6; then
+      fail 'PocketUFW chain already exists. Run disable before re-enabling.'
+    fi
+    # Guard against stale hooks with missing chains.
+    for iface in $IFACES; do
+      if "$IPT4" -w -C INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN" >/dev/null 2>&1 ||
+         "$IPT6" -w -C INPUT -i "$iface" -m comment --comment PocketUFW -j "$CHAIN" >/dev/null 2>&1; then
+        fail 'Stale PocketUFW hook exists; run disable to clean it up'
+      fi
+    done
+    committed=0
+    # On failures before completion, remove only what we created.
+    trap 'if [ "$committed" -ne 1 ]; then say "pocketufw: enable failed, cleaning own chains" >&2; cleanup; fi' 0
+    build_rules
+    hooks_attach
+    # Commands succeeding is not enough: if the actual installed policy fails
+    # either family's readback audit, roll back before reporting success.
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Post-install verification failed; rolling back own rules'
+    committed=1
+    trap - 0
+    say 'PocketUFW: enabled. Not persistent after reboot.'
+    if [ "$AUTO_TS" -eq 1 ]; then
+      if [ -n "$TS4$TS6" ]; then
+        say 'NOTE: Verified Tailscale UDP ports installed. Use refresh after a port change until monitoring is implemented.'
+      else
+        say 'No verified Tailscale listeners found; no VPN port exceptions opened.'
+      fi
+    elif [ -n "$TS4$TS6" ] && { [ -z "$TS4" ] || [ -z "$TS6" ]; }; then
+      say 'NOTE: Only one Tailscale address-family port was specified.'
+    fi
+    ;;
+  refresh)
+    root_needed
+    prereqs
+    chain_exists4 && chain_exists6 && ts_exists4 && ts_exists6 ||
+      fail 'Firewall incomplete or disabled; no refresh attempted'
+    afwall_active && fail 'AFWall+ active; refresh refused'
+    # Detect and validate both families before altering either one.
+    AUTO_TS=1
+    resolve_tailscale_ports
+    old4=$(current_tailscale_port "$IPT4") ||
+      fail 'Unrecognized IPv4 VPN exception chain; no changes made'
+    old6=$(current_tailscale_port "$IPT6") ||
+      fail 'Unrecognized IPv6 VPN exception chain; no changes made'
+    if ! apply_verified_refresh; then
+      fail 'refresh incomplete; inspect status before retrying'
+    fi
+    say "PocketUFW: Tailscale exceptions refreshed (IPv4: ${TS4:-none}, IPv6: ${TS6:-none})."
+    ;;
+  get-ports)
+    root_needed
+    prereqs
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Firewall disabled or degraded; no verified ports available'
+    old4=$(current_tailscale_port "$IPT4") || fail 'Unrecognized IPv4 UDP child chain'
+    old6=$(current_tailscale_port "$IPT6") || fail 'Unrecognized IPv6 UDP child chain'
+    printf 'udp4=%s\nudp6=%s\n' "${old4:-none}" "${old6:-none}"
+    ;;
+  set-ports)
+    root_needed
+    prereqs
+    # Refuse any changes unless every owned rule is already in a known state.
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Firewall disabled or degraded; no manual changes made'
+    afwall_active && fail 'AFWall+ active; manual UDP changes refused'
+    old4=$(current_tailscale_port "$IPT4") || fail 'Unrecognized IPv4 UDP child chain'
+    old6=$(current_tailscale_port "$IPT6") || fail 'Unrecognized IPv6 UDP child chain'
+    if ! apply_verified_refresh; then
+      fail 'Manual UDP update incomplete; previous exceptions should be inspected'
+    fi
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Manual UDP update could not be fully verified; inspect rules'
+    say "PocketUFW: manual UDP exceptions updated, session-only (IPv4: ${TS4:-none}, IPv6: ${TS6:-none})."
+    ;;
+  disable)
+    root_needed
+    prereqs
+    cleanup
+    # Final audit: refuse to claim success if an owned chain remains.
+    if chain_exists4 || chain_exists6 || ts_exists4 || ts_exists6; then
+      fail 'Unable to remove all PocketUFW chains; inspect status'
+    fi
+    say 'PocketUFW: disabled. Android rules untouched.'
+    ;;
+esac

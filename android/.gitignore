@@ -1,0 +1,8 @@
+# Local Android build outputs; keep the source tree tidy.
+.gradle/
+.idea/
+**/build/
+local.properties
+*.iml
+*.hprof
+.DS_Store

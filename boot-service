@@ -1,0 +1,54 @@
+#!/system/bin/sh
+# PocketUFW boot hook v1
+# Magisk late_start/service.d: one-shot, no persistent process.
+set -u
+PATH=/system/bin:/system/xbin:/vendor/bin
+STORE='/data/adb/pocketufw'
+HOOK='/data/adb/service.d/pocketufw.sh'
+MARKER="$STORE/boot.enabled"
+ENGINE="$STORE/pocketufw"
+PROBE="$STORE/vpn-probe"
+CONFIG="$STORE/udp-config"
+
+[ -f "$MARKER" ] && [ -r "$ENGINE" ] && [ -r "$PROBE" ] && [ -r "$CONFIG" ] || exit 0
+count=0
+# Wait until Android has finished booting. This never blocks Android boot.
+while [ "$(getprop sys.boot_completed)" != '1' ]; do
+  [ "$count" -lt 90 ] || exit 0
+  sleep 2
+  count=$((count + 1))
+  [ -f "$MARKER" ] || exit 0
+done
+# An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot.
+if ! pm path io.github.pocketufw.alpha 2>/dev/null | grep -q '^package:'; then
+  # Remove only our own boot files if the app was uninstalled.
+  rm -f "$MARKER" "$HOOK" "$ENGINE" "$PROBE" "$CONFIG"
+  rmdir "$STORE" 2>/dev/null || :
+  exit 0
+fi
+[ -f "$MARKER" ] || exit 0
+state=$(sh "$ENGINE" verify 2>/dev/null)
+case "$state" in
+  ACTIVE) exit 0 ;;
+  INACTIVE)
+    # Reconfirm opt-in immediately before making any firewall changes.
+    [ -f "$MARKER" ] || exit 0
+    policy=$(sh "$CONFIG" read 2>/dev/null) || exit 1
+    case "$policy" in
+      mode=AUTOMATIC)
+        sh "$ENGINE" enable --auto-tailscale >/dev/null 2>&1 || exit 1 ;;
+      mode=COMMITTED*)
+        p4=$(printf '%s\n' "$policy" | sed -n 's/^udp4=//p')
+        p6=$(printf '%s\n' "$policy" | sed -n 's/^udp6=//p')
+        # udp-config validated both values; never source app-written files.
+        set -- enable
+        [ "$p4" = none ] || set -- "$@" --tailscale-udp4 "$p4"
+        [ "$p6" = none ] || set -- "$@" --tailscale-udp6 "$p6"
+        sh "$ENGINE" "$@" >/dev/null 2>&1 || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    [ "$(sh "$ENGINE" verify 2>/dev/null)" = 'ACTIVE' ] || exit 1
+    exit 0
+    ;;
+  *) exit 1 ;; # Never wipe or replace a partial/unknown firewall.
+esac

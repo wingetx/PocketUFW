@@ -1,0 +1,99 @@
+#!/system/bin/sh
+# PocketUFW VPN listener probe, v0.1-dev.
+# Read-only: identifies verified Tailscale Android UDP listener ports.
+# Never opens ports or modifies kernel rules.
+set -eu
+
+SS_BIN="${POCKETUFW_SS_BIN:-ss}"
+PROC_ROOT="${POCKETUFW_PROC_ROOT:-/proc}"
+
+usage() {
+    cat <<'HELP'
+Usage: sh vpn-probe [--help]
+
+Read-only Android Tailscale UDP listener discovery. Requires root.
+Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
+verified using both ss process metadata and /proc/PID/cmdline.
+An empty value means no verified listener for that address family.
+No firewall rules are changed. Does not monitor subsequent port changes.
+HELP
+}
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    '') ;;
+    *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+    echo "vpn-probe: too many arguments" >&2
+    exit 2
+fi
+
+[ "$(id -u)" -eq 0 ] || { echo "vpn-probe: root needed to verify socket ownership" >&2; exit 3; }
+command -v "$SS_BIN" >/dev/null 2>&1 || { echo "vpn-probe: ss utility unavailable" >&2; exit 4; }
+[ -d "$PROC_ROOT" ] || { echo "vpn-probe: /proc unavailable" >&2; exit 4; }
+
+validate_port() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+scan() {
+    family="$1"
+    # Use separate socket families; never guess IPv6 from 0.0.0.0 or *.
+    if ! listing=$("$SS_BIN" -H -u -l -n -p "-$family" 2>/dev/null); then
+        echo "vpn-probe: ss IPv$family lookup unavailable" >&2
+        return 5
+    fi
+    matched=''
+    saw_unverified=0
+    while IFS= read -r line; do
+        case "$line" in
+            *tailscale.ipn*) ;;
+            *) continue ;;
+        esac
+        # Process name in ss can be truncated to 15 characters.
+        pid=$(printf '%s\n' "$line" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p')
+        case "$pid" in
+            ''|*[!0-9]*) saw_unverified=1; continue ;;
+        esac
+        # Validate against the full Android package process name.
+        # Do not trust the truncated ss label by itself.
+        if [ ! -r "$PROC_ROOT/$pid/cmdline" ]; then
+            saw_unverified=1
+            continue
+        fi
+        app=$(tr '\000' '\n' < "$PROC_ROOT/$pid/cmdline" | head -n 1)
+        [ "$app" = 'com.tailscale.ipn' ] || { saw_unverified=1; continue; }
+        socket_addr=$(printf '%s\n' "$line" | awk '{print $4}')
+        port=${socket_addr##*:}
+        validate_port "$port" || { saw_unverified=1; continue; }
+        if [ -n "$matched" ] && [ "$matched" != "$port" ]; then
+            echo "vpn-probe: ambiguous IPv$family Tailscale UDP ports; refusing to choose" >&2
+            return 6
+        fi
+        matched="$port"
+    done <<EOF
+$listing
+EOF
+    if [ "$saw_unverified" -ne 0 ]; then
+        echo "vpn-probe: IPv$family had unverified Tailscale-looking sockets; refusing automatic exception" >&2
+        return 7
+    fi
+    printf '%s\n' "$matched"
+}
+
+udp4=$(scan 4) || exit $?
+udp6=$(scan 6) || exit $?
+# If the app is running but socket ownership is not visible, do not pretend
+# that no exception is needed. The user can retry or choose manual ports.
+if [ -z "$udp4$udp6" ] && command -v pidof >/dev/null 2>&1; then
+    running=$(pidof com.tailscale.ipn 2>/dev/null || true)
+    if [ -n "$running" ]; then
+        echo 'vpn-probe: Tailscale running, but no verified UDP sockets found' >&2
+        exit 8
+    fi
+fi
+printf 'tailscale_udp4=%s\n' "$udp4"
+printf 'tailscale_udp6=%s\n' "$udp6"

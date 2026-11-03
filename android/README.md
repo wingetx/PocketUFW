@@ -36,6 +36,13 @@ tap still toggles using fresh kernel verification, with locked-screen
 protection intact. No background service, root timer, or firewall-engine
 changes were added.
 
+## Alpha19 half-penguin tile icon (local hardware acceptance pending)
+
+Refined the Quick Settings monochrome vector to an upper-body bust with
+an open outline, smaller eye cutouts, a distinct little beak, and a cropped
+chest. This replaces the bulky full-body shape from alpha18, without
+changing the themed launcher icon, neon artwork, kernel rules, or tile logic.
+
 ## Alpha18 cosmetic tile icon (local hardware acceptance pending)
 
 Quick Settings now uses its own tint-safe vector with transparent eyes, beak,

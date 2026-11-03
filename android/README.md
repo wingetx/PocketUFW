@@ -23,6 +23,19 @@ Pixel 9a; this is not a production release.
 - This alpha15 debug APK was built and linted on Arch; live Pixel testing
   and installation are separate from the already verified alpha14 beta.
 
+## Alpha17 active-tile candidate (local hardware acceptance pending)
+
+The optional Quick Settings tile now uses Android's **active tile** mode:
+opening the shade does not bind PocketUFW or call root. A completed
+in-app root inspection or a deliberate tile tap updates a small unprivileged
+last-verified-state cache and requests a one-shot tile repaint. The tile
+shows the last check's date/time, never claiming a cached result is
+"verified now." The cache is invalidated across reboot; opening the app
+refreshes a post-boot status without modifying firewall rules. A short tile
+tap still toggles using fresh kernel verification, with locked-screen
+protection intact. No background service, root timer, or firewall-engine
+changes were added.
+
 ## Hardware-tested capabilities in alpha14
 
 - The selected terminal-penguin branding and simple one-switch interface

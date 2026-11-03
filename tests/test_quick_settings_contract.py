@@ -24,7 +24,7 @@ class QuickSettingsContractTests(unittest.TestCase):
         metadata = {node.attrib[NAMESPACE + 'name']: node.attrib[NAMESPACE + 'value']
                     for node in tile.findall('./meta-data')}
         self.assertEqual(metadata['android.service.quicksettings.TOGGLEABLE_TILE'], 'true')
-        self.assertNotIn('android.service.quicksettings.ACTIVE_TILE', metadata)
+        self.assertEqual(metadata['android.service.quicksettings.ACTIVE_TILE'], 'true')
 
     def test_long_press_resolves_to_dashboard_without_changing_tile_tap(self):
         activities = self.root.findall('./application/activity')
@@ -52,34 +52,70 @@ class QuickSettingsContractTests(unittest.TestCase):
         self.assertNotIn('android.permission.FOREGROUND_SERVICE', permissions)
         self.assertNotIn('android.permission.POST_NOTIFICATIONS', permissions)
 
+    @classmethod
+    def tile_code(cls):
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
+
+    @classmethod
+    def client_code(cls):
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallClient.kt').read_text()
+
+    @classmethod
+    def store_code(cls):
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/TileStatusStore.kt').read_text()
+
     def test_tile_unlocks_before_security_sensitive_toggle(self):
-        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
+        code = self.tile_code()
         self.assertIn('if (isLocked) unlockAndRun', code)
         self.assertIn('rootMutex.withLock { client.toggleProtection() }', code)
-        self.assertIn('++generation  // Ignore a check started when the shade was opened.', code)
         self.assertNotIn('startForeground(', code)
 
-    def test_checking_never_paints_active_tile_off(self):
-        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
-        self.assertIn('FirewallClient.Protection.CHECKING -> tile.state', code)
-        self.assertIn('FirewallClient.Protection.ACTIVE -> Tile.STATE_ACTIVE', code)
-        self.assertIn('FirewallClient.Protection.INACTIVE,', code)
-        self.assertNotIn('tile.state = if (protection ==', code)
-
-    def test_listening_deduplicates_checks_without_background_polling(self):
-        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
-        opening = code.split('override fun onStartListening()', 1)[1].split('override fun onStopListening()', 1)[0]
-        self.assertIn('if (listening) return', opening)
-        self.assertIn('if (inspectionJob?.isActive == true) return', opening)
-        self.assertIn('ageMs in 0..quickReopenGraceMs', opening)
-        self.assertIn('checkedAgoSeconds = ageMs / 1_000', opening)
-        self.assertIn('rootMutex.withLock { client.inspectDashboard() }', opening)
-        self.assertLess(opening.index('if (listening) return'),
-                        opening.index('rootMutex.withLock { client.inspectDashboard() }'))
-        self.assertLess(opening.index('if (inspectionJob?.isActive == true) return'),
-                        opening.index('rootMutex.withLock { client.inspectDashboard() }'))
-        self.assertNotIn('while (', opening)
+    def test_active_tile_never_requests_root_to_render(self):
+        code = self.tile_code()
+        listening = code.split('override fun onStartListening()', 1)[1].split('override fun onClick()', 1)[0]
+        self.assertIn('TileStatusStore.read(applicationContext)', listening)
+        self.assertNotIn('inspectDashboard()', listening)
+        self.assertNotIn('toggleProtection()', listening)
+        self.assertNotIn('withContext(Dispatchers.IO)', listening)
+        self.assertNotIn('client.inspectDashboard()', code)
+        self.assertIn('override fun onTileAdded()', code)
+        self.assertIn('TileStatusStore.request(applicationContext)', code)
         self.assertNotIn('delay(', code)
+
+    def test_cached_status_cannot_drive_kernel_toggle(self):
+        code = self.tile_code()
+        self.assertIn('client.toggleProtection()', code)
+        self.assertNotIn('client.changeProtection(', code)
+        self.assertIn('TileStatusStore.read(applicationContext)', code)
+        self.assertIn('Tile.STATE_ACTIVE', code)
+        self.assertIn('Tile.STATE_INACTIVE', code)
+        self.assertIn('Tile.STATE_UNAVAILABLE', code)
+        self.assertIn('Not verified this boot', code)
+        self.assertNotIn('Verified now', code)
+
+    def test_tile_cache_only_changes_on_existing_root_actions(self):
+        client = self.client_code()
+        self.assertIn('}).also { TileStatusStore.publish(context, it.snapshot) }', client)
+        self.assertIn('}).also { TileStatusStore.publish(context, it.dashboard.snapshot) }', client)
+        self.assertIn('ProcessBuilder("su", "-c", command)', client)
+        store = self.store_code()
+        self.assertIn('TileService.requestListeningState(', store)
+        self.assertIn('ComponentName(context, FirewallTileService::class.java)', store)
+        self.assertIn('SystemClock.elapsedRealtime()', store)
+        self.assertIn('MAX_BOOT_DRIFT_MS', store)
+        self.assertIn('.commit()', store)
+        self.assertNotIn('ProcessBuilder(', store)
+        self.assertNotIn('su -c', store)
+        self.assertNotIn('Thread.sleep(', store)
+
+    def test_tile_boot_freshness_and_timestamp_are_explicit(self):
+        store = self.store_code()
+        self.assertIn('savedEpoch <= 0L', store)
+        self.assertIn('abs((now - uptime) - savedEpoch) > MAX_BOOT_DRIFT_MS', store)
+        self.assertIn('return null', store)
+        code = self.tile_code()
+        self.assertIn('DateFormat.getDateTimeInstance(', code)
+        self.assertIn('Checked $checkedAt', code)
 
 
 if __name__ == '__main__':

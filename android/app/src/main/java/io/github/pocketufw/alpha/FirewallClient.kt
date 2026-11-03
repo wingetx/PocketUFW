@@ -268,7 +268,7 @@ internal class FirewallClient(private val context: Context) {
     /** One Magisk root request returns current policy, boot status and counters. */
     fun inspectDashboard(): Dashboard {
         val vpn = readVpn()
-        return try {
+        return (try {
             prepareEngine()
             dashboardFrom(bridge("inspect"), vpn).also { dashboard ->
                 if (dashboard.snapshot.rootReady &&
@@ -280,13 +280,13 @@ internal class FirewallClient(private val context: Context) {
                 vpnActive = vpn,
                 details = "Unable to inspect firewall: " + (e.message ?: "unknown error")
             ))
-        }
+        }).also { TileStatusStore.publish(context, it.snapshot) }
     }
 
     /** A single root session performs the action and audits its final state. */
     private fun performAction(action: String, args: List<String> = emptyList()): Operation {
         val vpn = readVpn()
-        return try {
+        return (try {
             prepareEngine()
             val result = bridge(action, args)
             val dashboard = dashboardFrom(result, vpn)
@@ -314,7 +314,7 @@ internal class FirewallClient(private val context: Context) {
                 details = "Unable to check firewall after operation."
             ))
             Operation(false, "Operation failed: " + (e.message ?: "unknown error"), dashboard)
-        }
+        }).also { TileStatusStore.publish(context, it.dashboard.snapshot) }
     }
 
     fun changeProtection(activate: Boolean): Operation =

@@ -86,12 +86,10 @@ internal fun KernelStatusTab(
             }
         } else {
             KernelFamilyPanel("IPv4", report.ipv4, showRaw)
-            KernelFamilyPanel("IPv6", report.ipv6, showRaw)
-            OutlinedButton(onClick = { showRaw = !showRaw },
-                modifier = Modifier.fillMaxWidth()) {
-                Text(if (showRaw) "Hide raw kernel rules" else "Show raw kernel rules",
-                    fontSize = 13.sp)
-            }
+            // Both address families are one rules section. Keep its shared
+            // raw-view action inside the final (IPv6) rules card.
+            KernelFamilyPanel("IPv6", report.ipv6, showRaw,
+                onToggleRaw = { showRaw = !showRaw })
         }
         UdpExceptionsPanel(state, report, busy, setUdpPorts, restoreAutomatic)
         Text(
@@ -140,7 +138,8 @@ private fun describeRule(rule: String): Pair<String, String> = when {
 private fun KernelFamilyPanel(
     name: String,
     family: FirewallClient.RuleFamily,
-    rawVisible: Boolean
+    rawVisible: Boolean,
+    onToggleRaw: (() -> Unit)? = null
 ) {
     val interfaces = family.hooks.map {
         it.substringAfter(" -i ", "").substringBefore(' ')
@@ -175,15 +174,22 @@ private fun KernelFamilyPanel(
                 }
             }
 
-            if (family.vpnExceptions.isEmpty()) {
-                Text("Inbound VPN UDP exceptions: none installed",
-                    color = Muted, fontSize = 12.sp)
-            } else {
-                Text("VPN UDP exceptions", fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold)
-                family.vpnExceptions.forEach { raw ->
-                    val (action, detail) = describeRule(raw)
-                    Text("$action  $detail", color = Mint, fontSize = 13.sp)
+            // A visually distinct, inset subcard makes the optional listener
+            // allowances read separately from the main inbound rule sequence.
+            Surface(color = Background, shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("VPN UDP exceptions", fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold, color = Foreground)
+                    if (family.vpnExceptions.isEmpty()) {
+                        Text("None installed", color = Muted, fontSize = 12.sp)
+                    } else {
+                        family.vpnExceptions.forEach { raw ->
+                            val (action, detail) = describeRule(raw)
+                            Text("$action  $detail", color = Mint, fontSize = 13.sp)
+                        }
+                    }
                 }
             }
             if (rawVisible) {
@@ -203,6 +209,12 @@ private fun KernelFamilyPanel(
                             } else family.vpnExceptions.forEach { RawKernelRule(it) }
                         }
                     }
+                }
+            }
+            if (onToggleRaw != null) {
+                OutlinedButton(onClick = onToggleRaw, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (rawVisible) "Hide raw kernel rules" else "Show raw kernel rules",
+                        fontSize = 13.sp)
                 }
             }
         }

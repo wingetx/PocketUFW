@@ -55,8 +55,31 @@ class QuickSettingsContractTests(unittest.TestCase):
     def test_tile_unlocks_before_security_sensitive_toggle(self):
         code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
         self.assertIn('if (isLocked) unlockAndRun', code)
-        self.assertIn('client.toggleProtection()', code)
+        self.assertIn('rootMutex.withLock { client.toggleProtection() }', code)
+        self.assertIn('++generation  // Ignore a check started when the shade was opened.', code)
         self.assertNotIn('startForeground(', code)
+
+    def test_checking_never_paints_active_tile_off(self):
+        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
+        self.assertIn('FirewallClient.Protection.CHECKING -> tile.state', code)
+        self.assertIn('FirewallClient.Protection.ACTIVE -> Tile.STATE_ACTIVE', code)
+        self.assertIn('FirewallClient.Protection.INACTIVE,', code)
+        self.assertNotIn('tile.state = if (protection ==', code)
+
+    def test_listening_deduplicates_checks_without_background_polling(self):
+        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
+        opening = code.split('override fun onStartListening()', 1)[1].split('override fun onStopListening()', 1)[0]
+        self.assertIn('if (listening) return', opening)
+        self.assertIn('if (inspectionJob?.isActive == true) return', opening)
+        self.assertIn('ageMs in 0..quickReopenGraceMs', opening)
+        self.assertIn('checkedAgoSeconds = ageMs / 1_000', opening)
+        self.assertIn('rootMutex.withLock { client.inspectDashboard() }', opening)
+        self.assertLess(opening.index('if (listening) return'),
+                        opening.index('rootMutex.withLock { client.inspectDashboard() }'))
+        self.assertLess(opening.index('if (inspectionJob?.isActive == true) return'),
+                        opening.index('rootMutex.withLock { client.inspectDashboard() }'))
+        self.assertNotIn('while (', opening)
+        self.assertNotIn('delay(', code)
 
 
 if __name__ == '__main__':

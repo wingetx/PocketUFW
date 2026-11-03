@@ -3,13 +3,14 @@
 **v1 scope:** one-switch inbound firewall with honest counters, optional
 Magisk restore, and verified VPN exceptions. Arbitrary custom iptables and
 an advanced-rule builder are *not* part of this app. The research prototype
-is preserved on Git branch `main`; the active minimal release branch is
-`v1-simple`. See [`docs/v1-scope.md`](../docs/v1-scope.md).
+is not included in this public minimal v1 branch. See
+[`docs/v1-scope.md`](../docs/v1-scope.md).
 
-This directory contains the first **Kotlin + Jetpack Compose** application for
-PocketUFW. It is an experimental Moto G 5G (2024) test build, not a production release.
+This directory contains the **Kotlin + Jetpack Compose** application for
+PocketUFW. Experimental betas have been tested on a Moto G 5G (2024) and a
+Pixel 9a; this is not a production release.
 
-## What works in alpha13
+## What works in alpha14
 
 - The selected terminal-penguin branding and simple one-switch interface
 - Requests root via the device's existing `su` implementation (Magisk/KernelSU/APatch-style CLI)
@@ -261,3 +262,11 @@ The broader product goals, remaining tasks, and limitations are in the root
 - Committed text explains the saved lifetime: until edited, reset to automatic, or app data removal, and that restoration on reboot requires Magisk boot restoration.
 - `Reset to automatic VPN exceptions` is now always offered while live protection is verified, including immediately after an Experimental change with no committed file. It opens a confirmation stating it replaces the current ports with **verified Tailscale listener ports** (or none when no listeners are detected), and that a failed detection leaves existing settings unchanged. The existing single-root-action `use-auto` path is reused; no new persistent service, firewall-engine policy or Android permissions.
 - Focused regression covers Experimental→automatic reset; prior engine tests cover transactional Tailscale refresh and Committed→automatic clearing. All 110 tests passed. The alpha13 APK built and lint passed, and all seven bundled scripts matched source. It was installed in place on the Moto, with read-only verification that the firewall and Tailscale exceptions remained unchanged. The revised UI wording and reset button still need human visual confirmation.
+
+
+## Alpha14: scope-copy clarity and Pixel 9a beta (November 2-3, 2026)
+
+- The Status → incoming VPN UDP exceptions section now explicitly distinguishes its Experimental/Committed **port exceptions** from global Android firewall policy and outgoing traffic. An allowed UDP port admits inbound traffic to that port on supported physical interfaces; it is not limited to authenticated Tailscale packets.
+- `versionCode 14` / `0.1.0-alpha14`; 114 Python tests, debug assemble and lint passed. No backend script, permission, or long-running service change.
+- First Pixel 9a/Android 17 USB ADB beta passed verified enable, clean disable, re-enable, real dual-stack LAN DROP increments, boot restoration **without app launch**, simultaneous kernel WireGuard plus Tailscale, and one Wi-Fi → cellular → Wi-Fi handoff. Tailscale ports needed manual **Refresh VPN** after its later post-boot start. See [hardware validation](../docs/hardware-validation.md) for precise evidence and limitations.
+- Do not generalize to carrier voice/SMS/IMS safety, all Android devices, long-term standby or verified global inbound coverage. The app remains an experimental debug build.

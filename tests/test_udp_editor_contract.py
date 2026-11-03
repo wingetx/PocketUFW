@@ -28,6 +28,12 @@ class AdvancedUdpContractTests(unittest.TestCase):
         self.assertIn('Closing this app or reconnecting ', ui)
         self.assertIn('Tailscale does not reset it.', ui)
         self.assertIn('Magisk boot restoration is enabled.', ui)
+        # Advanced edit scope must remain clear: port exceptions are real
+        # inbound allowances, not edits to Android's global firewall.
+        self.assertIn("change only PocketUFW's incoming VPN UDP ", ui)
+        self.assertIn("not Android's global firewall rules or outgoing traffic.", ui)
+        self.assertIn("not just ", ui)
+        self.assertIn("Tailscale packets. Choose only ports with trusted listeners.", ui)
         # The reset is not exclusive to Committed: Experimental leaves the
         # persisted mode unchanged, so we must be able to undo live edits.
         self.assertIn('if (!editorOpen) {\n                    OutlinedButton(onClick = { autoConfirmation = true }', ui)

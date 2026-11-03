@@ -95,6 +95,13 @@ internal fun UdpExceptionsPanel(
                         "connections, such as Proton VPN, usually don't need them.",
                     color = Muted, fontSize = 13.sp, lineHeight = 19.sp
                 )
+                Text(
+                    "Experimental and Committed change only PocketUFW's incoming VPN UDP " +
+                        "port exceptions, not Android's global firewall rules or outgoing traffic. " +
+                        "An allowed port admits inbound UDP on supported interfaces, not just " +
+                        "Tailscale packets. Choose only ports with trusted listeners.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 18.sp
+                )
                 val mode = when (state.udpConfigMode) {
                     FirewallClient.UdpConfigMode.AUTOMATIC -> "Automatic · verified Tailscale listeners"
                     FirewallClient.UdpConfigMode.COMMITTED -> "Committed · saved for future sessions"

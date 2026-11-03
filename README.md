@@ -115,7 +115,7 @@ No `iptables -F`, `iptables -P INPUT DROP`, or global `iptables-restore` is used
 rules alone.** One toggle, accurate DROP counters, optional verified VPN
 listener exceptions, and a one-shot boot restore. No general custom-rule
 editor, arbitrary root scripts, per-app traffic blocking, VPN slot, or
-always-running daemon. The current alpha13 is a tested prototype, not yet a
+always-running daemon. The current alpha14 is a tested prototype, not yet a
 production release. See [the minimal v1 checklist](docs/v1-scope.md).
 
 ## Security & release checklist

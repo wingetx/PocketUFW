@@ -11,3 +11,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "PocketUFW"
 include(":app")
+
+include(":iconpack")

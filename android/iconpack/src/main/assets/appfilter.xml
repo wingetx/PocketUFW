@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item component="ComponentInfo{io.github.pocketufw.alpha/io.github.pocketufw.alpha.MainActivity}" drawable="pocketufw_neon" />
+</resources>

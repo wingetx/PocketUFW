@@ -175,7 +175,7 @@ private fun PocketScreen(client: FirewallClient) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
-                    painter = painterResource(id = R.drawable.pocket_penguin),
+                    painter = painterResource(id = R.drawable.pocket_penguin_neon_home),
                     contentDescription = "PocketUFW terminal penguin",
                     modifier = Modifier.size(76.dp).clip(RoundedCornerShape(20.dp))
                 )
@@ -524,7 +524,7 @@ private fun PocketScreen(client: FirewallClient) {
             }
 
             Text(
-                "PocketUFW · 0.1.0-alpha13 · Local-only · No accounts or telemetry",
+                "PocketUFW · " + BuildConfig.VERSION_NAME + " · Local-only · No accounts or telemetry",
                 modifier = Modifier.fillMaxWidth(),
                 color = Muted.copy(alpha = 0.75f),
                 fontSize = 11.sp,

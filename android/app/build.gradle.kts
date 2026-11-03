@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.pocketufw.alpha"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.1.0-alpha14"
+        versionCode = 15
+        versionName = "0.1.0-alpha15"
     }
 
     buildTypes {
@@ -25,7 +25,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.8" }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/firewallAssets"))

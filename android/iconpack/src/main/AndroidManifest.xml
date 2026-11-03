@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Deliberately no network, storage, root or special permissions. -->
+    <application
+        android:label="@string/app_name"
+        android:icon="@drawable/pocketufw_neon"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".IconPackActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="com.novalauncher.THEME" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="org.adw.launcher.THEMES" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="org.adw.ActivityStarter.THEMES" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.anddoes.launcher.THEME" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

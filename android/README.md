@@ -10,7 +10,20 @@ This directory contains the **Kotlin + Jetpack Compose** application for
 PocketUFW. Experimental betas have been tested on a Moto G 5G (2024) and a
 Pixel 9a; this is not a production release.
 
-## What works in alpha14
+## New in the source-only alpha15 build (not yet installed on Pixel)
+
+- The approved neon terminal penguin is the official launcher/adaptive icon
+  and Home illustration; the themed monochrome icon and Quick Settings tile
+  remain unchanged.
+- About text reads the version from the generated BuildConfig, so a future
+  alpha will no longer display a stale hardcoded alpha13 string.
+- An optional, separate, permission-free Niagara icon-pack APK can be built
+  with Gradle task :iconpack:assembleDebug. Its source and installation notes
+  are in iconpack/README.md. Blaze Backless is never modified.
+- This alpha15 debug APK was built and linted on Arch; live Pixel testing
+  and installation are separate from the already verified alpha14 beta.
+
+## Hardware-tested capabilities in alpha14
 
 - The selected terminal-penguin branding and simple one-switch interface
 - Requests root via the device's existing `su` implementation (Magisk/KernelSU/APatch-style CLI)

@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.pocketufw.alpha"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.1.0-alpha19"
+        versionCode = 20
+        versionName = "0.1.0-alpha20"
     }
 
     buildTypes {

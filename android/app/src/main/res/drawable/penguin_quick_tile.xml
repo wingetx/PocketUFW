@@ -1,47 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A friendly half-penguin for the Quick Settings tile at 24dp.
-     One tint-safe foreground color, with small transparent pupils. -->
+<!-- Round penguin face for 24dp Quick Settings.
+     One tint-safe silhouette with transparent hood, eye, and beak details.
+     Deliberately no shoulders, body, eyebrows, or separate face panels. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Head and shoulders: open at the bottom, not a full oval body. -->
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M21,94 C20,79 26,69 36,63 C31,51 31,31 38,22
-            C44,13 64,13 70,22 C77,31 77,51 72,63
-            C82,69 88,79 87,94" />
-    <!-- Tiny outward flippers make the head-and-body shape unmistakable. -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M29,70 Q19,75 16,90 Q16,97 23,93
-            L34,83 Z
-            M79,70 Q89,75 92,90 Q92,97 85,93
-            L74,83 Z" />
-    <!-- Two separate white cheeks with two small cut-out pupils. -->
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
         android:pathData="
-            M51,35 C43,28 38,33 39,45 C39,53 46,58 52,58 Z
-            M48.2,44.5 C48.2,46.4 46.8,47.7 45,47.7
-                C43.2,47.7 41.8,46.4 41.8,44.5
-                C41.8,42.7 43.2,41.3 45,41.3
-                C46.8,41.3 48.2,42.7 48.2,44.5 Z
-            M57,35 C65,28 70,33 69,45 C69,53 62,58 56,58 Z
-            M66.2,44.5 C66.2,46.4 64.8,47.7 63,47.7
-                C61.2,47.7 59.8,46.4 59.8,44.5
-                C59.8,42.7 61.2,41.3 63,41.3
-                C64.8,41.3 66.2,42.7 66.2,44.5 Z" />
-    <!-- Clear beak plus small cropped chest: no whale belly or feet. -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M48,58 L60,58 L54,65 Z
-            M54,74 C44,74 40,82 38,94 L70,94
-                C68,82 64,74 54,74 Z" />
+            M54,9 C30,9 13,29 13,53
+                C13,78 30,99 54,99
+                C78,99 95,78 95,53
+                C95,29 78,9 54,9 Z
+
+            M28,37 C30,24 42,13 54,13
+                C66,13 78,24 80,37
+                C65,35 57,43 54,45
+                C51,43 43,35 28,37 Z
+
+            M43.5,49 C43.5,51.9 41.8,53.8 39.5,53.8
+                C37.2,53.8 35.5,51.9 35.5,49
+                C35.5,46.1 37.2,44.2 39.5,44.2
+                C41.8,44.2 43.5,46.1 43.5,49 Z
+
+            M72.5,49 C72.5,51.9 70.8,53.8 68.5,53.8
+                C66.2,53.8 64.5,51.9 64.5,49
+                C64.5,46.1 66.2,44.2 68.5,44.2
+                C70.8,44.2 72.5,46.1 72.5,49 Z
+
+            M46.5,62 Q54,59 61.5,62
+                Q58,67.5 54,69.5
+                Q50,67.5 46.5,62 Z" />
 </vector>

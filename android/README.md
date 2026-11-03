@@ -36,6 +36,13 @@ tap still toggles using fresh kernel verification, with locked-screen
 protection intact. No background service, root timer, or firewall-engine
 changes were added.
 
+## Alpha20 round-face Quick Settings penguin (hardware acceptance pending)
+
+Swaps only the Quick Settings vector for a simple round face with two tiny
+transparent eyes, small penguin forehead cap, and one beak. No body, eyebrows, or distracting details.
+The themed and neon launcher artwork and all firewall and tile behavior remain
+unchanged.
+
 ## Alpha19 half-penguin tile icon (local hardware acceptance pending)
 
 Refined the Quick Settings monochrome vector to an upper-body bust with

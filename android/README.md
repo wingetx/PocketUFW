@@ -36,6 +36,14 @@ tap still toggles using fresh kernel verification, with locked-screen
 protection intact. No background service, root timer, or firewall-engine
 changes were added.
 
+## Alpha21 distinct penguin face (hardware acceptance pending)
+
+The Quick Settings glyph now has a *circular* dark head surrounded by one
+white ring, one continuous soft white facial patch, tiny eye cutouts and a
+triangular beak. This replaces alpha20's mostly blank white circle. The
+vector remains monochrome/tint-safe with no full body or mask. No changes to
+launcher artwork, root operations, tile logic or firewall scripts.
+
 ## Alpha20 round-face Quick Settings penguin (hardware acceptance pending)
 
 Swaps only the Quick Settings vector for a simple round face with two tiny

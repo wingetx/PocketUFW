@@ -64,27 +64,26 @@ class QuickSettingsContractTests(unittest.TestCase):
     def store_code(cls):
         return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/TileStatusStore.kt').read_text()
 
-    def test_quick_tile_is_only_a_round_tint_safe_penguin_face(self):
+    def test_quick_tile_is_circular_with_single_large_penguin_face(self):
         import xml.etree.ElementTree as ET
         ns = '{http://schemas.android.com/apk/res/android}'
         icon = PROJECT / 'android/app/src/main/res/drawable/penguin_quick_tile.xml'
         launcher = PROJECT / 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'
         root = ET.parse(icon).getroot()
         paths = root.findall('path')
-        # A single even/odd silhouette makes the eyes and beak genuine
-        # transparent holes even when SystemUI applies a monochrome tint.
-        self.assertEqual(len(paths), 1)
-        self.assertEqual(paths[0].attrib[ns + 'fillColor'], '#FFFFFFFF')
-        self.assertEqual(paths[0].attrib[ns + 'fillType'], 'evenOdd')
-        d = paths[0].attrib[ns + 'pathData']
-        self.assertIn('M54,9 C30,9 13,29 13,53', d)
-        self.assertIn('M43.5,49 C43.5,51.9', d)
-        self.assertIn('M72.5,49 C72.5,51.9', d)
-        self.assertIn('M46.5,62 Q54,59 61.5,62', d)
-        self.assertIn('M28,37 C30,24 42,13 54,13', d)
-        self.assertEqual(d.count(' Z'), 5)
-        self.assertNotIn('strokeColor', paths[0].attrib)
-        # Only the QS tile changes; themed and neon launcher artwork stay.
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(paths[0].attrib[ns + 'fillColor'], '#00000000')
+        self.assertEqual(paths[0].attrib[ns + 'strokeColor'], '#FFFFFFFF')
+        self.assertIn('M54,7 C28,7 8,28 8,54', paths[0].attrib[ns + 'pathData'])
+        self.assertEqual(paths[1].attrib[ns + 'fillColor'], '#FFFFFFFF')
+        self.assertEqual(paths[1].attrib[ns + 'fillType'], 'evenOdd')
+        face = paths[1].attrib[ns + 'pathData']
+        self.assertIn('M54,42 C46,29 32,32 28,46', face)
+        self.assertIn('M44.7,51 C44.7,53.8', face)
+        self.assertIn('M71.3,51 C71.3,53.8', face)
+        self.assertIn('M47.5,63 Q54,60 60.5,63', face)
+        self.assertEqual(face.count(' Z'), 4)
+        # Only QS icon changes; preserve the neon and themed launcher icon.
         self.assertIn('@drawable/penguin_monochrome', launcher.read_text())
         self.assertIn('R.drawable.penguin_quick_tile', self.tile_code())
         services = self.root.findall('./application/service')

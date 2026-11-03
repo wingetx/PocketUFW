@@ -36,6 +36,13 @@ tap still toggles using fresh kernel verification, with locked-screen
 protection intact. No background service, root timer, or firewall-engine
 changes were added.
 
+## Alpha18 cosmetic tile icon (local hardware acceptance pending)
+
+Quick Settings now uses its own tint-safe vector with transparent eyes, beak,
+belly, flippers, and feet that remain legible when reduced to 24dp. The
+original monochrome themed launcher icon and the neon app art remain unchanged.
+No changes to root operations, Android tile behavior, or kernel rules.
+
 ## Hardware-tested capabilities in alpha14
 
 - The selected terminal-penguin branding and simple one-switch interface

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Separate from the monochrome launcher icon.
+     Silhouette and transparent cutouts survive a single SystemUI tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Distinct flippers and feet, visible at the Quick Settings 24dp size. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M29,46 C18,52 14,64 15,78 C16,85 23,87 29,78 L33,68 Z
+            M79,46 C90,52 94,64 93,78 C92,85 85,87 79,78 L75,68 Z
+            M36,86 C34,90 30,92 24,94 C20,95 20,100 25,101
+                L45,101 C49,101 49,97 46,94 Z
+            M72,86 C74,90 78,92 84,94 C88,95 88,100 83,101
+                L63,101 C59,101 59,97 62,94 Z" />
+    <!-- Eye holes, beak, and belly are transparent negative space. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,11 C39,11 30,23 29,43 C27,57 30,76 35,88
+                C39,96 46,98 54,98 C62,98 69,96 73,88 C78,76 81,57 79,43
+                C78,23 69,11 54,11 Z
+            M49,42 C49,45.1 46.5,47.5 43.5,47.5 C40.5,47.5 38,45.1 38,42
+                C38,38.9 40.5,36.5 43.5,36.5 C46.5,36.5 49,38.9 49,42 Z
+            M70,42 C70,45.1 67.5,47.5 64.5,47.5 C61.5,47.5 59,45.1 59,42
+                C59,38.9 61.5,36.5 64.5,36.5 C67.5,36.5 70,38.9 70,42 Z
+            M48,54 L60,54 L54,61 Z
+            M54,65 C46,65 42,74 44,83 C46,91 51,94 54,94
+                C57,94 62,91 64,83 C66,74 62,65 54,65 Z" />
+</vector>

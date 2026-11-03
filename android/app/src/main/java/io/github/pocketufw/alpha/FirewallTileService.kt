@@ -80,7 +80,7 @@ class FirewallTileService : TileService() {
             status == FirewallClient.Protection.DEGRADED -> "Needs attention"
             else -> "Not verified this boot · Open app"
         }
-        tile.icon = Icon.createWithResource(this, R.drawable.penguin_monochrome)
+        tile.icon = Icon.createWithResource(this, R.drawable.penguin_quick_tile)
         tile.label = "PocketUFW"
         // Only a completed verification may display green. Unknown means
         // unknown, not a statement that kernel rules are switched off.

@@ -64,6 +64,22 @@ class QuickSettingsContractTests(unittest.TestCase):
     def store_code(cls):
         return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/TileStatusStore.kt').read_text()
 
+    def test_quick_tile_has_its_own_recognizable_tint_safe_icon(self):
+        import xml.etree.ElementTree as ET
+        ns = '{http://schemas.android.com/apk/res/android}'
+        icon = PROJECT / 'android/app/src/main/res/drawable/penguin_quick_tile.xml'
+        launcher = PROJECT / 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'
+        root = ET.parse(icon).getroot()
+        paths = root.findall('path')
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(paths[1].attrib[ns + 'fillType'], 'evenOdd')
+        self.assertIn('M48,54 L60,54 L54,61 Z', paths[1].attrib[ns + 'pathData'])
+        self.assertIn('C46,65 42,74', paths[1].attrib[ns + 'pathData'])
+        self.assertIn('@drawable/penguin_monochrome', launcher.read_text())
+        self.assertIn('R.drawable.penguin_quick_tile', self.tile_code())
+        services = self.root.findall('./application/service')
+        self.assertEqual(services[0].attrib[ns + 'icon'], '@drawable/penguin_quick_tile')
+
     def test_tile_unlocks_before_security_sensitive_toggle(self):
         code = self.tile_code()
         self.assertIn('if (isLocked) unlockAndRun', code)

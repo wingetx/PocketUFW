@@ -30,7 +30,7 @@
         <service
             android:name=".FirewallTileService"
             android:label="PocketUFW"
-            android:icon="@drawable/penguin_monochrome"
+            android:icon="@drawable/penguin_quick_tile"
             android:exported="true"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

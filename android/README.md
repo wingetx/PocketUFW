@@ -1,16 +1,19 @@
-# PocketUFW Android alpha
+# PocketUFW Android beta
 
-**v1 scope:** one-switch inbound firewall with honest counters, optional
-Magisk restore, and verified VPN exceptions. Arbitrary custom iptables and
-an advanced-rule builder are *not* part of this app. The research prototype
-is not included in this public minimal v1 branch. See
-[`docs/v1-scope.md`](../docs/v1-scope.md).
+**0.1.0-beta1 (versionCode 22)** is a testing release of the one-switch
+Android root firewall, not a production security guarantee. Pixel 9a and
+Moto G 5G (2024) have been hardware tested; other Android variants may
+behave differently. Root and legacy iptables/ip6tables support are required.
 
-This directory contains the **Kotlin + Jetpack Compose** application for
-PocketUFW. Experimental betas have been tested on a Moto G 5G (2024) and a
-Pixel 9a; this is not a production release.
+For F-Droid, the simplest route is source-tagged builds signed by F-Droid
+itself. This avoids creating a separate developer signing key. The app
+currently installed on Frankenpixel is debug-signed; moving to an
+F-Droid-signed build requires uninstalling the old package, which clears
+PocketUFW's own saved preferences. Turn protection off first to disarm the
+Magisk boot hook and remove the owned rules. Tailscale and WireGuard
+configurations belong to their own applications and are not removed.
 
-## New in the source-only alpha15 build (not yet installed on Pixel)
+## Historical alpha15 branding milestone## New in the source-only alpha15 build (not yet installed on Pixel)
 
 - The approved neon terminal penguin is the official launcher/adaptive icon
   and Home illustration; the themed monochrome icon and Quick Settings tile
@@ -20,8 +23,8 @@ Pixel 9a; this is not a production release.
 - An optional, separate, permission-free Niagara icon-pack APK can be built
   with Gradle task :iconpack:assembleDebug. Its source and installation notes
   are in iconpack/README.md. Blaze Backless is never modified.
-- This alpha15 debug APK was built and linted on Arch; live Pixel testing
-  and installation are separate from the already verified alpha14 beta.
+- Alpha15 was installed and hardware-tested on Pixel. Subsequent alpha
+  versions refined the active Quick Settings tile and mascot.
 
 ## Alpha17 active-tile candidate (local hardware acceptance pending)
 

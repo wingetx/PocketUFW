@@ -1,0 +1,1 @@
+First beta: dual-stack inbound firewall, kernel rule-match counters, readable rules, opt-in Magisk boot restoration, and Tailscale listener refresh. Active Quick Settings tile avoids repeated root requests while viewing the shade. New penguin artwork. Root required; no continuous repair service or general custom-rule editor.

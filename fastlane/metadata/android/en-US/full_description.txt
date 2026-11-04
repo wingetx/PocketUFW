@@ -1,0 +1,17 @@
+PocketUFW is a free and open-source, UFW-inspired inbound-only firewall for rooted Android devices.
+
+One switch controls PocketUFW-owned IPv4 and IPv6 kernel rules that deny unsolicited incoming connections on supported physical network interfaces while leaving Android's outbound policies untouched.
+
+Features:
+* Verified protection switch and on-demand root checks
+* IPv4 and IPv6 blocked-packet counters and readable kernel rules
+* Optional one-shot Magisk restoration after reboot
+* Tailscale incoming UDP listener discovery and manual refresh
+* An active Quick Settings tile without periodic root requests
+* No VPN slot, network telemetry, accounts, advertisements, or packet logging
+
+Requires working root access (Magisk or compatible su), legacy iptables/ip6tables and a compatible Android kernel. No Google Play Services required.
+
+This is beta software. It is not universal Android host protection. Only specified physical interface patterns are filtered; earlier Android/OEM ACCEPT rules may bypass PocketUFW. Tethering and inner VPN interfaces are not covered. Tailscale port changes may require an explicit Refresh VPN. There is no resident self-repair monitor.
+
+PocketUFW is independent software, not affiliated with Canonical or UFW.

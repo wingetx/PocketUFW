@@ -1,8 +1,17 @@
 # PocketUFW 🐧
 
-**A UFW-inspired, inbound-only firewall prototype for rooted Android.**
+**A UFW-inspired inbound-only firewall beta for rooted Android.**
 
-PocketUFW is an independent experiment, **not UFW itself, not affiliated with Canonical, and not ready for unattended or production use**. **The public v1 development line is deliberately minimal**: one protection switch, truthful status, optional Magisk restoration, and VPN compatibility. General-purpose advanced-rule experiments are deliberately **not part of this public v1 repository**. See [v1 release scope](docs/v1-scope.md). It uses Android's existing `iptables`/`ip6tables` kernel interfaces; it does not require a VPN slot, per-app selections, or a background app. The repository also includes an **experimental Android APK** (Kotlin + Jetpack Compose) for rooted test devices; the CLI remains the firewall engine. Alpha12 offers opt-in Magisk boot restoration, one `su` session per UI action, and a read-only Status tab showing actual kernel rules, with no resident app process or timer-driven root polling. The planned Android release is **one app** that automatically probes root or Shizuku and presents only the capabilities actually supported. See [architecture](docs/architecture.md) and [compatibility priorities](docs/compatibility.md).
+PocketUFW is independent software, not UFW and not affiliated with Canonical.
+The version 0.1.0-beta1 release is intended for testing, not unattended or
+production security use. It uses Android's existing IPv4 and IPv6 kernel
+firewall, leaves outgoing traffic unchanged and provides one protection switch,
+readable rules, counters, optional one-shot Magisk boot restoration, and manual
+verified Tailscale listener refresh. No VPN slot, packet capture, accounts,
+advertising, analytics, or continuous background app. Requires root access
+and compatible iptables/ip6tables. Shizuku-only operation is not supported.
+See the v1 scope, architecture, compatibility and hardware validation docs
+for details and limitations.
 
 ## Design philosophy
 
@@ -24,7 +33,7 @@ PocketUFW is an independent experiment, **not UFW itself, not affiliated with Ca
 - Wordmark: `Pocket` in charcoal, `UFW` in muted green.
 - Separate the icon from the wordmark so the launcher icon works without text.
 - Use the same restrained palette and typography for the one-switch app interface.
-- Treat the current generated logo as a **concept** until app-icon exports, contrast checks, and final assets are prepared.
+- Neon artwork is the app launcher and Home image; a separate monochrome penguin is used for Quick Settings.
 
 ## Firewall policy
 
@@ -40,7 +49,7 @@ PocketUFW is an independent experiment, **not UFW itself, not affiliated with Ca
 
 Most Android root firewalls use app allow/block lists. Linux users may instead prefer a network-facing, stateful firewall policy. PocketUFW attempts to implement the **inbound** half of that policy without taking over Android's firewall.
 
-### Important limitations in v0.1.0-dev
+### Important limitations in 0.1.0-beta1
 
 1. **Do not enable alongside AFWall+'s active rules**. PocketUFW checks for its output hook and refuses to enable. Android or other firewall tools may still own unknown chains.
 2. **No continuous Tailscale port tracking.** `--auto-tailscale` verifies current Android app-owned sockets when enabling rules. Use `refresh` after a port change to update only the exception chain. A future monitor will handle this automatically. A blocked direct UDP listener can push Tailscale onto encrypted relays.
@@ -52,7 +61,7 @@ Most Android root firewalls use app allow/block lists. Linux users may instead p
 8. **Hardware tested, not production-ready.** IPv4/IPv6 ingress blocking, removal, Proton VPN coexistence, and Magisk reboot restoration were validated on a rooted Moto G 5G (2024). Other kernels, carriers, root managers, and unattended operation still require testing. See [hardware validation](docs/hardware-validation.md).
 9. DNS filtering (such as Quad9) and VPN encryption are separate from PocketUFW's inbound firewall policy.
 
-## Android app (experimental alpha)
+## Android app (beta)
 
 The Kotlin/Jetpack Compose app lives in [`android/`](android/). It has a terminal-penguin launcher icon, one protection switch, root/VPN status, verified rule checks, and manual VPN refresh. Alpha5 combines each control action and its status/counter verification into **one root request**. Opt-in Magisk boot restoration is available without running a background app. **Use on test devices only.**
 
@@ -61,7 +70,12 @@ Build and installation instructions are in [the Android README](android/README.m
 ### Background operation and recovery roadmap
 
 - **Already works:** the Linux kernel filters inbound packets independently of whether the Android UI is visible, force-stopped, or closed. The optional Magisk late-start hook restores the policy after a reboot. No Android foreground service is needed.
-- **Optional Quick Settings toggle (alpha10):** Android briefly binds a `TileService` while Quick Settings is viewed. It checks kernel state once on opening, and a tap independently verifies live state before toggling protection. It never installs a foreground service, creates a permanent notification, or polls on a timer. A Magisk superuser toast may appear when the shade is opened because live verification needs root. Disabling the firewall disarms its boot hook; a previously opted-in boot restoration setting is remembered locally and rearmed when protection is switched back on. The lock screen must be unlocked before changing the firewall. The tile is entirely optional. The alpha9 reboot milestone passed, and alpha10 is installed on the Moto; manual tile usage has not yet been hardware-tested.
+- **Optional active Quick Settings tile:** opening the shade does not request
+  root; it displays the last verified state with a check timestamp. A tap
+  performs a fresh kernel-verified toggle, requiring an unlock when locked.
+  The tile does not poll root or run a background service. Magisk may show a
+  toast after an explicit operation. On Pixel 9a, the owner confirmed the
+  active-tile change stopped repeated shade-open Magisk toasts.
 - **Not yet solved:** later Android/OEM firewall rewrites, interrupted rule installation, unexpected interface changes, and Tailscale listener-port rotations. The existing boot hook runs only once.
 - **Next design target:** an opt-in, low-overhead root-side health/recovery mechanism with explicit ownership checks, bounded retries, and honest failure reporting. It must refuse to overwrite unknown or conflicting chains, preserve boot and VPN functionality, and be removable through the off switch. Avoid repeatedly invoking `su` or keeping a foreground Android service alive.
 - **Optional visibility:** packet totals can be shown on demand or in an opt-in notification. Counts are DROP-rule matches, never automatic claims of attacks or blocked trackers. No notification permission, constant polling, or packet-history collection should be required for ordinary protection.
@@ -77,7 +91,7 @@ sh pocketufw plan --auto-tailscale
 
 The ports above are **examples from one Pixel's observed session**, not universal or permanent defaults. Tailscale may choose different values.
 
-## Experimental operation (do not run on the working phone yet)
+## Command-line operation (root required; use only on authorized devices)
 
 ```sh
 # From a tested root shell, only after disabling conflicting AFWall rules:
@@ -115,8 +129,7 @@ No `iptables -F`, `iptables -P INPUT DROP`, or global `iptables-restore` is used
 rules alone.** One toggle, accurate DROP counters, optional verified VPN
 listener exceptions, and a one-shot boot restore. No general custom-rule
 editor, arbitrary root scripts, per-app traffic blocking, VPN slot, or
-always-running daemon. The current alpha14 is a tested prototype, not yet a
-production release. See [the minimal v1 checklist](docs/v1-scope.md).
+always-running daemon. Beta1 is a tested prototype, not a production security release. See [the minimal v1 checklist](docs/v1-scope.md).
 
 ## Security & release checklist
 

@@ -1,0 +1,1 @@
+Inbound-only firewall for rooted Android, without a VPN slot

@@ -4,7 +4,7 @@
 # Never evaluate configuration content as shell code.
 set -eu
 umask 077
-DIR="${POCKETUFW_CONFIG_DIR:-/data/user_de/0/io.github.pocketufw.alpha/files}"
+DIR="${POCKETUFW_CONFIG_DIR:-/data/user_de/0/io.github.pocketufw/files}"
 FILE="$DIR/udp-committed.conf"
 STAGE="$DIR/.udp-committed.stage.$$"
 

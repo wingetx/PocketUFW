@@ -1,0 +1,1 @@
+Beta2: Adopt permanent Android package name io.github.pocketufw, with corresponding Magisk boot hook, VPN settings storage, icon-pack mapping, and source namespace updates. The earlier beta1 is a separate Android app and cannot update in place. No firewall rule-engine changes.

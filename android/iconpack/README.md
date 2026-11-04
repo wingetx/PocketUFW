@@ -9,7 +9,7 @@ The pack uses conventional ADW/Nova-style appfilter.xml and drawable.xml
 mapping. It declares no network, storage, root or other permissions
 and has no launcher entry or background service.
 
-The icon automatically maps to io.github.pocketufw.alpha.MainActivity.
+The icon automatically maps to io.github.pocketufw.MainActivity.
 This separate pack does not alter installed Blaze or Android firewall state.
 
 Build: cd android && ./gradlew :iconpack:assembleDebug

@@ -1,4 +1,4 @@
-package io.github.pocketufw.alpha
+package io.github.pocketufw
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

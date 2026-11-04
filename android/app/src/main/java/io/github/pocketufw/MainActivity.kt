@@ -1,4 +1,4 @@
-package io.github.pocketufw.alpha
+package io.github.pocketufw
 
 import android.os.Bundle
 import java.text.DateFormat

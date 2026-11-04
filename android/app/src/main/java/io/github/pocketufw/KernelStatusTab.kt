@@ -1,4 +1,4 @@
-package io.github.pocketufw.alpha
+package io.github.pocketufw
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement

@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "io.github.pocketufw.alpha"
+    namespace = "io.github.pocketufw"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.pocketufw.alpha"
+        applicationId = "io.github.pocketufw"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.1.0-beta1"
+        versionCode = 23
+        versionName = "0.1.0-beta2"
     }
 
     buildTypes {

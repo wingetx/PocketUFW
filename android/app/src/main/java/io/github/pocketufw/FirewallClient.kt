@@ -1,4 +1,4 @@
-package io.github.pocketufw.alpha
+package io.github.pocketufw
 
 import android.content.Context
 import android.net.ConnectivityManager

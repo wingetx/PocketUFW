@@ -20,7 +20,7 @@ while [ "$(getprop sys.boot_completed)" != '1' ]; do
   [ -f "$MARKER" ] || exit 0
 done
 # An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot.
-if ! pm path io.github.pocketufw.alpha 2>/dev/null | grep -q '^package:'; then
+if ! pm path io.github.pocketufw 2>/dev/null | grep -q '^package:'; then
   # Remove only our own boot files if the app was uninstalled.
   rm -f "$MARKER" "$HOOK" "$ENGINE" "$PROBE" "$CONFIG"
   rmdir "$STORE" 2>/dev/null || :

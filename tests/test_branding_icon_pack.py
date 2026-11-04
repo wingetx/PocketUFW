@@ -31,8 +31,8 @@ class BrandingIconPackTests(unittest.TestCase):
 
     def test_appfilter_points_at_the_real_pocketufw_activity(self):
         expected = (
-            "ComponentInfo{io.github.pocketufw.alpha/"
-            "io.github.pocketufw.alpha.MainActivity}"
+            "ComponentInfo{io.github.pocketufw/"
+            "io.github.pocketufw.MainActivity}"
         )
         for name in ("assets", "res/xml"):
             with self.subTest(name=name):
@@ -45,7 +45,7 @@ class BrandingIconPackTests(unittest.TestCase):
                 self.assertEqual(matches[0].get("drawable"), "pocketufw_neon")
 
     def test_alpha_footer_reads_real_version(self):
-        text = (APP / "src/main/java/io/github/pocketufw/alpha/MainActivity.kt").read_text()
+        text = (APP / "src/main/java/io/github/pocketufw/MainActivity.kt").read_text()
         self.assertIn("BuildConfig.VERSION_NAME", text)
         self.assertNotIn('PocketUFW · 0.1.0-alpha13 ·', text)
 

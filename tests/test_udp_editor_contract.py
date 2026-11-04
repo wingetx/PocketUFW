@@ -3,9 +3,9 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-UI = ROOT / 'android/app/src/main/java/io/github/pocketufw/alpha/UdpExceptionsPanel.kt'
-MAIN = ROOT / 'android/app/src/main/java/io/github/pocketufw/alpha/MainActivity.kt'
-CLIENT = ROOT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallClient.kt'
+UI = ROOT / 'android/app/src/main/java/io/github/pocketufw/UdpExceptionsPanel.kt'
+MAIN = ROOT / 'android/app/src/main/java/io/github/pocketufw/MainActivity.kt'
+CLIENT = ROOT / 'android/app/src/main/java/io/github/pocketufw/FirewallClient.kt'
 BOOT = ROOT / 'boot-service'
 
 
@@ -13,7 +13,7 @@ class AdvancedUdpContractTests(unittest.TestCase):
     def test_editor_stays_in_status_tab_and_gates_manual_updates(self):
         ui = UI.read_text()
         main = MAIN.read_text()
-        self.assertIn('UdpExceptionsPanel(', (ROOT / 'android/app/src/main/java/io/github/pocketufw/alpha/KernelStatusTab.kt').read_text())
+        self.assertIn('UdpExceptionsPanel(', (ROOT / 'android/app/src/main/java/io/github/pocketufw/KernelStatusTab.kt').read_text())
         self.assertIn('About / edit VPN UDP exceptions', ui)
         self.assertIn('Warning: advanced users only', ui)
         self.assertIn('I understand', ui)

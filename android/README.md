@@ -1,6 +1,6 @@
 # PocketUFW Android beta
 
-**0.1.0-beta1 (versionCode 22)** is a testing release of the one-switch
+**0.1.0-beta2 (versionCode 23)** is a testing release of the one-switch
 Android root firewall, not a production security guarantee. Pixel 9a and
 Moto G 5G (2024) have been hardware tested; other Android variants may
 behave differently. Root and legacy iptables/ip6tables support are required.
@@ -8,10 +8,21 @@ behave differently. Root and legacy iptables/ip6tables support are required.
 For F-Droid, the simplest route is source-tagged builds signed by F-Droid
 itself. This avoids creating a separate developer signing key. The app
 currently installed on Frankenpixel is debug-signed; moving to an
-F-Droid-signed build requires uninstalling the old package, which clears
+F-Droid-signed build may require uninstalling an app signed with a different certificate, which clears
 PocketUFW's own saved preferences. Turn protection off first to disarm the
 Magisk boot hook and remove the owned rules. Tailscale and WireGuard
 configurations belong to their own applications and are not removed.
+
+## Permanent Android identity starting beta2
+
+The published beta1 used the experimental package identity
+`io.github.pocketufw.alpha`. Beta2 uses `io.github.pocketufw`
+permanently. Android treats these as **different apps**. To migrate,
+disable protection in beta1 to remove its rules and disarm the Magisk
+hook, uninstall beta1, install beta2, grant Magisk root to beta2,
+then enable protection and optional boot restoration in its UI.
+Tailscale and WireGuard configurations remain independent.
+Earlier beta1 remains an immutable public release.
 
 ## Historical alpha15 branding milestone## New in the source-only alpha15 build (not yet installed on Pixel)
 
@@ -123,7 +134,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ```sh
 adb devices -l
 adb -s DEVICE_SERIAL install -r --no-incremental app/build/outputs/apk/debug/app-debug.apk
-adb -s DEVICE_SERIAL shell am start -n io.github.pocketufw.alpha/.MainActivity
+adb -s DEVICE_SERIAL shell am start -n io.github.pocketufw/.MainActivity
 ```
 
 Approve the app's Magisk/KernelSU/APatch root prompt **manually**, if prompted.
@@ -133,7 +144,7 @@ rules. Keep USB ADB access and a tested rule-cleanup path available while testin
 If the app cannot be used but USB ADB and root remain available:
 
 ```sh
-adb -s DEVICE_SERIAL shell 'su -c "sh /data/user/0/io.github.pocketufw.alpha/files/engine/pocketufw disable"'
+adb -s DEVICE_SERIAL shell 'su -c "sh /data/user/0/io.github.pocketufw/files/engine/pocketufw disable"'
 ```
 
 Do not delete the app's private files while its firewall rules are active.

@@ -7,7 +7,7 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / 'android/app/src/main/java/io/github/pocketufw/alpha'
+APP = ROOT / 'android/app/src/main/java/io/github/pocketufw'
 
 
 class MinimalReleaseScope(unittest.TestCase):

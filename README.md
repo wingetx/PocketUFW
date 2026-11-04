@@ -13,6 +13,11 @@ and compatible iptables/ip6tables. Shizuku-only operation is not supported.
 See the v1 scope, architecture, compatibility and hardware validation docs
 for details and limitations.
 
+**Permanent Android app identity:** Starting with `0.1.0-beta2`,
+the app ID is `io.github.pocketufw`. The earlier beta1 used the
+temporary `io.github.pocketufw.alpha` ID. This one-time change
+requires uninstalling the old app before using the renamed version.
+
 ## Design philosophy
 
 **Debian calm, in your pocket.** PocketUFW aims to be simple, dependable, and easy to trust. The firewall engine can be sophisticated; the experience should not be.

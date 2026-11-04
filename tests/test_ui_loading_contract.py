@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 SOURCE = (Path(__file__).resolve().parents[1] /
-          'android/app/src/main/java/io/github/pocketufw/alpha/MainActivity.kt')
+          'android/app/src/main/java/io/github/pocketufw/MainActivity.kt')
 
 
 class LoadingUiContractTests(unittest.TestCase):

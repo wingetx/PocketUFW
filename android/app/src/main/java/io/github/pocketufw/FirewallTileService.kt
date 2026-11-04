@@ -1,4 +1,4 @@
-package io.github.pocketufw.alpha
+package io.github.pocketufw
 
 import android.graphics.drawable.Icon
 import android.os.Build

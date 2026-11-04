@@ -54,15 +54,15 @@ class QuickSettingsContractTests(unittest.TestCase):
 
     @classmethod
     def tile_code(cls):
-        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallTileService.kt').read_text()
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/FirewallTileService.kt').read_text()
 
     @classmethod
     def client_code(cls):
-        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/FirewallClient.kt').read_text()
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/FirewallClient.kt').read_text()
 
     @classmethod
     def store_code(cls):
-        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/alpha/TileStatusStore.kt').read_text()
+        return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/TileStatusStore.kt').read_text()
 
     def test_quick_tile_is_circular_with_single_large_penguin_face(self):
         import xml.etree.ElementTree as ET

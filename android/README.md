@@ -1,6 +1,6 @@
 # PocketUFW Android beta
 
-**0.1.0-beta2 (versionCode 23)** is a testing release of the one-switch
+**0.1.0-beta3 (versionCode 24)** is a testing release of the one-switch
 Android root firewall, not a production security guarantee. Pixel 9a and
 Moto G 5G (2024) have been hardware tested; other Android variants may
 behave differently. Root and legacy iptables/ip6tables support are required.
@@ -13,6 +13,20 @@ PocketUFW's own saved preferences. Turn protection off first to disarm the
 Magisk boot hook and remove the owned rules. Tailscale and WireGuard
 configurations belong to their own applications and are not removed.
 
+## Beta3: safe counter reset and visual cleanup
+
+The **Reset counters** action verifies both kernel firewall families before
+zeroing only PocketUFW-owned inbound and Tailscale child counters, using
+iptables/ip6tables -Z on the exact owned chains. It does not flush or
+reinstall any rules or change the VPN, INPUT policy, or Magisk boot hook.
+Counters can start incrementing immediately, and a partial failure is
+reported rather than fabricating zeroes. The Home screen shows the time of
+the last successful manual reset, not a claim about resets on reboot.
+
+The active Quick Settings tile uses a white, tint-safe shield with no penguin;
+the adaptive launcher image and Neon icon pack use quieter penguin-with-shield
+artwork. All other firewall behavior is unchanged.
+
 ## Permanent Android identity starting beta2
 
 The published beta1 used the experimental package identity
@@ -24,7 +38,7 @@ then enable protection and optional boot restoration in its UI.
 Tailscale and WireGuard configurations remain independent.
 Earlier beta1 remains an immutable public release.
 
-## Historical alpha15 branding milestone## New in the source-only alpha15 build (not yet installed on Pixel)
+## Historical alpha15 branding milestone
 
 - The approved neon terminal penguin is the official launcher/adaptive icon
   and Home illustration; the themed monochrome icon and Quick Settings tile

@@ -7,7 +7,7 @@ set -u
 [ "$#" -ge 1 ] || exit 2
 ACTION="$1"
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh)
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters)
     [ "$#" -eq 1 ] || exit 2 ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
@@ -161,6 +161,15 @@ case "$ACTION" in
       message='Could not remove the boot hook; inspect status.'
     fi
     ;;
+  reset-counters)
+    if sh "$ENGINE" reset-counters >/dev/null 2>&1; then
+      outcome='SUCCESS'
+      message='PocketUFW counters reset. Rules and VPN exceptions are unchanged.'
+    else
+      outcome='FAILED'
+      message='Could not reset all counters. Existing firewall rules are unchanged.'
+    fi
+    ;;
   vpn-refresh)
     if ! read_config; then
       outcome='FAILED'
@@ -260,7 +269,7 @@ if [ "$outcome" = 'SUCCESS' ]; then
     disable) [ "$state" = INACTIVE ] && [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
     boot-enable) [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
     boot-disable) [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
-    vpn-refresh|set-ports|use-auto) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
+    vpn-refresh|set-ports|use-auto|reset-counters) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
   esac
   if [ "$outcome" = 'FAILED' ]; then
     message='Operation postcondition not verified; inspect firewall state.'

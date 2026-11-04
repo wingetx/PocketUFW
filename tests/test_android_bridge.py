@@ -34,6 +34,7 @@ class AndroidBridgeTests(unittest.TestCase):
                         TEST_ENGINE_STATE=str(self.state),
                         TEST_BOOT_STATE=str(self.boot_state),
                         TEST_BRIDGE_LOG=str(self.log))
+        self.env['TEST_BRIDGE_RESET'] = str(self.root / 'reset-confirmation')
         fake_id = self.bin / "id"
         fake_id.write_text(
             "#!/bin/sh\n"
@@ -62,6 +63,9 @@ class AndroidBridgeTests(unittest.TestCase):
             "get-ports) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] || exit 4; "
             "echo udp4=none; echo udp6=none ;;\n"
             "refresh) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] ;;\n"
+            "reset-counters) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] || exit 6; "
+            "[ \"$TEST_ENGINE_FAIL_RESET\" = 1 ] && exit 9; "
+            "echo yes > \"$TEST_BRIDGE_RESET\" ;;\n"
             "set-ports) [ \"$TEST_ENGINE_FAIL_MANUAL\" = 1 ] && exit 7; "
             "[ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] ;;\n"
             "*) exit 8 ;;\n"
@@ -266,6 +270,32 @@ class AndroidBridgeTests(unittest.TestCase):
             self.assertEqual(values["operation"], "SUCCESS")
             self.assertEqual(values["boot"], expected)
             self.assertEqual(values["state"], "ACTIVE")
+
+    def test_reset_counters_uses_one_verified_root_action(self):
+        result, values = self.run_bridge('reset-counters')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values.get('operation'), 'SUCCESS')
+        self.assertEqual(values.get('state'), 'ACTIVE')
+        self.assertEqual(values.get('boot'), 'ENABLED')
+        self.assertIn('counters reset', values.get('message', '').lower())
+        self.assertTrue((self.root/'reset-confirmation').exists())
+        self.assertIn('engine:reset-counters', self.log.read_text())
+
+    def test_reset_counters_failure_keeps_firewall_active(self):
+        result, values = self.run_bridge('reset-counters',
+                                         {'TEST_ENGINE_FAIL_RESET': '1'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values.get('operation'), 'FAILED')
+        self.assertEqual(values.get('state'), 'ACTIVE')
+        self.assertFalse((self.root/'reset-confirmation').exists())
+
+    def test_reset_counters_refuses_inactive(self):
+        self.state.write_text('INACTIVE\n')
+        result, values = self.run_bridge('reset-counters')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values.get('operation'), 'FAILED')
+        self.assertEqual(values.get('state'), 'INACTIVE')
+        self.assertFalse((self.root/'reset-confirmation').exists())
 
     def test_unavailable_counters_fall_back_to_rule_verification(self):
         result, values = self.run_bridge("inspect",

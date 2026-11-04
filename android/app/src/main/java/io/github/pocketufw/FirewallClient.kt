@@ -39,7 +39,8 @@ internal class FirewallClient(private val context: Context) {
         val ipv4Replies: Long? = null,
         val ipv6Replies: Long? = null,
         val checkedAt: Long = 0L,
-        val error: String? = null
+        val error: String? = null,
+        val lastManualResetAt: Long = 0L
     ) {
         val measured: Boolean
             get() = error == null && ipv4Blocked != null && ipv6Blocked != null &&
@@ -145,7 +146,7 @@ internal class FirewallClient(private val context: Context) {
     private fun bridge(action: String, args: List<String> = emptyList()): ShellResult {
         check(action in setOf("inspect", "enable", "disable",
             "enable-restore", "toggle", "toggle-restore",
-            "boot-enable", "boot-disable", "vpn-refresh", "set-ports", "use-auto"))
+            "boot-enable", "boot-disable", "vpn-refresh", "reset-counters", "set-ports", "use-auto"))
         check((action == "set-ports" && args.size == 3) ||
             (action != "set-ports" && args.isEmpty()))
         val path = File(engineDir, "android-bridge").absolutePath
@@ -240,7 +241,8 @@ internal class FirewallClient(private val context: Context) {
                     ipv4Blocked = counts[0], ipv6Blocked = counts[1],
                     ipv4Bytes = counts[2], ipv6Bytes = counts[3],
                     ipv4Replies = counts[4], ipv6Replies = counts[5],
-                    checkedAt = System.currentTimeMillis()
+                    checkedAt = System.currentTimeMillis(),
+                    lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L)
                 )
             }
         } else null
@@ -289,8 +291,13 @@ internal class FirewallClient(private val context: Context) {
         return (try {
             prepareEngine()
             val result = bridge(action, args)
-            val dashboard = dashboardFrom(result, vpn)
             val values = fields(result.text)
+            if (action == "reset-counters" && result.succeeded &&
+                values["operation"] == "SUCCESS" && values["state"] == "ACTIVE") {
+                preferences.edit()
+                    .putLong("last_counter_reset_at", System.currentTimeMillis()).apply()
+            }
+            val dashboard = dashboardFrom(result, vpn)
             val success = dashboard.snapshot.rootReady && values["operation"] == "SUCCESS"
             val message = if (!dashboard.snapshot.rootReady) {
                 "Root access is needed for this action."
@@ -328,6 +335,9 @@ internal class FirewallClient(private val context: Context) {
         performAction(if (enabled) "boot-enable" else "boot-disable")
 
     fun refreshVerifiedPorts(): Operation = performAction("vpn-refresh")
+
+    /** Reset ONLY PocketUFW-owned netfilter counters, with no rule changes. */
+    fun resetCounters(): Operation = performAction("reset-counters")
 
     private fun normalizeManualPort(value: String): String {
         val candidate = value.trim()

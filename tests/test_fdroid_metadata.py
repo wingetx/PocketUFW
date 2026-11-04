@@ -10,10 +10,10 @@ GRADLE = ROOT / "android/app/build.gradle.kts"
 
 
 class FDroidMetadataTests(unittest.TestCase):
-    def test_version_and_changelog_match_beta2(self):
+    def test_version_and_changelog_match_beta3(self):
         gradle = GRADLE.read_text()
-        self.assertRegex(gradle, r'versionCode\s*=\s*23\b')
-        self.assertIn('versionName = "0.1.0-beta2"', gradle)
+        self.assertRegex(gradle, r'versionCode\s*=\s*24\b')
+        self.assertIn('versionName = "0.1.0-beta3"', gradle)
         self.assertIn('applicationId = "io.github.pocketufw"', gradle)
         self.assertIn('namespace = "io.github.pocketufw"', gradle)
         self.assertNotIn('io.github.pocketufw.alpha', gradle)
@@ -23,7 +23,7 @@ class FDroidMetadataTests(unittest.TestCase):
         for script in ('boot-service', 'udp-config'):
             self.assertNotIn('io.github.pocketufw.alpha',
                              (ROOT / script).read_text())
-        notes = (META / "changelogs/23.txt").read_text()
+        notes = (META / "changelogs/24.txt").read_text()
         self.assertTrue(10 < len(notes.strip()) <= 500)
 
     def test_listing_is_present_and_accurate(self):

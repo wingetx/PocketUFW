@@ -3,7 +3,7 @@
 **A UFW-inspired inbound-only firewall beta for rooted Android.**
 
 PocketUFW is independent software, not UFW and not affiliated with Canonical.
-The version 0.1.0-beta1 release is intended for testing, not unattended or
+The version 0.1.0-beta3 release is intended for testing, not unattended or
 production security use. It uses Android's existing IPv4 and IPv6 kernel
 firewall, leaves outgoing traffic unchanged and provides one protection switch,
 readable rules, counters, optional one-shot Magisk boot restoration, and manual
@@ -17,6 +17,10 @@ for details and limitations.
 the app ID is `io.github.pocketufw`. The earlier beta1 used the
 temporary `io.github.pocketufw.alpha` ID. This one-time change
 requires uninstalling the old app before using the renamed version.
+
+**Beta3:** A manual **Reset counters** action zeroes only owned IPv4/IPv6
+packet counters, without restarting protection; a reduced-glow shield-penguin
+launcher image and a shield-only Quick Settings tile complete the beta polish.
 
 ## Design philosophy
 

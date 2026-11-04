@@ -430,6 +430,12 @@ private fun PocketScreen(client: FirewallClient) {
                                 val checked = DateFormat.getTimeInstance(DateFormat.SHORT)
                                     .format(Date(activity.checkedAt))
                                 Text("Last checked: " + checked, color = Muted, fontSize = 12.sp)
+                                if (activity.lastManualResetAt > 0L) {
+                                    val resetAt = DateFormat.getTimeInstance(DateFormat.SHORT)
+                                        .format(Date(activity.lastManualResetAt))
+                                    Text("Last manual counter reset: " + resetAt,
+                                        color = Muted, fontSize = 12.sp)
+                                }
                             } else {
                                 Text(
                                     activity?.error ?: "Waiting for the kernel counter read.",
@@ -446,7 +452,7 @@ private fun PocketScreen(client: FirewallClient) {
                                 color = Muted, fontSize = 12.sp)
                             Text(
                                 "These are real matches on PocketUFW rules, not detected attacks. " +
-                                    "Counts reset when rules are reinstalled. Earlier Android/OEM " +
+                                    "Counts reset on request or when rules are reinstalled. Earlier Android/OEM " +
                                     "rules or other interfaces may bypass these hooks.",
                                 color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                             )
@@ -455,6 +461,11 @@ private fun PocketScreen(client: FirewallClient) {
                                 enabled = !busy,
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("Refresh counters", fontSize = 13.sp) }
+                            OutlinedButton(
+                                onClick = { perform { client.resetCounters() } },
+                                enabled = !busy && active && state.rootReady,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Reset counters", fontSize = 13.sp) }
                         }
                     }
                 }

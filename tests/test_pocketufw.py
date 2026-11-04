@@ -24,6 +24,10 @@ case "$action" in
       iptables) dropped="${PUFW_TEST_DROP4:-0}"; replies="${PUFW_TEST_REPLIES4:-0}" ;;
       ip6tables) dropped="${PUFW_TEST_DROP6:-0}"; replies="${PUFW_TEST_REPLIES6:-0}" ;;
     esac
+    # Test-only persistent counters: reset must survive a CLI subprocess.
+    if [ -f "$state/$fam.counters" ]; then
+      read dropped replies < "$state/$fam.counters"
+    fi
     printf 'Chain %s (3 references)\n' "$name"
     printf '    pkts      bytes target     prot opt in out source destination\n'
     printf '      %s        500 ACCEPT     all  --  * * 0/0 0/0 ctstate ESTABLISHED,RELATED\n' "$replies"
@@ -50,8 +54,18 @@ case "$action" in
     [ -f "$file" ] || exit 1
     grep -Fqx -- "$*" "$file" ; exit $? ;;
 esac
-if [ -n "${PUFW_TEST_FAIL:-}" ] && [ "$action $name $*" = "$PUFW_TEST_FAIL" ]; then exit 7; fi
+if [ -n "${PUFW_TEST_FAIL:-}" ] &&
+   { [ "$action $name $*" = "$PUFW_TEST_FAIL" ] ||
+     [ "$action $name" = "$PUFW_TEST_FAIL" ]; } &&
+   { [ -z "${PUFW_TEST_FAIL_FAMILY:-}" ] || [ "$fam" = "$PUFW_TEST_FAIL_FAMILY" ]; }; then exit 7; fi
 case "$action" in
+  -Z)
+    [ -f "$file" ] || exit 1
+    case "$name" in POCKETUFW_IN|POCKETUFW_TS) : ;; *) exit 7 ;; esac
+    echo "$fam $name" >> "$state/zero_events"
+    if [ "$name" = POCKETUFW_IN ]; then
+      printf '0 0\n' > "$state/$fam.counters"
+    fi ;;
   -N)
     [ -f "$file" ] && exit 1
     : > "$file" ;;
@@ -573,6 +587,63 @@ class PocketUFWTests(unittest.TestCase):
         self.assertIn("Cannot read IPv4 counters", result.stderr)
         self.assertNotIn("ipv4_blocked=", result.stdout)
         self.assertEqual(self.run_cmd("disable").returncode, 0)
+
+    def test_reset_counters_only_owned_chains_no_rule_changes(self):
+        self.assertEqual(self.run_cmd('enable', '--tailscale-udp4', '46867',
+                                      '--tailscale-udp6', '43504').returncode, 0)
+        before = {
+            fam: {name: self.read(fam, name)
+                  for name in ('INPUT', 'POCKETUFW_IN', 'POCKETUFW_TS')}
+            for fam in ('iptables', 'ip6tables')
+        }
+        env = {'PUFW_TEST_DROP4': '120', 'PUFW_TEST_DROP6': '9',
+               'PUFW_TEST_REPLIES4': '600', 'PUFW_TEST_REPLIES6': '80'}
+        self.assertIn('ipv4_blocked=120', self.run_cmd('activity', extra_env=env).stdout)
+        reset = self.run_cmd('reset-counters', extra_env=env)
+        self.assertEqual(reset.returncode, 0, reset.stderr)
+        self.assertIn('owned counters reset', reset.stdout)
+        self.assertEqual(self.run_cmd('verify').stdout.strip(), 'ACTIVE')
+        counters = self.run_cmd('activity')
+        self.assertEqual(counters.returncode, 0, counters.stderr)
+        for name in ('ipv4_blocked', 'ipv6_blocked',
+                     'ipv4_established_replies', 'ipv6_established_replies'):
+            self.assertIn(f'{name}=0', counters.stdout)
+        self.assertEqual((self.base/'zero_events').read_text().splitlines(), [
+            'iptables POCKETUFW_IN', 'ip6tables POCKETUFW_IN',
+            'iptables POCKETUFW_TS', 'ip6tables POCKETUFW_TS'
+        ])
+        for fam, chains in before.items():
+            for name, original in chains.items():
+                self.assertEqual(self.read(fam, name), original)
+        self.assertEqual(self.run_cmd('disable').returncode, 0)
+
+    def test_reset_counters_refuses_inactive_and_degraded(self):
+        inactive = self.run_cmd('reset-counters')
+        self.assertNotEqual(inactive.returncode, 0)
+        self.assertIn('inactive or degraded', inactive.stderr)
+        self.assertFalse((self.base/'zero_events').exists())
+        self.assertEqual(self.run_cmd('enable').returncode, 0)
+        broken = self.base / 'ip6tables.POCKETUFW_IN'
+        broken.write_text(broken.read_text().replace('-j DROP\n', ''))
+        degraded = self.run_cmd('reset-counters')
+        self.assertNotEqual(degraded.returncode, 0)
+        self.assertFalse((self.base/'zero_events').exists())
+        self.assertEqual(self.run_cmd('disable').returncode, 0)
+
+    def test_reset_counters_partial_ipv6_failure_keeps_rules(self):
+        self.assertEqual(self.run_cmd('enable').returncode, 0)
+        original = self.read('iptables', 'INPUT')
+        failed = self.run_cmd('reset-counters', extra_env={
+            'PUFW_TEST_FAIL': '-Z POCKETUFW_IN',
+            'PUFW_TEST_FAIL_FAMILY': 'ip6tables'
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('IPv6 parent counter reset failed', failed.stderr)
+        self.assertEqual(self.read('iptables', 'INPUT'), original)
+        self.assertEqual(self.run_cmd('verify').stdout.strip(), 'ACTIVE')
+        self.assertEqual((self.base/'zero_events').read_text().splitlines(),
+                         ['iptables POCKETUFW_IN'])
+        self.assertEqual(self.run_cmd('disable').returncode, 0)
 
     def test_no_output_forward_changes(self):
         self.assertEqual(self.run_cmd('enable').returncode, 0)

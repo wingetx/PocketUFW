@@ -29,6 +29,7 @@ Usage:
   pocketufw status
   pocketufw verify
   pocketufw activity     # machine-readable live rule counters
+  pocketufw reset-counters   # zero owned counters without changing firewall rules
   pocketufw verbose      # human-readable status and kernel counters
   pocketufw plan [--auto-tailscale | --tailscale-udp4 PORT --tailscale-udp6 PORT]
   pocketufw enable [--auto-tailscale | --tailscale-udp4 PORT --tailscale-udp6 PORT]
@@ -50,7 +51,7 @@ check_port() {
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    doctor|status|verify|activity|verbose|plan|enable|refresh|get-ports|set-ports|disable)
+    doctor|status|verify|activity|reset-counters|verbose|plan|enable|refresh|get-ports|set-ports|disable)
       [ -z "$CMD" ] || fail 'Specify one command'; CMD="$1"; shift ;;
     --udp4|--udp6)
       opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port or none"
@@ -412,6 +413,21 @@ case "$CMD" in
       say 'DEGRADED'
       exit 4
     fi
+    ;;
+  reset-counters)
+    root_needed
+    prereqs
+    # Never reset Android/OEM INPUT or other managers' counters.
+    # Verify the complete owned grammar in BOTH address families first.
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Firewall inactive or degraded; no counters reset'
+    # Only PocketUFW's parent and Tailscale child chains are zeroed.
+    # These operations preserve each rule, hook, policy and VPN exception.
+    fw4 -Z "$CHAIN" || fail 'IPv4 parent counter reset failed'
+    fw6 -Z "$CHAIN" || fail 'IPv6 parent counter reset failed; IPv4 already reset'
+    fw4 -Z "$TSCHAIN" || fail 'IPv4 VPN counter reset failed; parent counters already reset'
+    fw6 -Z "$TSCHAIN" || fail 'IPv6 VPN counter reset failed; other owned counters already reset'
+    say 'PocketUFW: owned counters reset; newly arriving packets may already be counted.'
     ;;
   activity|verbose)
     root_needed

@@ -11,6 +11,12 @@ AN = "{http://schemas.android.com/apk/res/android}"
 
 
 class BrandingIconPackTests(unittest.TestCase):
+    def test_release_companion_iconpack_has_upgrade_version(self):
+        build = (PACK / "build.gradle.kts").read_text()
+        self.assertIn('applicationId = "io.github.pocketufw.neonicons"', build)
+        self.assertIn('versionCode = 2', build)
+        self.assertIn('versionName = "1.1"', build)
+
     def test_icon_pack_requires_no_permissions_or_services(self):
         manifest = ET.parse(PACK / "src/main/AndroidManifest.xml").getroot()
         self.assertEqual(manifest.findall("uses-permission"), [])

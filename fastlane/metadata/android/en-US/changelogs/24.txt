@@ -1,0 +1,1 @@
+Beta3: Reset PocketUFW-owned IPv4 and IPv6 kernel packet counters on demand without restarting the firewall or changing rules. Shows last manual reset time. Updated muted shield-carrying penguin launcher art and simplified Quick Settings tile to a shield icon. Root and kernel firewall requirements are unchanged.

@@ -64,31 +64,27 @@ class QuickSettingsContractTests(unittest.TestCase):
     def store_code(cls):
         return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/TileStatusStore.kt').read_text()
 
-    def test_quick_tile_is_circular_with_single_large_penguin_face(self):
+    def test_quick_tile_is_a_single_tint_safe_shield(self):
         import xml.etree.ElementTree as ET
         ns = '{http://schemas.android.com/apk/res/android}'
-        icon = PROJECT / 'android/app/src/main/res/drawable/penguin_quick_tile.xml'
+        icon = PROJECT / 'android/app/src/main/res/drawable/shield_quick_tile.xml'
         launcher = PROJECT / 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'
+        self.assertTrue(icon.exists())
+        self.assertFalse((icon.parent / 'penguin_quick_tile.xml').exists())
         root = ET.parse(icon).getroot()
         paths = root.findall('path')
-        self.assertEqual(len(paths), 2)
-        self.assertEqual(paths[0].attrib[ns + 'fillColor'], '#00000000')
-        self.assertEqual(paths[0].attrib[ns + 'strokeColor'], '#FFFFFFFF')
-        self.assertIn('M54,7 C28,7 8,28 8,54', paths[0].attrib[ns + 'pathData'])
-        self.assertEqual(paths[1].attrib[ns + 'fillColor'], '#FFFFFFFF')
-        self.assertEqual(paths[1].attrib[ns + 'fillType'], 'evenOdd')
-        face = paths[1].attrib[ns + 'pathData']
-        self.assertIn('M54,42 C46,29 32,32 28,46', face)
-        self.assertIn('M44.7,51 C44.7,53.8', face)
-        self.assertIn('M71.3,51 C71.3,53.8', face)
-        self.assertIn('M47.5,63 Q54,60 60.5,63', face)
-        self.assertEqual(face.count(' Z'), 4)
-        # Only QS icon changes; preserve the neon and themed launcher icon.
+        self.assertEqual(len(paths), 1)
+        for path in paths:
+            self.assertEqual(path.attrib[ns + 'fillColor'], '#00000000')
+            self.assertEqual(path.attrib[ns + 'strokeColor'], '#FFFFFFFF')
+        self.assertIn('M54,11 L89,24 L89,52', paths[0].attrib[ns + 'pathData'])
+        # The shield tile doesn't replace the themed/launcher penguin.
         self.assertIn('@drawable/penguin_monochrome', launcher.read_text())
-        self.assertIn('R.drawable.penguin_quick_tile', self.tile_code())
+        self.assertIn('R.drawable.shield_quick_tile', self.tile_code())
         services = self.root.findall('./application/service')
         self.assertEqual(services[0].attrib[ns + 'icon'],
-                         '@drawable/penguin_quick_tile')
+                         '@drawable/shield_quick_tile')
+
 
     def test_tile_unlocks_before_security_sensitive_toggle(self):
         code = self.tile_code()

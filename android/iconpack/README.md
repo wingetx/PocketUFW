@@ -12,6 +12,11 @@ and has no launcher entry or background service.
 The icon automatically maps to io.github.pocketufw.MainActivity.
 This separate pack does not alter installed Blaze or Android firewall state.
 
+Version 1.1.1 corrects transparent padding so the shield-holding penguin fills
+roughly 87% of its 512px icon canvas instead of appearing tiny in Niagara.
+Only the standalone icon pack changes. PocketUFW beta3's engine, firewall rules,
+boot handling, UI, and APK are unchanged.
+
 Version 1.1 refreshes the Neon penguin with a muted shield-holding design.
 The official companion APK is now built from the release variant and signed
 with PocketUFW's dedicated release key; it can update in place on future versions.

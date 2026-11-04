@@ -14,8 +14,23 @@ class BrandingIconPackTests(unittest.TestCase):
     def test_release_companion_iconpack_has_upgrade_version(self):
         build = (PACK / "build.gradle.kts").read_text()
         self.assertIn('applicationId = "io.github.pocketufw.neonicons"', build)
-        self.assertIn('versionCode = 2', build)
-        self.assertIn('versionName = "1.1"', build)
+        self.assertIn('versionCode = 3', build)
+        self.assertIn('versionName = "1.1.1"', build)
+
+    def test_neon_icon_art_fills_canvas_without_excess_transparency(self):
+        # Inspect the PNG alpha bounding box, not its nominal 512px canvas.
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest('Pillow not installed')
+        p = PACK / 'src/main/res/drawable-nodpi/pocketufw_neon.png'
+        image = Image.open(p).convert('RGBA')
+        alpha = image.getchannel('A')
+        bounds = alpha.getbbox()
+        self.assertEqual(image.size, (512, 512))
+        self.assertIsNotNone(bounds)
+        self.assertGreaterEqual(bounds[2] - bounds[0], 420)
+        self.assertGreaterEqual(bounds[3] - bounds[1], 420)
 
     def test_icon_pack_requires_no_permissions_or_services(self):
         manifest = ET.parse(PACK / "src/main/AndroidManifest.xml").getroot()

@@ -21,6 +21,25 @@ class LoadingUiContractTests(unittest.TestCase):
         self.assertNotIn('Switch(', code[loading:home])
         self.assertIn('checked = active', code[home:])
 
+    def test_counter_refresh_shows_feedback_and_does_not_trigger_full_inspection(self):
+        code = self.code
+        start = code.index('fun refreshCounters() {')
+        stop = code.index('val active = state.protection', start)
+        path = code[start:stop]
+        self.assertIn('client.refreshCounterActivity()', path)
+        self.assertNotIn('client.inspectDashboard()', path)
+        self.assertIn('counterRefreshing = true', path)
+        self.assertIn('counterRefreshing = false', path)
+        self.assertIn('finally {', path)
+        self.assertIn('if (fresh.measured)', path)
+        self.assertIn('Counters refreshed at', path)
+        self.assertIn('counterRefreshNote = fresh.error', path)
+        self.assertIn('DateFormat.MEDIUM', path)
+        self.assertIn('Text(if (counterRefreshing) "Refreshing…"', code)
+        self.assertIn('if (counterRefreshNote.isNotEmpty())', code)
+        self.assertIn('Last checked:', code)
+        self.assertIn('DateFormat.getTimeInstance(DateFormat.MEDIUM)', code)
+
     def test_boot_root_request_does_not_dim_other_switches(self):
         code = self.code
         firewall = code.index('checked = active,')

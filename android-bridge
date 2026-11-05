@@ -7,7 +7,7 @@ set -u
 [ "$#" -ge 1 ] || exit 2
 ACTION="$1"
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters)
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters)
     [ "$#" -eq 1 ] || exit 2 ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
@@ -34,6 +34,24 @@ ENGINE="$BASE/pocketufw"
 BOOT="$BASE/bootctl"
 CONFIG="$BASE/udp-config"
 [ -r "$ENGINE" ] && [ -r "$BOOT" ] && [ -r "$CONFIG" ] || exit 4
+
+# Fast, read-only counter refresh. The engine itself verifies both families,
+# their owned rules and hooks before reading kernel counters. Do not query
+# boot status, saved UDP policy, or the verbose rules report for a button tap.
+if [ "$ACTION" = counters ]; then
+  snapshot=$(sh "$ENGINE" activity 2>/dev/null) || {
+    echo 'error=Live kernel counters are unavailable; firewall rules were not changed.'
+    exit 5
+  }
+  case "$snapshot" in
+    'state=ACTIVE'*)
+      printf 'root=GRANTED\n%s\n' "$snapshot"
+      exit 0 ;;
+    *)
+      echo 'error=Firewall is not active or its policy could not be verified.'
+      exit 5 ;;
+  esac
+fi
 
 # A verified saved choice takes precedence over automatic Tailscale discovery.
 # This is app-owned device-protected data, removed by Android on uninstall.

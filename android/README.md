@@ -1,17 +1,27 @@
 # PocketUFW Android beta
 
-**0.1.0-beta3 (versionCode 24)** is a testing release of the one-switch
+**0.1.0-beta4 (versionCode 25)** is a testing release of the one-switch
 Android root firewall, not a production security guarantee. Pixel 9a and
 Moto G 5G (2024) have been hardware tested; other Android variants may
 behave differently. Root and legacy iptables/ip6tables support are required.
 
-For F-Droid, the simplest route is source-tagged builds signed by F-Droid
-itself. This avoids creating a separate developer signing key. The app
-currently installed on Frankenpixel is debug-signed; moving to an
-F-Droid-signed build may require uninstalling an app signed with a different certificate, which clears
-PocketUFW's own saved preferences. Turn protection off first to disarm the
-Magisk boot hook and remove the owned rules. Tailscale and WireGuard
-configurations belong to their own applications and are not removed.
+For F-Droid, the simplest route is source-tagged builds signed by F-Droid.
+The published GitHub beta2 and newer APKs use PocketUFW's release signing
+certificate. A future F-Droid-signed build may use a different certificate,
+which Android cannot update in place without an intentional migration.
+Uninstalling the firewall app clears its private saved settings, so disable
+protection first to disarm Magisk boot restoration and remove owned rules.
+Tailscale and WireGuard configurations belong to their own applications.
+
+## Beta4: counter refresh UI reliability
+
+The Home screen's **Refresh counters** button now performs one dedicated
+read-only root operation (engine 'activity') instead of the full dashboard
+inspection with boot and verbose rules reporting. The button shows
+"Refreshing…" while running, reports success or failure explicitly, and
+shows Last checked including seconds. Failed or malformed reads preserve the
+last valid measurement, never silently replacing counters with zeroes. No
+firewall policies, VPN rules, boot hooks, or counters are modified by refresh.
 
 ## Beta3: safe counter reset and visual cleanup
 

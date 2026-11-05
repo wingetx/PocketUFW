@@ -146,7 +146,8 @@ internal class FirewallClient(private val context: Context) {
     private fun bridge(action: String, args: List<String> = emptyList()): ShellResult {
         check(action in setOf("inspect", "enable", "disable",
             "enable-restore", "toggle", "toggle-restore",
-            "boot-enable", "boot-disable", "vpn-refresh", "reset-counters", "set-ports", "use-auto"))
+            "boot-enable", "boot-disable", "vpn-refresh", "reset-counters",
+            "counters", "set-ports", "use-auto"))
         check((action == "set-ports" && args.size == 3) ||
             (action != "set-ports" && args.isEmpty()))
         val path = File(engineDir, "android-bridge").absolutePath
@@ -192,6 +193,46 @@ internal class FirewallClient(private val context: Context) {
         return RuleFamily(policy, hooks, inbound, vpn)
     }
 
+    /** Parse only complete, nonnegative counters. Never invent zeroes on failure. */
+    private fun parseCounterActivity(values: Map<String, String>): RuleActivity {
+        val keys = listOf("ipv4_blocked", "ipv6_blocked",
+            "ipv4_blocked_bytes", "ipv6_blocked_bytes",
+            "ipv4_established_replies", "ipv6_established_replies")
+        val counts = keys.map { key ->
+            values[key]?.toLongOrNull()?.takeIf { it >= 0L }
+        }
+        if (counts.any { it == null }) {
+            return RuleActivity(error = "Kernel counters are unavailable or malformed.")
+        }
+        return RuleActivity(
+            ipv4Blocked = counts[0], ipv6Blocked = counts[1],
+            ipv4Bytes = counts[2], ipv6Bytes = counts[3],
+            ipv4Replies = counts[4], ipv6Replies = counts[5],
+            checkedAt = System.currentTimeMillis(),
+            lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L)
+        )
+    }
+
+    /** Read-only, one-root-session refresh. Does not inspect boot/VPN or modify rules. */
+    fun refreshCounterActivity(): RuleActivity = try {
+        prepareEngine()
+        val result = bridge("counters")
+        val values = fields(result.text)
+        if (result.succeeded && values["root"] == "GRANTED" &&
+            values["state"] == "ACTIVE") {
+            parseCounterActivity(values)
+        } else {
+            RuleActivity(error = values["error"] ?: if (!result.succeeded) {
+                "Could not read live kernel counters. Existing counts were kept."
+            } else {
+                "Firewall counters could not be verified. Existing counts were kept."
+            })
+        }
+    } catch (e: Exception) {
+        RuleActivity(error = "Counter refresh failed: " +
+            (e.message ?: "unknown error") + ". Existing counts were kept.")
+    }
+
     private fun dashboardFrom(result: ShellResult, vpn: Boolean): Dashboard {
         val values = fields(result.text)
         val rootGranted = result.succeeded && values["root"] == "GRANTED"
@@ -226,26 +267,8 @@ internal class FirewallClient(private val context: Context) {
             Protection.CHECKING -> "Checking the firewall."
         }
 
-        // Missing / malformed counters are unavailable, not fictitious zeros.
-        val activity = if (protection == Protection.ACTIVE) {
-            val keys = listOf("ipv4_blocked", "ipv6_blocked",
-                "ipv4_blocked_bytes", "ipv6_blocked_bytes",
-                "ipv4_established_replies", "ipv6_established_replies")
-            val counts = keys.map { key ->
-                values[key]?.toLongOrNull()?.takeIf { it >= 0L }
-            }
-            if (counts.any { it == null }) {
-                RuleActivity(error = "Kernel counters are unavailable or malformed.")
-            } else {
-                RuleActivity(
-                    ipv4Blocked = counts[0], ipv6Blocked = counts[1],
-                    ipv4Bytes = counts[2], ipv6Bytes = counts[3],
-                    ipv4Replies = counts[4], ipv6Replies = counts[5],
-                    checkedAt = System.currentTimeMillis(),
-                    lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L)
-                )
-            }
-        } else null
+        val activity = if (protection == Protection.ACTIVE) parseCounterActivity(values)
+            else null
 
         val policyReport = if (rootGranted && values["rules_report"] == "READY") {
             val four = kernelFamily(values, 4)

@@ -1,0 +1,1 @@
+Beta4: Fixed the Refresh counters button with a dedicated read-only kernel counter path, visible Refreshing state, second-precision Last checked time, and explicit success or failure feedback. Firewall policy, VPN exceptions, counter reset and boot restoration are unchanged.\n

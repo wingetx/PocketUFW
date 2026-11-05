@@ -92,6 +92,9 @@ private fun PocketScreen(client: FirewallClient) {
     var failed by remember { mutableStateOf(false) }
     var activityExpanded by remember { mutableStateOf(false) }
     var counters by remember { mutableStateOf<FirewallClient.RuleActivity?>(null) }
+    var counterRefreshing by remember { mutableStateOf(false) }
+    var counterRefreshNote by remember { mutableStateOf("") }
+    var counterRefreshError by remember { mutableStateOf(false) }
     var kernelReport by remember { mutableStateOf<FirewallClient.KernelReport?>(null) }
     var selectedTab by remember { mutableStateOf(PocketTab.HOME) }
     val scrollState = rememberScrollState()
@@ -134,16 +137,33 @@ private fun PocketScreen(client: FirewallClient) {
         }
     }
 
-    // One intentional root request refreshes rules, boot status, and counters.
+    // Counter-only root read: never reset packet counts or reconfigure the firewall.
     fun refreshCounters() {
         if (busy || state.protection != FirewallClient.Protection.ACTIVE) return
         busy = true
+        counterRefreshing = true
+        counterRefreshNote = ""
         scope.launch {
-            val dashboard = withContext(Dispatchers.IO) { client.inspectDashboard() }
-            state = dashboard.snapshot
-            counters = dashboard.activity
-            kernelReport = dashboard.kernelReport
-            busy = false
+            try {
+                val fresh = withContext(Dispatchers.IO) { client.refreshCounterActivity() }
+                if (fresh.measured) {
+                    counters = fresh
+                    counterRefreshError = false
+                    val whenChecked = DateFormat.getTimeInstance(DateFormat.MEDIUM)
+                        .format(Date(fresh.checkedAt))
+                    counterRefreshNote = "Counters refreshed at $whenChecked"
+                } else {
+                    // Preserve the last verified measurement instead of showing zeros.
+                    counterRefreshError = true
+                    counterRefreshNote = fresh.error ?: "Counter refresh failed; previous counts kept."
+                }
+            } catch (e: Exception) {
+                counterRefreshError = true
+                counterRefreshNote = "Counter refresh failed; previous counts kept."
+            } finally {
+                counterRefreshing = false
+                busy = false
+            }
         }
     }
 
@@ -427,7 +447,7 @@ private fun PocketScreen(client: FirewallClient) {
                                     fmt.format(activity.ipv6Blocked ?: 0L) + " packets", true)
                                 StatusLine("Established replies accepted",
                                     fmt.format(activity.totalReplies ?: 0L) + " packets", true)
-                                val checked = DateFormat.getTimeInstance(DateFormat.SHORT)
+                                val checked = DateFormat.getTimeInstance(DateFormat.MEDIUM)
                                     .format(Date(activity.checkedAt))
                                 Text("Last checked: " + checked, color = Muted, fontSize = 12.sp)
                                 if (activity.lastManualResetAt > 0L) {
@@ -458,9 +478,17 @@ private fun PocketScreen(client: FirewallClient) {
                             )
                             OutlinedButton(
                                 onClick = { refreshCounters() },
-                                enabled = !busy,
+                                enabled = !busy && active && state.rootReady,
                                 modifier = Modifier.fillMaxWidth()
-                            ) { Text("Refresh counters", fontSize = 13.sp) }
+                            ) {
+                                Text(if (counterRefreshing) "Refreshing…" else "Refresh counters",
+                                    fontSize = 13.sp)
+                            }
+                            if (counterRefreshNote.isNotEmpty()) {
+                                Text(counterRefreshNote,
+                                    color = if (counterRefreshError) Amber else Mint,
+                                    fontSize = 12.sp, lineHeight = 17.sp)
+                            }
                             OutlinedButton(
                                 onClick = { perform { client.resetCounters() } },
                                 enabled = !busy && active && state.rootReady,

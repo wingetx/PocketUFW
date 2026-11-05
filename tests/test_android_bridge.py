@@ -120,6 +120,44 @@ class AndroidBridgeTests(unittest.TestCase):
     def log_lines(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
 
+    def test_counter_refresh_is_read_only_and_skips_heavy_dashboard_work(self):
+        result, values = self.run_bridge("counters")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values["root"], "GRANTED")
+        self.assertEqual(values["state"], "ACTIVE")
+        self.assertEqual(values["ipv4_blocked"], "41")
+        self.assertEqual(values["ipv6_blocked"], "8")
+        self.assertEqual(values["ipv4_established_replies"], "900")
+        self.assertEqual(values["ipv6_established_replies"], "25")
+        self.assertNotIn("boot", values)
+        self.assertNotIn("rules_report", values)
+        self.assertNotIn("operation", values)
+        self.assertEqual(self.log_lines(), ["engine:activity"])
+
+    def test_counter_refresh_fails_without_synthetic_counts_when_unavailable(self):
+        result, values = self.run_bridge("counters",
+                                         {"TEST_ENGINE_ACTIVITY_FAIL": "1"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("error", values)
+        self.assertNotIn("ipv4_blocked", values)
+        self.assertNotIn("root", values)
+        self.assertEqual(self.log_lines(), ["engine:activity"])
+
+    def test_counter_refresh_inactive_fails_closed_without_mutating_rules(self):
+        self.state.write_text("INACTIVE\n")
+        result, values = self.run_bridge("counters")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("error", values)
+        self.assertNotIn("ipv6_blocked", values)
+        self.assertEqual(self.log_lines(), ["engine:activity"])
+        self.assertEqual(self.state.read_text(), "INACTIVE\n")
+
+    def test_counter_refresh_rejects_arguments_before_root(self):
+        result, values = self.run_bridge("counters", args=("disable",))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log_lines(), [])
+        self.assertNotIn("root", values)
+
     def test_inspection_reads_state_boot_and_counters_in_one_call(self):
         result, values = self.run_bridge("inspect")
         self.assertEqual(result.returncode, 0, result.stderr)

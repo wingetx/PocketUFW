@@ -97,6 +97,9 @@ def _ip_info(raw: bytes):
 def _nflog_payload(record: bytes, endian: str):
     if len(record) < 4 or record[1] != 0:
         raise ValueError("invalid NFLOG header/version")
+    # nfgenmsg.res_id uses network byte order, independent of PCAP byte order.
+    if struct.unpack_from("!H", record, 2)[0] != 17:
+        return None
     offset = 4
     marker = None
     payload = None
@@ -112,11 +115,18 @@ def _nflog_payload(record: bytes, endian: str):
         offset += (size + 3) & ~3
     if offset != len(record):
         raise ValueError("truncated NFLOG attributes")
-    if marker != MARKER:
+    if marker == MARKER:
+        reason = "UNSPECIFIED"  # prior diagnostic captures
+    elif marker and marker.startswith(MARKER + b":"):
+        parts = marker.split(b":")
+        if len(parts) != 3 or not parts[1].isdigit() or parts[2] not in (b"I", b"F"):
+            return None
+        reason = "INVALID" if parts[2] == b"I" else "FINAL"
+    else:
         return None
     if payload is None:
         raise ValueError("marked NFLOG record without IP payload")
-    return payload
+    return payload, reason
 
 
 def summarize(stream: BinaryIO) -> dict:
@@ -150,15 +160,16 @@ def summarize(stream: BinaryIO) -> dict:
         if inspected > MAX_RECORDS:
             raise CaptureError("too many packet records; use a shorter capture")
         try:
-            ip = _nflog_payload(record, endian)
-            if ip is None:
+            sample = _nflog_payload(record, endian)
+            if sample is None:
                 mismatched += 1
                 continue
+            ip, reason = sample
             fam, src, dst, proto, port, size = _ip_info(ip)
         except ValueError:
             malformed += 1
             continue
-        key = (fam, src, dst, proto, port)
+        key = (fam, src, dst, proto, port, reason)
         if key not in groups and len(groups) >= 4096:
             raise CaptureError("too many distinct flows; use a shorter capture")
         entry = groups[key]
@@ -168,12 +179,12 @@ def summarize(stream: BinaryIO) -> dict:
         sources[(fam, src)][0] += 1
         sources[(fam, src)][1] += size
     top_flows = []
-    for (fam, src, dst, proto, port), (count, size, last) in sorted(
+    for (fam, src, dst, proto, port, reason), (count, size, last) in sorted(
         groups.items(), key=lambda x: (-x[1][0], -x[1][1], str(x[0]))
     ):
         top_flows.append({
             "family": fam, "source": src, "destination": dst,
-            "protocol": proto, "destination_port": port,
+            "protocol": proto, "destination_port": port, "drop_rule": reason,
             "sampled_packets": count, "sampled_ip_bytes": size,
             "last_seen_utc": dt.datetime.fromtimestamp(last, dt.timezone.utc).isoformat(),
         })
@@ -223,7 +234,7 @@ def main() -> int:
         for row in report["top_flows"]:
             port = row["destination_port"] if row["destination_port"] is not None else "-"
             print(f"{row['sampled_packets']:>6} {row['sampled_ip_bytes']:>10}B  "
-                  f"IPv{row['family']} {row['protocol']} {row['source']} -> "
+                  f"IPv{row['family']} {row['protocol']} [{row['drop_rule']}] {row['source']} -> "
                   f"{row['destination']}:{port}  last={row['last_seen_utc']}")
     return 0
 

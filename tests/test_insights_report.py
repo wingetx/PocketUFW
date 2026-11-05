@@ -90,15 +90,37 @@ class InsightsReportTests(unittest.TestCase):
         self.assertEqual(r["samples_counted"], 0)
         self.assertEqual(r["unrelated_packets"], 1)
 
+    def test_wrong_nf_log_group_is_not_our_evidence(self):
+        sample = bytearray(packet(ip4(), marker=b"PUFW_INSIGHTS:1234:F"))
+        sample[3] = 22
+        r = self.summary([bytes(sample)])
+        self.assertEqual(r["samples_counted"], 0)
+        self.assertEqual(r["unrelated_packets"], 1)
+
     def test_corrupt_tlv_is_reported_not_counted(self):
         r = self.summary([packet(ip4(), bad_attr=struct.pack("<HH", 800, 9) + b"\0")])
         self.assertEqual(r["samples_counted"], 0)
         self.assertEqual(r["unreadable_packets"], 1)
 
     def test_missing_payload_is_reported(self):
-        data = b"\x02\0\0\0" + attribute("<", 10, insights.MARKER + b"\0")
+        data = b"\x02\0\0\x11" + attribute("<", 10, insights.MARKER + b"\0")
         r = self.summary([data])
         self.assertEqual(r["unreadable_packets"], 1)
+
+    def test_session_specific_tagged_drop_points(self):
+        invalid = packet(ip4(), marker=b"PUFW_INSIGHTS:1234:I")
+        final = packet(ip4(), marker=b"PUFW_INSIGHTS:1234:F")
+        report = self.summary([invalid, final])
+        self.assertEqual(report["samples_counted"], 2)
+        self.assertEqual({f["drop_rule"] for f in report["top_flows"]}, {"INVALID", "FINAL"})
+        self.assertEqual({f["sampled_packets"] for f in report["top_flows"]}, {1})
+
+    def test_malformed_or_unrelated_session_tag_does_not_count(self):
+        records = [packet(ip4(), marker=p) for p in
+                   (b"PUFW_INSIGHTS:who:F", b"PUFW_INSIGHTS:123:Z", b"PUFW_INSIGHTS:12:F:extra")]
+        report = self.summary(records)
+        self.assertEqual(report["unrelated_packets"], 3)
+        self.assertEqual(report["samples_counted"], 0)
 
     def test_big_endian_capture(self):
         r = self.summary([packet(ip4(), endian=">")], endian=">")

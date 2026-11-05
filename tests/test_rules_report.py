@@ -24,9 +24,13 @@ case "$chain" in
       echo '-P INPUT DROP'
     fi
     echo '-A INPUT -j unrelated_oem_chain'
-    echo '-A INPUT -i wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN'
-    echo '-A INPUT -i rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
-    echo '-A INPUT -i v4-rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
+    if [ "$fam" = iptables ]; then printf '%s' "${TEST_INPUT_BEFORE4:-}"; else printf '%s' "${TEST_INPUT_BEFORE6:-}"; fi
+    if [ "${TEST_NO_HOOKS:-0}" = 0 ]; then
+      echo '-A INPUT -i wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN'
+      echo '-A INPUT -i rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
+      echo '-A INPUT -i v4-rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
+    fi
+    printf '%s' "${TEST_INPUT_AFTER:-}"
     ;;
   POCKETUFW_IN)
     echo '-N POCKETUFW_IN'
@@ -101,6 +105,55 @@ class RuleReportTests(unittest.TestCase):
         self.assertIn("vpn4_01=-A POCKETUFW_TS -p udp --dport 41641", result.stdout)
         self.assertIn("vpn6_01=-A POCKETUFW_TS -p udp --dport 51233", result.stdout)
         self.assertNotIn("unrelated_oem_chain", result.stdout)
+
+    REAL_ANDROID_INPUT = ('-A INPUT -j oem_in\n-A INPUT -j bw_INPUT\n-A INPUT -j fw_INPUT\n'
+                          '-A INPUT -j nm_mdnsd_block\n-A INPUT -j pl_INPUT\n')
+
+    def report_lines(self, prefix, **changes):
+        result = self.run_report(**changes)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], 'rules_report=READY')
+        return [line for line in result.stdout.splitlines() if line.startswith(prefix)]
+
+    def test_real_android_input_chains_are_not_flagged(self):
+        self.assertEqual(self.report_lines('input_bypass', TEST_INPUT_BEFORE4=self.REAL_ANDROID_INPUT,
+                                           TEST_INPUT_BEFORE6=self.REAL_ANDROID_INPUT), [])
+
+    def test_earlier_accept_rules_are_reported_per_family_and_in_order(self):
+        lines = self.report_lines(
+            'input_bypass',
+            TEST_INPUT_BEFORE4=self.REAL_ANDROID_INPUT + '-A INPUT -i wlan0 -j ACCEPT\n-A INPUT -p tcp --dport 22 -j ACCEPT\n',
+            TEST_INPUT_BEFORE6='-A INPUT -j ACCEPT\n')
+        self.assertEqual(lines, ['input_bypass4_01=-A INPUT -i wlan0 -j ACCEPT',
+                                 'input_bypass4_02=-A INPUT -p tcp --dport 22 -j ACCEPT',
+                                 'input_bypass6_01=-A INPUT -j ACCEPT'])
+
+    def test_accept_rules_after_the_first_hook_are_not_a_bypass(self):
+        self.assertEqual(self.report_lines('input_bypass', TEST_INPUT_AFTER='-A INPUT -i wlan0 -j ACCEPT\n'), [])
+
+    def test_only_a_final_accept_target_is_flagged(self):
+        before = ('-A INPUT -m comment --comment "-j ACCEPT here" -j oem_in\n'
+                  '-A INPUT -i wlan0 -j DROP\n'
+                  '-A INPUT -j ACCEPTANCE\n'
+                  '-A OTHER -j ACCEPT\n')
+        self.assertEqual(self.report_lines('input_bypass', TEST_INPUT_BEFORE4=before), [])
+
+    def test_no_hook_means_nothing_can_be_bypassed(self):
+        before = '-A INPUT -i wlan0 -j ACCEPT\n'
+        self.assertEqual(self.report_lines('input_bypass', TEST_NO_HOOKS=1, TEST_INPUT_BEFORE4=before,
+                                           TEST_INPUT_BEFORE6=before), [])
+
+    def test_too_many_earlier_accept_rules_refuses_a_complete_claim(self):
+        rule = '-A INPUT -i wlan0 -j ACCEPT\n'
+        self.assertEqual(len(self.report_lines('input_bypass', TEST_INPUT_BEFORE4=rule * 6)), 6)
+        result = self.run_report(TEST_INPUT_BEFORE4=rule * 7)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('rules_report=READY', result.stdout)
+
+    def test_overlong_earlier_accept_rule_refuses_a_complete_claim(self):
+        result = self.run_report(TEST_INPUT_BEFORE4='-A INPUT -m comment --comment ' + 'x' * 200 + ' -j ACCEPT\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('rules_report=READY', result.stdout)
 
     def test_read_only_commands_only(self):
         self.assertEqual(self.run_report().returncode, 0)

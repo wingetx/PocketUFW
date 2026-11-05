@@ -70,6 +70,19 @@ class UdpConfigTests(unittest.TestCase):
         self.assertNotEqual(self.run_cli('clear').returncode, 0)
         self.assertEqual(target.read_text(), 'keep me')
 
+    def test_symlinked_directory_refused_without_touching_its_target(self):
+        real = self.root / 'somewhere-else'
+        real.mkdir()
+        saved = real / 'udp-committed.conf'
+        saved.write_text('udp4=41476\nudp6=none\n')
+        link = self.root / 'linked'
+        link.symlink_to(real)
+        self.env['POCKETUFW_CONFIG_DIR'] = str(link)
+        for command in (('read',), ('write', '45678', 'none'), ('clear',)):
+            with self.subTest(command=command[0]):
+                self.assertNotEqual(self.run_cli(*command).returncode, 0)
+                self.assertEqual(saved.read_text(), 'udp4=41476\nudp6=none\n')
+
 
 if __name__ == '__main__':
     unittest.main()

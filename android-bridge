@@ -6,8 +6,16 @@ set -u
 
 [ "$#" -ge 1 ] || exit 2
 ACTION="$1"
+# Optionally, a toggle states what its caller was showing: see below.
+SHOWN=''
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters)
+  toggle|toggle-restore)
+    if [ "$#" -eq 2 ]; then
+      case "$2" in ACTIVE|INACTIVE) SHOWN="$2"; shift ;; *) exit 2 ;; esac
+    fi ;;
+esac
+case "$ACTION" in
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial)
     [ "$#" -eq 1 ] || exit 2 ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
@@ -84,6 +92,14 @@ restore_config() {
   fi
 }
 
+# STALE means armed but running older copies, so for every decision it is
+# ENABLED. The refresh happens at the final read below, and Kotlin never sees it.
+read_boot_status() {
+  boot_status=$(sh "$BOOT" status 2>/dev/null) || boot_status='boot=UNKNOWN'
+  [ "$boot_status" != boot=STALE ] || boot_status='boot=ENABLED'
+  printf '%s\n' "$boot_status"
+}
+
 outcome='NONE'
 message=''
 created_now=0
@@ -95,67 +111,102 @@ case "$ACTION" in
   toggle|toggle-restore)
     requested="$ACTION"
     live=$(sh "$ENGINE" verify 2>/dev/null) || :
-    case "$live" in
-      ACTIVE) ACTION=disable ;;
-      INACTIVE)
-        if [ "$requested" = toggle-restore ]; then ACTION=enable-restore
-        else ACTION=enable; fi
-        ;;
-      *)
-        ACTION=inspect
-        outcome='FAILED'
-        message='Cannot toggle: live firewall state is degraded or unknown. Open the app.'
-        ;;
-    esac
+    # A tap on an out-of-date tile must not do the opposite of what it showed.
+    if [ -n "$SHOWN" ] && [ "$live" != "$SHOWN" ]; then
+      ACTION=inspect
+      outcome='FAILED'
+      message='Firewall state had changed, so nothing was toggled. Status updated.'
+    else
+      case "$live" in
+        ACTIVE) ACTION=disable ;;
+        INACTIVE)
+          if [ "$requested" = toggle-restore ]; then ACTION=enable-restore
+          else ACTION=enable; fi
+          ;;
+        *)
+          ACTION=inspect
+          outcome='FAILED'
+          message='Cannot toggle: live firewall state is degraded or unknown. Open the app.'
+          ;;
+      esac
+    fi
+    ;;
+  remove-partial)
+    # Only a firewall that is partial right now may be removed by this request.
+    live=$(sh "$ENGINE" verify 2>/dev/null) || :
+    if [ "$live" = DEGRADED ]; then
+      ACTION=disable
+    else
+      ACTION=inspect
+      outcome='FAILED'
+      message='Firewall state had changed, so nothing was removed. Status updated.'
+    fi
     ;;
 esac
 
 case "$ACTION" in
   inspect) ;;
   enable|enable-restore)
+    # The firewall must never depend on Tailscale or saved ports: those problems
+    # can only withhold the UDP exceptions, and the user is told so.
+    set -- enable
+    enable_note=''
     if ! read_config; then
-      outcome='FAILED'
-      message='Saved UDP policy is unavailable or invalid; firewall not modified.'
+      enable_note='Firewall enabled without saved UDP exceptions because the saved settings could not be read.'
+    elif [ "$MODE" = AUTOMATIC ]; then
+      set -- "$@" --auto-tailscale
     else
-      set -- enable
-      if [ "$MODE" = AUTOMATIC ]; then
-        set -- "$@" --auto-tailscale
-      else
-        [ "$SAVED4" = none ] || set -- "$@" --tailscale-udp4 "$SAVED4"
-        [ "$SAVED6" = none ] || set -- "$@" --tailscale-udp6 "$SAVED6"
-      fi
-    if sh "$ENGINE" "$@" >/dev/null 2>&1; then
+      [ "$SAVED4" = none ] || set -- "$@" --tailscale-udp4 "$SAVED4"
+      [ "$SAVED6" = none ] || set -- "$@" --tailscale-udp6 "$SAVED6"
+    fi
+    if enable_output=$(sh "$ENGINE" "$@" 2>/dev/null); then
       created_now=1
-      if [ "$ACTION" = enable-restore ]; then
-        if sh "$BOOT" enable >/dev/null 2>&1; then
-          outcome='SUCCESS'
-          message='Firewall enabled; boot restoration resumed.'
-        else
-          outcome='FAILED'
-          message='Firewall enabled, but boot restoration could not be rearmed.'
-        fi
-      else
-        outcome='SUCCESS'
-        message='Firewall enabled.'
-      fi
+      case "$enable_output" in
+        *tailscale_probe=FAILED*)
+          enable_note='Firewall enabled. Tailscale ports could not be verified, so no VPN exception was added. Use Refresh Tailscale ports later.' ;;
+      esac
+      enabled=1
+    elif [ "$(sh "$ENGINE" verify 2>/dev/null)" = ACTIVE ]; then
+      # A concurrent request got there first. Those rules are not ours to roll back.
+      enable_note='Firewall is already on.'
+      enabled=1
     else
+      enabled=0
+    fi
+    if [ "$enabled" -ne 1 ]; then
       outcome='FAILED'
       message='Cannot enable firewall. Check other rules or VPN configuration.'
-    fi
+    elif [ "$ACTION" = enable-restore ]; then
+      if sh "$BOOT" enable >/dev/null 2>&1; then
+        outcome='SUCCESS'
+        message="${enable_note:-Firewall enabled; boot restoration resumed.}"
+      else
+        outcome='FAILED'
+        message='Firewall enabled, but boot restoration could not be rearmed.'
+      fi
+    else
+      outcome='SUCCESS'
+      message="${enable_note:-Firewall enabled.}"
     fi
     ;;
   disable)
     # Remember whether the user opted into boot restoration so Kotlin can
     # honor that preference after a temporary tile or Home-switch OFF.
-    previous_boot=$(sh "$BOOT" status 2>/dev/null) || previous_boot='UNKNOWN'
+    previous_boot=$(read_boot_status)
     previous_boot=${previous_boot#boot=}
-    # The off switch must also disarm any Magisk boot hook.
-    if ! sh "$BOOT" disable >/dev/null 2>&1; then
+    # The off switch must also disarm any Magisk boot hook, except that a hook
+    # path owned by another module is not ours to touch and must not keep the
+    # firewall on.
+    if [ "$previous_boot" != CONFLICT ] && ! sh "$BOOT" disable >/dev/null 2>&1; then
       outcome='FAILED'
       message='Boot restoration could not be disabled; firewall left unchanged.'
     elif sh "$ENGINE" disable >/dev/null 2>&1; then
       outcome='SUCCESS'
-      message='Firewall disabled; boot restoration removed.'
+      if [ "$previous_boot" = CONFLICT ]; then
+        message='Firewall disabled. Another module owns the boot hook path, so it was left alone.'
+      else
+        message='Firewall disabled; boot restoration removed.'
+      fi
     else
       outcome='FAILED'
       message='Could not remove all firewall rules; inspect status.'
@@ -194,7 +245,7 @@ case "$ACTION" in
       message='Saved UDP policy is invalid; automatic refresh refused.'
     elif [ "$MODE" = COMMITTED ]; then
       outcome='FAILED'
-      message='Committed UDP exceptions are active. Use the Status editor to change them or return to automatic detection.'
+      message='Committed UDP exceptions are active. Use the VPN UDP exceptions editor to change them or return to automatic detection.'
     elif refresh_output=$(sh "$ENGINE" refresh 2>/dev/null); then
       # The engine reports a result only after a successful refresh. Do not
       # claim a change if the listener ports were already installed.
@@ -232,7 +283,7 @@ case "$ACTION" in
         outcome='FAILED'
         message='Could not save committed UDP exceptions; attempted to restore previous live ports.'
       else
-        current_boot=$(sh "$BOOT" status 2>/dev/null) || current_boot='boot=UNKNOWN'
+        current_boot=$(read_boot_status)
         if [ "$current_boot" != boot=ENABLED ] && [ "$current_boot" != boot=DISABLED ] &&
            [ "$current_boot" != boot=UNSUPPORTED ]; then
           restore_config || :
@@ -286,6 +337,18 @@ case "$state" in
     ;;
 esac
 boot=$(sh "$BOOT" status 2>/dev/null) || :
+if [ "$boot" = boot=STALE ]; then
+  if [ "$state" != ACTIVE ]; then
+    # Installing requires a verified firewall; the opt-in itself still stands.
+    boot='boot=ENABLED'
+  elif ! sh "$BOOT" enable >/dev/null 2>&1; then
+    boot='boot=DEGRADED'
+  else
+    # Touches only root-owned boot files, never firewall rules.
+    boot=$(sh "$BOOT" status 2>/dev/null) || :
+    [ "$boot" != boot=STALE ] || boot='boot=DEGRADED'
+  fi
+fi
 case "$boot" in
   boot=ENABLED|boot=DISABLED|boot=UNSUPPORTED|boot=DEGRADED|boot=CONFLICT) : ;;
   *) boot='boot=UNKNOWN' ;;
@@ -296,7 +359,14 @@ if [ "$outcome" = 'SUCCESS' ]; then
   case "$ACTION" in
     enable) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
     enable-restore) [ "$state" = ACTIVE ] && [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
-    disable) [ "$state" = INACTIVE ] && [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
+    disable)
+      if [ "$previous_boot" = CONFLICT ]; then
+        [ "$state" = INACTIVE ] && [ "$boot" = boot=CONFLICT ] || outcome='FAILED'
+      else
+        # Without Magisk there is no hook to disarm, so status stays UNSUPPORTED.
+        [ "$state" = INACTIVE ] && { [ "$boot" = boot=DISABLED ] || [ "$boot" = boot=UNSUPPORTED ]; } ||
+          outcome='FAILED'
+      fi ;;
     boot-enable) [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
     boot-disable) [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
     vpn-refresh|set-ports|use-auto|reset-counters) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
@@ -337,8 +407,32 @@ if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; the
   esac
 fi
 
+# Read-only and best effort: interfaces that can receive traffic but that the
+# wlan+, rmnet+ and v4-rmnet+ hooks do not filter. Loopback and dummy carry no
+# inbound traffic, and tun is the VPN's inner side, excluded from filtering by design.
+UNCOVERED_IFACES=''
+if command -v ip >/dev/null 2>&1; then
+  UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk '
+    $0 == "--addresses--" { in_addresses = 1; next }
+    !in_addresses {
+      name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
+      if ($3 ~ /[<,]UP[,>]/) up[name] = 1
+      next
+    }
+    $3 == "inet" || ($3 == "inet6" && / scope global /) {
+      name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
+      if (!(name in up) || (name in listed)) next
+      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy|tun)/) next
+      listed[name] = 1
+      list = list (list == "" ? "" : ",") name
+    }
+    END { print list }
+  ') || UNCOVERED_IFACES=''
+fi
+
 echo 'root=GRANTED'
 echo "vpn_owner=$VPN_OWNER"
+echo "uncovered_ifaces=$UNCOVERED_IFACES"
 echo "config_mode=$MODE"
 echo "committed_udp4=$SAVED4"
 echo "committed_udp6=$SAVED6"

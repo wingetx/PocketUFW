@@ -23,6 +23,10 @@ class VPNProbeTests(unittest.TestCase):
         self.proc.mkdir()
         (self.proc / '6283').mkdir()
         (self.proc / '6283' / 'cmdline').write_bytes(b'com.tailscale.ipn\0')
+        self.data_dir = self.root / 'ts-data'
+        self.data_dir.mkdir()
+        self.uid = self.data_dir.stat().st_uid
+        self.write_status(self.uid)
         (self.root / 'ss4').write_text(V4)
         (self.root / 'ss6').write_text(V6)
         (self.bindir / 'id').write_text('#!/bin/sh\nif [ "$1" = "-u" ]; then echo "${PUFW_TEST_UID:-0}"; fi\n')
@@ -44,8 +48,16 @@ class VPNProbeTests(unittest.TestCase):
             'PATH': str(self.bindir) + os.pathsep + os.environ.get('PATH', ''),
             'POCKETUFW_PROC_ROOT': str(self.proc),
             'POCKETUFW_SS_BIN': 'ss',
+            'POCKETUFW_TS_DATA_DIR': str(self.data_dir),
             'PUFW_TEST_DIR': str(self.root),
         }
+
+    def write_status(self, real, others=None):
+        others = real if others is None else others
+        (self.proc / '6283' / 'status').write_text(
+            f'Name:\tm.tailscale.ipn\nUmask:\t0077\nState:\tS (sleeping)\n'
+            f'Pid:\t6283\nPPid:\t600\nUid:\t{real}\t{others}\t{others}\t{others}\n'
+            f'Gid:\t{real}\t{real}\t{real}\t{real}\n')
 
     def run_probe(self, extra=None):
         return subprocess.run(
@@ -106,6 +118,91 @@ class VPNProbeTests(unittest.TestCase):
         out = self.run_probe({'PUFW_PIDOF_RUNNING': '1'})
         self.assertNotEqual(out.returncode, 0)
         self.assertIn('running, but no verified UDP sockets', out.stderr)
+
+    def assert_refused_as_unverified(self, out):
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn('unverified', out.stderr)
+        self.assertNotIn('tailscale_udp4=46867', out.stdout)
+
+    def test_spoofed_process_with_the_right_name_but_another_uid_is_refused(self):
+        # Any app can set its process name and cmdline with android:process.
+        # The kernel-assigned UID is what it cannot forge.
+        self.write_status(self.uid + 1)
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_only_the_real_uid_field_counts(self):
+        self.write_status(self.uid + 1, others=self.uid)
+        self.assert_refused_as_unverified(self.run_probe())
+        self.write_status(self.uid, others=self.uid + 1)
+        out = self.run_probe()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=46867', 'tailscale_udp6=43504'])
+
+    def test_real_android_uid_sample_matches_data_dir_owner(self):
+        (self.bindir / 'stat').write_text(
+            '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$POCKETUFW_TS_DATA_DIR" ] || exit 9\necho 10429\n')
+        (self.bindir / 'stat').chmod(0o755)
+        (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\nUid:\t10429\t10429\t10429\t10429\n')
+        out = self.run_probe()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=46867', 'tailscale_udp6=43504'])
+        (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\nUid:\t10430\t10430\t10430\t10430\n')
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_unreadable_or_malformed_status_is_refused(self):
+        for content in ('Name:\tm.tailscale.ipn\n', 'Uid:\n', 'XUid:\t{0}\n', '', 'Uid:\tabc\t1\n'):
+            with self.subTest(status=content):
+                (self.proc / '6283' / 'status').write_text(content.format(self.uid))
+                self.assert_refused_as_unverified(self.run_probe())
+        (self.proc / '6283' / 'status').unlink()
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_missing_package_data_dir_is_refused(self):
+        # A process merely named like Tailscale, with Tailscale not installed.
+        out = self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')})
+        self.assert_refused_as_unverified(out)
+
+    def test_failing_stat_is_refused(self):
+        (self.bindir / 'stat').write_text('#!/bin/sh\nexit 1\n')
+        (self.bindir / 'stat').chmod(0o755)
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_unknown_owner_and_unknown_process_uid_are_not_a_match(self):
+        (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\n')
+        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')}))
+        (self.proc / '6283' / 'status').unlink()
+        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')}))
+
+    def test_one_spoofed_socket_among_real_ones_refuses_the_family(self):
+        spoof = V4.replace(':46867', ':31337').replace('pid=6283', 'pid=7000')
+        (self.proc / '7000').mkdir()
+        (self.proc / '7000' / 'cmdline').write_bytes(b'com.tailscale.ipn\0')
+        (self.proc / '7000' / 'status').write_text(f'Uid:\t{self.uid + 1}\t0\t0\t0\n')
+        (self.root / 'ss4').write_text(V4 + spoof)
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_absent_tailscale_needs_no_data_dir(self):
+        (self.root / 'ss4').write_text('')
+        (self.root / 'ss6').write_text('')
+        out = self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=', 'tailscale_udp6='])
+
+    def test_default_data_dir_is_the_tailscale_package(self):
+        self.assertIn('${POCKETUFW_TS_DATA_DIR:-/data/user_de/0/com.tailscale.ipn}', SCRIPT.read_text())
+
+    def test_ipv6_failure_is_not_treated_as_no_listener(self):
+        (self.root / 'ss6').write_text(V6.replace(':43504', ':99999'))
+        out = self.run_probe()
+        self.assertNotEqual(out.returncode, 0)
+        self.assertNotIn('tailscale_udp4=', out.stdout)
+
+    def test_other_processes_sockets_are_ignored(self):
+        other = 'UNCONN 0 0 0.0.0.0:5353 0.0.0.0:* users:(("mdnsd",pid=900,fd=4))\n'
+        (self.root / 'ss4').write_text(other + V4)
+        out = self.run_probe()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.splitlines()[0], 'tailscale_udp4=46867')
 
     def test_repeated_same_port_is_safe(self):
         (self.root / 'ss4').write_text(V4 + V4)

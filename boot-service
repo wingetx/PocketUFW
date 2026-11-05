@@ -9,22 +9,37 @@ MARKER="$STORE/boot.enabled"
 ENGINE="$STORE/pocketufw"
 PROBE="$STORE/vpn-probe"
 CONFIG="$STORE/udp-config"
+APP_DATA="${POCKETUFW_APP_DATA_DIR:-/data/user_de/0/io.github.pocketufw}"
 
-[ -f "$MARKER" ] && [ -r "$ENGINE" ] && [ -r "$PROBE" ] && [ -r "$CONFIG" ] || exit 0
+# The firewall must never depend on Tailscale: a missing probe or saved-config
+# copy can only withhold the UDP exception, so only the engine is required here.
+[ -f "$MARKER" ] && [ -r "$ENGINE" ] || exit 0
 count=0
+boot_settled=1
 # Wait until Android has finished booting. This never blocks Android boot.
 while [ "$(getprop sys.boot_completed)" != '1' ]; do
-  [ "$count" -lt 90 ] || exit 0
+  if [ "$count" -ge 90 ]; then
+    # Install anyway. Only the uninstall check below needs a working Android.
+    boot_settled=0
+    break
+  fi
   sleep 2
   count=$((count + 1))
   [ -f "$MARKER" ] || exit 0
 done
-# An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot.
-if ! pm path io.github.pocketufw 2>/dev/null | grep -q '^package:'; then
-  # Remove only our own boot files if the app was uninstalled.
-  rm -f "$MARKER" "$HOOK" "$ENGINE" "$PROBE" "$CONFIG"
-  rmdir "$STORE" 2>/dev/null || :
-  exit 0
+# An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot,
+# only on proof it is gone: pm says "not installed" by exiting exactly 1 with no
+# package line, and the app's data is gone too. Any other answer may be transient.
+if [ "$boot_settled" -eq 1 ]; then
+  pm_output=$(pm path io.github.pocketufw 2>/dev/null)
+  pm_status=$?
+  if [ "$pm_status" -eq 1 ] && [ ! -e "$APP_DATA" ] &&
+     ! printf '%s\n' "$pm_output" | grep -q '^package:'; then
+    # Remove only our own boot files if the app was uninstalled.
+    rm -f "$MARKER" "$HOOK" "$ENGINE" "$PROBE" "$CONFIG"
+    rmdir "$STORE" 2>/dev/null || :
+    exit 0
+  fi
 fi
 [ -f "$MARKER" ] || exit 0
 state=$(sh "$ENGINE" verify 2>/dev/null)
@@ -33,7 +48,7 @@ case "$state" in
   INACTIVE)
     # Reconfirm opt-in immediately before making any firewall changes.
     [ -f "$MARKER" ] || exit 0
-    policy=$(sh "$CONFIG" read 2>/dev/null) || exit 1
+    policy=$(sh "$CONFIG" read 2>/dev/null) || policy=''
     case "$policy" in
       mode=AUTOMATIC)
         sh "$ENGINE" enable --auto-tailscale >/dev/null 2>&1 || exit 1 ;;
@@ -45,7 +60,8 @@ case "$state" in
         [ "$p4" = none ] || set -- "$@" --tailscale-udp4 "$p4"
         [ "$p6" = none ] || set -- "$@" --tailscale-udp6 "$p6"
         sh "$ENGINE" "$@" >/dev/null 2>&1 || exit 1 ;;
-      *) exit 1 ;;
+      # Unreadable or unknown saved settings withhold only the exceptions.
+      *) sh "$ENGINE" enable >/dev/null 2>&1 || exit 1 ;;
     esac
     [ "$(sh "$ENGINE" verify 2>/dev/null)" = 'ACTIVE' ] || exit 1
     exit 0

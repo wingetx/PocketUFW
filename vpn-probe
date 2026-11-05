@@ -6,6 +6,7 @@ set -eu
 
 SS_BIN="${POCKETUFW_SS_BIN:-ss}"
 PROC_ROOT="${POCKETUFW_PROC_ROOT:-/proc}"
+TS_DATA_DIR="${POCKETUFW_TS_DATA_DIR:-/data/user_de/0/com.tailscale.ipn}"
 
 usage() {
     cat <<'HELP'
@@ -13,7 +14,8 @@ Usage: sh vpn-probe [--help]
 
 Read-only Android Tailscale UDP listener discovery. Requires root.
 Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
-verified using both ss process metadata and /proc/PID/cmdline.
+verified using ss process metadata, /proc/PID/cmdline and the process UID,
+which must own Tailscale's package data directory.
 An empty value means no verified listener for that address family.
 No firewall rules are changed. Does not monitor subsequent port changes.
 HELP
@@ -31,6 +33,12 @@ fi
 [ "$(id -u)" -eq 0 ] || { echo "vpn-probe: root needed to verify socket ownership" >&2; exit 3; }
 command -v "$SS_BIN" >/dev/null 2>&1 || { echo "vpn-probe: ss utility unavailable" >&2; exit 4; }
 [ -d "$PROC_ROOT" ] || { echo "vpn-probe: /proc unavailable" >&2; exit 4; }
+
+# Android gives each package its own UID and data directory. Unlike a process
+# name or cmdline, which any app can set with android:process, an app cannot
+# choose its UID. Unknown is empty, which can never match a process below.
+ts_uid=$(stat -c %u "$TS_DATA_DIR" 2>/dev/null) || ts_uid=''
+case "$ts_uid" in *[!0-9]*) ts_uid='' ;; esac
 
 validate_port() {
     case "$1" in
@@ -66,6 +74,9 @@ scan() {
         fi
         app=$(tr '\000' '\n' < "$PROC_ROOT/$pid/cmdline" | head -n 1)
         [ "$app" = 'com.tailscale.ipn' ] || { saw_unverified=1; continue; }
+        # First field of Uid: is the real UID. Name and cmdline prove nothing alone.
+        proc_uid=$(awk '$1 == "Uid:" { print $2; exit }' "$PROC_ROOT/$pid/status" 2>/dev/null) || proc_uid=''
+        [ -n "$ts_uid" ] && [ "$proc_uid" = "$ts_uid" ] || { saw_unverified=1; continue; }
         socket_addr=$(printf '%s\n' "$line" | awk '{print $4}')
         port=${socket_addr##*:}
         validate_port "$port" || { saw_unverified=1; continue; }

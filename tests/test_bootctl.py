@@ -29,19 +29,44 @@ class BootTests(unittest.TestCase):
         self.state = self.root / "state"
         self.state.write_text("ACTIVE\n")
         self.calls = self.root / "enable-calls"
+        self.disable_calls = Path(str(self.calls) + ".disable")
+        self.order = self.root / "order"
+        # Absent by default: Android removes it on uninstall.
+        self.app_data = self.root / "app-data"
         self.config_dir = self.root / "device-protected"
         self.config_dir.mkdir()
         self.env = dict(os.environ,
                         POCKETUFW_CONFIG_DIR=str(self.config_dir),
                         PATH=f"{self.fakebin}:/usr/bin:/bin",
                         TEST_ENGINE_STATE=str(self.state),
-                        TEST_ENGINE_CALLS=str(self.calls))
+                        TEST_ENGINE_CALLS=str(self.calls),
+                        TEST_ORDER_LOG=str(self.order),
+                        POCKETUFW_APP_DATA_DIR=str(self.app_data))
 
         for cmd, script in {
             "id": "#!/bin/sh\n[ \"$1\" = -u ] && { echo 0; exit 0; }\n/usr/bin/id \"$@\"\n",
             "magisk": "#!/bin/sh\nexit 0\n",
-            "getprop": "#!/bin/sh\necho 1\n",
-            "pm": "#!/bin/sh\n[ \"$TEST_PM_MISSING\" = 1 ] && exit 1\n[ \"$1\" = path ] && echo 'package:/data/app/placeholder/base.apk'\n",
+            # Reports boot_completed=1 after TEST_BOOT_READY_AFTER polls answered 0.
+            "getprop": "#!/bin/sh\n"
+                       "[ \"$1\" = sys.boot_completed ] || exit 3\n"
+                       "echo getprop >> \"$TEST_ORDER_LOG\"\n"
+                       "[ \"${TEST_BOOT_READY_AFTER:-0}\" != never ] || { echo 0; exit 0; }\n"
+                       "polls=$(grep -c '^getprop$' \"$TEST_ORDER_LOG\")\n"
+                       "if [ \"$polls\" -gt \"${TEST_BOOT_READY_AFTER:-0}\" ]; then echo 1; else echo 0; fi\n",
+            "sleep": "#!/bin/sh\n"
+                     "echo \"sleep $1\" >> \"$TEST_ORDER_LOG\"\n"
+                     "[ -z \"${TEST_REMOVE_WHILE_SLEEPING:-}\" ] || rm -f \"$TEST_REMOVE_WHILE_SLEEPING\"\n",
+            "pm": "#!/bin/sh\n"
+                  "echo pm >> \"$TEST_ORDER_LOG\"\n"
+                  "[ -z \"${TEST_REMOVE_DURING_PM:-}\" ] || rm -f \"$TEST_REMOVE_DURING_PM\"\n"
+                  "[ \"$1\" = path ] && [ \"$2\" = io.github.pocketufw ] || exit 9\n"
+                  "case \"${TEST_PM_MODE:-ok}\" in\n"
+                  "  ok) echo 'package:/data/app/placeholder/base.apk' ;;\n"
+                  "  gone) exit 1 ;;\n"
+                  "  transient) echo 'cmd: Failure calling service package: Broken pipe (32)' >&2; exit 224 ;;\n"
+                  "  one-with-package) echo 'package:/data/app/placeholder/base.apk'; exit 1 ;;\n"
+                  "  ok-no-package) exit 0 ;;\n"
+                  "esac\n",
         }.items():
             target = self.fakebin / cmd
             target.write_text(script)
@@ -49,12 +74,17 @@ class BootTests(unittest.TestCase):
 
         (self.app / "pocketufw").write_text(
             "#!/bin/sh\n"
+            "echo \"engine:$*\" >> \"$TEST_ORDER_LOG\"\n"
+            "[ -z \"${TEST_REMOVE_DURING_VERIFY:-}\" ] || rm -f \"$TEST_REMOVE_DURING_VERIFY\"\n"
             "case \"$1\" in\n"
             "verify) cat \"$TEST_ENGINE_STATE\"; "
             "[ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] ;;\n"
-            "enable) echo ACTIVE > \"$TEST_ENGINE_STATE\"; "
+            "enable) [ \"${TEST_ENGINE_FAIL_ENABLE:-0}\" = 1 ] && exit 7; "
+            "echo \"${TEST_ENGINE_ENABLE_RESULT:-ACTIVE}\" > \"$TEST_ENGINE_STATE\"; "
             "echo called >> \"$TEST_ENGINE_CALLS\"; "
             "echo \"$*\" >> \"$TEST_ENGINE_CALLS.args\" ;;\n"
+            "disable) echo called >> \"$TEST_ENGINE_CALLS.disable\"; "
+            "echo INACTIVE > \"$TEST_ENGINE_STATE\" ;;\n"
             "*) exit 5 ;;\n"
             "esac\n"
         )
@@ -87,11 +117,19 @@ class BootTests(unittest.TestCase):
         )
 
     def boot(self, env=None):
+        self.order.unlink(missing_ok=True)
         return subprocess.run(
             ["/bin/sh", str(self.hook)],
             capture_output=True, text=True,
             env={**self.env, **(env or {})}, timeout=8
         )
+
+    def order_lines(self):
+        return self.order.read_text().splitlines() if self.order.exists() else []
+
+    def enable_args(self):
+        path = Path(str(self.calls) + '.args')
+        return path.read_text().splitlines() if path.exists() else []
 
     def test_install_status_disable_owns_only_its_files(self):
         self.assertEqual(self.call("status").stdout.strip(), "boot=DISABLED")
@@ -164,26 +202,307 @@ class BootTests(unittest.TestCase):
         self.assertEqual(self.boot().returncode, 0)
         self.assertEqual(Path(str(self.calls) + '.args').read_text().strip(), 'enable')
 
-    def test_corrupt_committed_config_does_not_execute_untrusted_input(self):
+    def test_corrupt_committed_config_is_not_executed_and_still_enables(self):
         self.assertEqual(self.call('enable').returncode, 0)
-        (self.config_dir / 'udp-committed.conf').write_text('udp4=$(touch /tmp/pwn)\nudp6=none\n')
+        pwned = self.root / 'pwned'
+        (self.config_dir / 'udp-committed.conf').write_text(f'udp4=$(touch {pwned})\nudp6=none\n')
         self.state.write_text('INACTIVE\n')
-        self.assertNotEqual(self.boot().returncode, 0)
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertFalse(pwned.exists())
+        self.assertEqual(self.enable_args(), ['enable'])
+        self.assertEqual(self.state.read_text().strip(), 'ACTIVE')
+
+    def test_unreadable_or_unknown_saved_config_still_enables_without_exceptions(self):
+        def missing_dir():
+            return {'POCKETUFW_CONFIG_DIR': str(self.root / 'no-such-dir')}
+
+        def unsafe_symlink():
+            target = self.root / 'elsewhere'
+            target.write_text('udp4=41641\nudp6=none\n')
+            (self.config_dir / 'udp-committed.conf').symlink_to(target)
+            return {}
+
+        def unknown_mode():
+            (self.store / 'udp-config').write_text('#!/bin/sh\necho mode=FUTURE\n')
+            return {}
+
+        def empty_output():
+            (self.store / 'udp-config').write_text('#!/bin/sh\nexit 0\n')
+            return {}
+
+        def failing():
+            (self.store / 'udp-config').write_text('#!/bin/sh\necho mode=AUTOMATIC\nexit 3\n')
+            return {}
+
+        def copy_missing():
+            (self.store / 'udp-config').unlink()
+            return {}
+
+        for setup in (missing_dir, unsafe_symlink, unknown_mode, empty_output, failing, copy_missing):
+            with self.subTest(case=setup.__name__):
+                for leftover in (self.calls, Path(str(self.calls) + '.args'),
+                                 self.config_dir / 'udp-committed.conf'):
+                    leftover.unlink(missing_ok=True)
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                env = setup()
+                self.state.write_text('INACTIVE\n')
+                restored = self.boot(env)
+                self.assertEqual(restored.returncode, 0, restored.stderr)
+                self.assertEqual(self.enable_args(), ['enable'])
+                self.assertEqual(self.state.read_text().strip(), 'ACTIVE')
+
+    def test_missing_probe_copy_still_enables(self):
+        # Engine decides what to do without a probe; boot must not give up first.
+        self.assertEqual(self.call('enable').returncode, 0)
+        (self.store / 'vpn-probe').unlink()
+        self.state.write_text('INACTIVE\n')
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertEqual(self.enable_args(), ['enable --auto-tailscale'])
+        self.assertEqual(self.state.read_text().strip(), 'ACTIVE')
+
+    def test_missing_engine_copy_or_marker_does_nothing(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        (self.store / 'boot.enabled').unlink()
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertEqual(self.order_lines(), [])
+        self.state.write_text('ACTIVE\n')
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        (self.store / 'pocketufw').unlink()
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertEqual(self.order_lines(), [])
+
+    def test_automatic_mode_passes_auto_tailscale(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertEqual(self.enable_args(), ['enable --auto-tailscale'])
+
+    def test_waits_for_boot_completed_before_doing_anything(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        self.assertEqual(self.boot({'TEST_BOOT_READY_AFTER': '3'}).returncode, 0)
+        lines = self.order_lines()
+        self.assertEqual(lines[:7], ['getprop', 'sleep 2', 'getprop', 'sleep 2', 'getprop', 'sleep 2', 'getprop'])
+        self.assertEqual(lines[7], 'pm')
+        self.assertEqual(lines[8:], ['engine:verify', 'engine:enable --auto-tailscale', 'engine:verify'])
+
+    def test_wait_limit_installs_the_firewall_and_skips_only_the_uninstall_check(self):
+        for pm_mode in ('ok', 'gone'):
+            with self.subTest(pm=pm_mode):
+                self.calls.unlink(missing_ok=True)
+                Path(str(self.calls) + '.args').unlink(missing_ok=True)
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                self.state.write_text('INACTIVE\n')
+                result = self.boot({'TEST_BOOT_READY_AFTER': 'never', 'TEST_PM_MODE': pm_mode})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                lines = self.order_lines()
+                self.assertEqual(lines.count('sleep 2'), 90)
+                self.assertNotIn('pm', lines)
+                self.assertEqual(self.enable_args(), ['enable --auto-tailscale'])
+                self.assertEqual(self.state.read_text().strip(), 'ACTIVE')
+                self.assertTrue(self.hook.exists())
+                self.assertTrue((self.store / 'boot.enabled').exists())
+
+    def test_wait_limit_still_never_replaces_a_partial_firewall(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('DEGRADED\n')
+        self.assertNotEqual(self.boot({'TEST_BOOT_READY_AFTER': 'never'}).returncode, 0)
         self.assertFalse(self.calls.exists())
-        self.assertEqual(self.state.read_text().strip(), 'INACTIVE')
+        self.assertFalse(self.disable_calls.exists())
+
+    def test_opt_out_during_the_wait_stops_the_boot_restore(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        result = self.boot({'TEST_BOOT_READY_AFTER': 'never',
+                            'TEST_REMOVE_WHILE_SLEEPING': str(self.store / 'boot.enabled')})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.order_lines(), ['getprop', 'sleep 2'])
+        self.assertFalse(self.calls.exists())
+
+    def test_opt_out_during_the_last_checks_stops_the_boot_restore(self):
+        marker = str(self.store / 'boot.enabled')
+        for variable, last_call in (('TEST_REMOVE_DURING_PM', 'pm'), ('TEST_REMOVE_DURING_VERIFY', 'engine:verify')):
+            with self.subTest(during=last_call):
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                self.state.write_text('INACTIVE\n')
+                result = self.boot({variable: marker})
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(self.order_lines()[-1], last_call)
+                self.assertFalse(self.calls.exists())
+
+    def test_ambiguous_package_manager_answers_never_disarm(self):
+        cases = (('transient', False), ('one-with-package', False), ('ok-no-package', False),
+                 ('gone', True))
+        for mode, data_dir_present in cases:
+            with self.subTest(pm=mode, data_dir=data_dir_present):
+                for leftover in (self.calls, Path(str(self.calls) + '.args')):
+                    leftover.unlink(missing_ok=True)
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                if data_dir_present:
+                    self.app_data.mkdir(exist_ok=True)
+                self.state.write_text('INACTIVE\n')
+                result = self.boot({'TEST_PM_MODE': mode})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(self.hook.exists())
+                self.assertTrue((self.store / 'pocketufw').exists())
+                self.assertTrue((self.store / 'boot.enabled').exists())
+                self.assertEqual(self.enable_args(), ['enable --auto-tailscale'])
+                self.assertEqual(self.state.read_text().strip(), 'ACTIVE')
+                if data_dir_present:
+                    self.app_data.rmdir()
+
+    def test_default_app_data_dir_is_the_production_package(self):
+        self.assertIn('${POCKETUFW_APP_DATA_DIR:-/data/user_de/0/io.github.pocketufw}',
+                      (PROJECT / 'boot-service').read_text())
+
+    def test_verifies_after_enable_and_reports_failure_without_wiping(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        result = self.boot({'TEST_ENGINE_ENABLE_RESULT': 'DEGRADED'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.order_lines()[-2:], ['engine:enable --auto-tailscale', 'engine:verify'])
+        self.assertFalse(self.disable_calls.exists())
+        self.assertEqual(self.state.read_text().strip(), 'DEGRADED')
+
+    def test_engine_enable_failure_is_reported_for_every_saved_mode(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.state.write_text('INACTIVE\n')
+        self.assertNotEqual(self.boot({'TEST_ENGINE_FAIL_ENABLE': '1'}).returncode, 0)
+        (self.config_dir / 'udp-committed.conf').write_text('udp4=41641\nudp6=none\n')
+        self.assertNotEqual(self.boot({'TEST_ENGINE_FAIL_ENABLE': '1'}).returncode, 0)
+        (self.config_dir / 'udp-committed.conf').write_text('garbage\n')
+        self.assertNotEqual(self.boot({'TEST_ENGINE_FAIL_ENABLE': '1'}).returncode, 0)
+        self.assertFalse(self.disable_calls.exists())
+
+    def test_never_wipes_or_replaces_partial_or_unknown_firewall(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        for state in ('DEGRADED', 'SOMETHING-ELSE', ''):
+            with self.subTest(state=state):
+                self.state.write_text(state + '\n')
+                self.assertNotEqual(self.boot().returncode, 0)
+                self.assertFalse(self.calls.exists())
+                self.assertFalse(self.disable_calls.exists())
+                self.assertEqual(self.state.read_text().strip(), state)
+                self.assertEqual(self.order_lines()[-1], 'engine:verify')
+
+    def test_active_firewall_is_left_alone(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.assertEqual(self.boot().returncode, 0)
+        self.assertEqual(self.order_lines()[-1], 'engine:verify')
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.disable_calls.exists())
+
+    # --- status: an armed hook must be complete and running what the app shipped. ---
+
+    def test_status_requires_every_installed_copy(self):
+        for name in ('pocketufw', 'vpn-probe', 'udp-config', 'boot.enabled'):
+            with self.subTest(missing=name):
+                self.assertEqual(self.call('enable').returncode, 0)
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=ENABLED')
+                (self.store / name).unlink()
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=DEGRADED')
+
+    def test_status_reports_stale_when_any_installed_copy_differs(self):
+        for path in (self.store / 'pocketufw', self.store / 'vpn-probe',
+                     self.store / 'udp-config', self.hook):
+            with self.subTest(copy=path.name):
+                self.assertEqual(self.call('enable').returncode, 0)
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=ENABLED')
+                with path.open('a') as fh:
+                    fh.write('# an older build\n')
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=STALE')
+                # Installing refreshes the copies.
+                self.assertEqual(self.call('enable').returncode, 0)
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=ENABLED')
+
+    def test_status_reports_stale_when_the_app_upgrade_changed_a_source(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        with (self.app / 'boot-service').open('a') as fh:
+            fh.write('# a newer build\n')
+        self.assertEqual(self.call('status').stdout.strip(), 'boot=STALE')
+
+    def test_unreadable_source_is_not_called_stale(self):
+        for name in ('pocketufw', 'vpn-probe', 'udp-config', 'boot-service'):
+            with self.subTest(source=name):
+                source = self.app / name
+                kept = source.read_text()
+                self.assertEqual(self.call('enable').returncode, 0)
+                source.unlink()
+                self.assertEqual(self.call('status').stdout.strip(), 'boot=ENABLED')
+                source.write_text(kept)
+
+    def test_missing_copy_outranks_stale(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        with (self.store / 'pocketufw').open('a') as fh:
+            fh.write('# an older build\n')
+        (self.store / 'udp-config').unlink()
+        self.assertEqual(self.call('status').stdout.strip(), 'boot=DEGRADED')
+
+    def test_hook_conflict_outranks_stale(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        with (self.store / 'pocketufw').open('a') as fh:
+            fh.write('# an older build\n')
+        self.hook.write_text('#!/bin/sh\n# not ours\n')
+        self.assertEqual(self.call('status').stdout.strip(), 'boot=CONFLICT')
+
+    def test_installed_copies_are_private_and_identical_to_the_source(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        for name in ('pocketufw', 'vpn-probe', 'udp-config'):
+            with self.subTest(copy=name):
+                self.assertEqual((self.store / name).read_bytes(), (self.app / name).read_bytes())
+                self.assertEqual((self.store / name).stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.hook.read_bytes(), (self.app / 'boot-service').read_bytes())
+        self.assertEqual((self.store / 'boot.enabled').stat().st_mode & 0o777, 0o600)
+
+    def test_cannot_arm_on_a_firewall_that_is_not_active(self):
+        for state in ('DEGRADED', 'INACTIVE'):
+            with self.subTest(state=state):
+                self.state.write_text(state + '\n')
+                self.assertNotEqual(self.call('enable').returncode, 0)
+                self.assertFalse(self.hook.exists())
+        # Even if a verifier printed something else with a zero exit.
+        (self.app / 'pocketufw').write_text('#!/bin/sh\necho DEGRADED\n')
+        self.assertNotEqual(self.call('enable').returncode, 0)
+        self.assertFalse(self.hook.exists())
+
+    def test_symlinked_data_directory_does_not_write_through(self):
+        target = self.root / 'other'
+        target.mkdir()
+        self.store.symlink_to(target)
+        self.assertNotEqual(self.call('enable').returncode, 0)
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(self.call('status').stdout.strip(), 'boot=CONFLICT')
+
+    def test_symlinked_boot_file_is_refused(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        target = self.root / 'other-file'
+        target.write_text('keep')
+        (self.store / 'pocketufw').unlink()
+        (self.store / 'pocketufw').symlink_to(target)
+        self.assertNotEqual(self.call('enable').returncode, 0)
+        self.assertEqual(target.read_text(), 'keep')
 
     def test_degraded_boot_state_is_never_overwritten(self):
         self.assertEqual(self.call("enable").returncode, 0)
         self.state.write_text("DEGRADED\n")
         self.assertNotEqual(self.boot().returncode, 0)
         self.assertFalse(self.calls.exists())
+        self.assertFalse(self.disable_calls.exists())
         self.assertEqual(self.state.read_text().strip(), "DEGRADED")
 
     def test_uninstalled_app_disarms_on_next_boot(self):
         self.assertEqual(self.call("enable").returncode, 0)
-        self.assertEqual(self.boot({"TEST_PM_MISSING": "1"}).returncode, 0)
+        self.state.write_text("INACTIVE\n")
+        self.assertEqual(self.boot({"TEST_PM_MODE": "gone"}).returncode, 0)
         self.assertFalse(self.hook.exists())
         self.assertFalse(self.store.exists())
+        self.assertFalse(self.calls.exists())
 
     def test_symlink_data_directory_is_refused(self):
         self.store.symlink_to(self.root / "other")

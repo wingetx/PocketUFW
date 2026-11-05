@@ -46,6 +46,17 @@ supported() {
     [ -r "$SELF_DIR/boot-service" ]
 }
 
+# An app upgrade replaces the sources but not the root-owned boot copies, so an
+# armed hook can keep running an old engine. A source we cannot read proves nothing.
+copies_stale() {
+  command -v cmp >/dev/null 2>&1 || return 1
+  for name in pocketufw vpn-probe udp-config; do
+    [ -r "$SELF_DIR/$name" ] || continue
+    cmp -s "$SELF_DIR/$name" "$STORE/$name" || return 0
+  done
+  [ -r "$SELF_DIR/boot-service" ] && ! cmp -s "$SELF_DIR/boot-service" "$HOOK"
+}
+
 case "$CMD" in
   status)
     if [ -L "$STORE" ] || [ -L "$HOOK" ]; then
@@ -55,8 +66,9 @@ case "$CMD" in
     elif owned_hook; then
       if [ -f "$MARKER" ] &&
          [ -f "$STORE/pocketufw" ] &&
-         [ -f "$STORE/vpn-probe" ]; then
-        say 'boot=ENABLED'
+         [ -f "$STORE/vpn-probe" ] &&
+         [ -f "$STORE/udp-config" ]; then
+        if copies_stale; then say 'boot=STALE'; else say 'boot=ENABLED'; fi
       else
         say 'boot=DEGRADED'
       fi

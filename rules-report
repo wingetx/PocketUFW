@@ -14,6 +14,11 @@ emit_rules() {
   max="$4"
   printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" '
     $1 == "-A" {
+      if (kind == "input_bypass") {
+        if ($2 != "INPUT") next
+        if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) exit
+        if ($(NF-1) != "-j" || $NF != "ACCEPT") next
+      }
       if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
                                   /-j POCKETUFW_IN/)) next
       if (kind == "main" && $2 != "POCKETUFW_IN") next
@@ -40,6 +45,11 @@ emit_family() {
   policy=$(printf '%s\n' "$input" | awk '$1 == "-P" && $2 == "INPUT" {print $3; exit}')
   case "$policy" in ACCEPT|DROP|REJECT) : ;; *) return 1 ;; esac
   printf 'input_policy%s=%s\n' "$fam" "$policy"
+  # An ACCEPT ahead of our hooks is a hole the rule audit cannot see. Android's
+  # own chains jump to oem_in, pl_INPUT and so on. With no hook, nothing is bypassed.
+  case "$input" in
+    *'--comment PocketUFW'*) emit_rules input_bypass "$fam" "$input" 6 || return 1 ;;
+  esac
   emit_rules hook "$fam" "$input" 6 || return 1
   emit_rules main "$fam" "$main" 12 || return 1
   emit_rules vpn "$fam" "$vpn" 3 || return 1

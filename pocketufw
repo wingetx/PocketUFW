@@ -11,6 +11,7 @@ IFACES='wlan+ rmnet+ v4-rmnet+'
 TS4=''
 TS6=''
 AUTO_TS=0
+PROBE_FAILED=0
 UDP4_SET=0
 UDP6_SET=0
 CMD=''
@@ -107,21 +108,38 @@ ts_exists4() { "$IPT4" -w -S "$TSCHAIN" >/dev/null 2>&1; }
 ts_exists6() { "$IPT6" -w -S "$TSCHAIN" >/dev/null 2>&1; }
 afwall_active() { "$IPT4" -w -S OUTPUT 2>/dev/null | grep -q -- '-A OUTPUT -j afwall'; }
 
+# The firewall must never depend on Tailscale. For enable, a discovery problem
+# withholds only the UDP exceptions; plan and refresh must not guess, so they fail.
+probe_problem() {
+  [ "$CMD" = enable ] || fail "$1"
+  say "pocketufw: $1" >&2
+  PROBE_FAILED=1
+  TS4=''
+  TS6=''
+}
+port_is_valid() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
 resolve_tailscale_ports() {
   [ "$AUTO_TS" -eq 1 ] || return 0
   root_needed
   # Resolve probe relative to the PocketUFW CLI, never search arbitrary directories.
   case "$0" in
     */*) script_path="$0" ;;
-    *) script_path=$(command -v "$0") || fail 'Cannot locate PocketUFW CLI' ;;
+    *) script_path=$(command -v "$0") || { probe_problem 'Cannot locate PocketUFW CLI'; return 0; } ;;
   esac
   case "$script_path" in */*) probe_dir=${script_path%/*} ;; *) probe_dir=. ;; esac
-  [ -r "$probe_dir/vpn-probe" ] || fail 'vpn-probe not installed alongside PocketUFW'
-  discovered=$(sh "$probe_dir/vpn-probe") || fail 'Tailscale port discovery failed; no firewall rules changed'
+  [ -r "$probe_dir/vpn-probe" ] || { probe_problem 'vpn-probe not installed alongside PocketUFW'; return 0; }
+  # The probe does not need the engine lock, so a stuck child cannot keep it.
+  discovered=$(sh "$probe_dir/vpn-probe" 9>&-) || {
+    probe_problem 'Tailscale port discovery failed; no VPN port exceptions changed'
+    return 0
+  }
   TS4=$(printf '%s\n' "$discovered" | sed -n 's/^tailscale_udp4=//p')
   TS6=$(printf '%s\n' "$discovered" | sed -n 's/^tailscale_udp6=//p')
-  [ -z "$TS4" ] || check_port "$TS4"
-  [ -z "$TS6" ] || check_port "$TS6"
+  { [ -z "$TS4" ] || port_is_valid "$TS4"; } && { [ -z "$TS6" ] || port_is_valid "$TS6"; } ||
+    probe_problem 'Tailscale port discovery returned an invalid port'
 }
 
 # The only chain we own is POCKETUFW_IN in the IPv4 and IPv6 filter tables.
@@ -367,6 +385,37 @@ apply_verified_refresh() {
   return 1
 }
 
+# Cross-process lock: one engine's half-finished install must not be seen as
+# DEGRADED by a reader, or be torn down by another engine's failure cleanup.
+# Toybox flock takes only a descriptor, so poll -n: 150 x 0.1 s, about 15 s.
+# No flock or no usable lock file means proceeding unlocked. Nothing the engine
+# runs re-invokes the engine, so holding this cannot deadlock against itself.
+lock_engine() {
+  command -v flock >/dev/null 2>&1 || return 0
+  lock_file="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}"
+  # A failed redirect on exec would end this shell, so try it in a subshell.
+  ( : >>"$lock_file" ) 2>/dev/null || return 0
+  exec 9>>"$lock_file"
+  lock_polls=0
+  while :; do
+    # 9>&9 hands the descriptor over explicitly: mksh, Android's sh, keeps exec'd
+    # descriptors above 2 from child commands otherwise.
+    lock_error=$(flock -n "$1" 9 9>&9 2>&1) && return 0
+    # Contention is silent. A diagnostic means flock cannot work here at all.
+    [ -z "$lock_error" ] || { exec 9>&-; return 0; }
+    [ "$lock_polls" -lt 150 ] || break
+    lock_polls=$((lock_polls + 1))
+    sleep 0.1 2>/dev/null || :
+  done
+  exec 9>&-
+  [ "$1" = -s ] || fail 'Another PocketUFW operation is still running; no changes made. Try again.'
+  say 'pocketufw: another operation is still running; reading without the lock' >&2
+}
+case "$CMD" in
+  enable|disable|refresh|set-ports|reset-counters) lock_engine -x ;;
+  verify|activity|verbose|status|get-ports) lock_engine -s ;;
+esac
+
 case "$CMD" in
   doctor)
     root_needed
@@ -483,7 +532,11 @@ case "$CMD" in
     committed=1
     trap - 0
     say 'PocketUFW: enabled. Not persistent after reboot.'
-    if [ "$AUTO_TS" -eq 1 ]; then
+    if [ "$PROBE_FAILED" -eq 1 ]; then
+      # android-bridge consumes this marker to explain the withheld exception.
+      say 'tailscale_probe=FAILED'
+      say 'NOTE: Tailscale ports could not be verified; no VPN port exceptions opened. Use refresh later.'
+    elif [ "$AUTO_TS" -eq 1 ]; then
       if [ -n "$TS4$TS6" ]; then
         say 'NOTE: Verified Tailscale UDP ports installed. Use refresh after a port change until monitoring is implemented.'
       else
@@ -496,8 +549,9 @@ case "$CMD" in
   refresh)
     root_needed
     prereqs
-    chain_exists4 && chain_exists6 && ts_exists4 && ts_exists6 ||
-      fail 'Firewall incomplete or disabled; no refresh attempted'
+    # Refuse any changes unless every owned rule is already in a known state.
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Firewall degraded or disabled; no refresh attempted'
     afwall_active && fail 'AFWall+ active; refresh refused'
     # Detect and validate both families before altering either one.
     AUTO_TS=1
@@ -517,6 +571,8 @@ case "$CMD" in
     if ! apply_verified_refresh; then
       fail 'refresh incomplete; inspect status before retrying'
     fi
+    verify_family "$IPT4" 4 && verify_family "$IPT6" 6 ||
+      fail 'Refresh could not be fully verified; inspect rules'
     # This marker is emitted ONLY after a successful transactional refresh.
     # android-bridge consumes it to distinguish updates from no-ops.
     say "refresh_result=$refresh_result"

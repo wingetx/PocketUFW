@@ -30,6 +30,8 @@ android {
         buildConfig = true
     }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.8" }
+    // JVM UI tests measure real Compose layout, so they need merged resources.
+    testOptions { unitTests { isIncludeAndroidResources = true } }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/firewallAssets"))
 }
@@ -54,4 +56,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+
+    // Test-only: none of these reach the APK. See docs/audit-fixes.md.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(platform("androidx.compose:compose-bom:2024.04.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
 }

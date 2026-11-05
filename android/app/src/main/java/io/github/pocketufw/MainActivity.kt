@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PocketScreen(client: FirewallClient) {
+internal fun PocketScreen(client: FirewallGateway) {
     var state by remember { mutableStateOf(FirewallClient.Snapshot()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }

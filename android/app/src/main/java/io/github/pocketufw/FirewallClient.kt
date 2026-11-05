@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  * boot hook lives in root-only storage under /data/adb.
  * Shell scripts are copied from APK assets into private app storage.
  */
-internal class FirewallClient(private val context: Context) {
+internal class FirewallClient(private val context: Context) : FirewallGateway {
     enum class Protection { CHECKING, ACTIVE, INACTIVE, DEGRADED, ROOT_REQUIRED }
     enum class BootRestore { ENABLED, DISABLED, UNSUPPORTED, DEGRADED, CONFLICT, UNKNOWN }
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
@@ -214,7 +214,7 @@ internal class FirewallClient(private val context: Context) {
     }
 
     /** Read-only, one-root-session refresh. Does not inspect boot/VPN or modify rules. */
-    fun refreshCounterActivity(): RuleActivity = try {
+    override fun refreshCounterActivity(): RuleActivity = try {
         prepareEngine()
         val result = bridge("counters")
         val values = fields(result.text)
@@ -291,7 +291,7 @@ internal class FirewallClient(private val context: Context) {
     }
 
     /** One Magisk root request returns current policy, boot status and counters. */
-    fun inspectDashboard(): Dashboard {
+    override fun inspectDashboard(): Dashboard {
         val vpn = readVpn()
         return (try {
             prepareEngine()
@@ -347,20 +347,20 @@ internal class FirewallClient(private val context: Context) {
         }).also { TileStatusStore.publish(context, it.dashboard.snapshot) }
     }
 
-    fun changeProtection(activate: Boolean): Operation =
+    override fun changeProtection(activate: Boolean): Operation =
         performAction(if (!activate) "disable" else if (bootOptedIn()) "enable-restore" else "enable")
 
     /** Toggle from verified *live* rules in a single privileged session. */
     fun toggleProtection(): Operation =
         performAction(if (bootOptedIn()) "toggle-restore" else "toggle")
 
-    fun changeBootRestoration(enabled: Boolean): Operation =
+    override fun changeBootRestoration(enabled: Boolean): Operation =
         performAction(if (enabled) "boot-enable" else "boot-disable")
 
-    fun refreshVerifiedPorts(): Operation = performAction("vpn-refresh")
+    override fun refreshVerifiedPorts(): Operation = performAction("vpn-refresh")
 
     /** Reset ONLY PocketUFW-owned netfilter counters, with no rule changes. */
-    fun resetCounters(): Operation = performAction("reset-counters")
+    override fun resetCounters(): Operation = performAction("reset-counters")
 
     private fun normalizeManualPort(value: String): String {
         val candidate = value.trim()
@@ -372,7 +372,7 @@ internal class FirewallClient(private val context: Context) {
         return candidate
     }
 
-    fun updateUdpExceptions(ipv4: String, ipv6: String, committed: Boolean): Operation =
+    override fun updateUdpExceptions(ipv4: String, ipv6: String, committed: Boolean): Operation =
         try {
             performAction("set-ports", listOf(
                 normalizeManualPort(ipv4), normalizeManualPort(ipv6),
@@ -382,5 +382,5 @@ internal class FirewallClient(private val context: Context) {
             Operation(false, e.message ?: "Invalid UDP port.", inspectDashboard())
         }
 
-    fun restoreAutomaticUdpExceptions(): Operation = performAction("use-auto")
+    override fun restoreAutomaticUdpExceptions(): Operation = performAction("use-auto")
 }

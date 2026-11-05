@@ -12,7 +12,21 @@ import java.util.concurrent.TimeUnit
  * boot hook lives in root-only storage under /data/adb.
  * Shell scripts are copied from APK assets into private app storage.
  */
-internal class FirewallClient(private val context: Context) {
+internal class FirewallClient(private val context: Context) : FirewallGateway {
+    /** The sentence behind each state. Unknown states must not read as "off". */
+    fun protectionDetails(protection: Protection): String = when (protection) {
+        Protection.ACTIVE ->
+            "IPv4 and IPv6 rules, hooks and default inbound policy verified."
+        Protection.INACTIVE -> "PocketUFW has not installed any firewall chains."
+        Protection.ROOT_REQUIRED ->
+            "PocketUFW couldn't get root access, so it can't read the kernel. This doesn't " +
+                "mean the firewall is off: rules installed earlier stay in the kernel."
+        Protection.DEGRADED ->
+            "Firewall state could not be verified. Some rules may be installed. Don't assume " +
+                "packets are being filtered, or that they aren't."
+        Protection.CHECKING -> "Checking the firewall."
+    }
+
     enum class Protection { CHECKING, ACTIVE, INACTIVE, DEGRADED, ROOT_REQUIRED }
     enum class BootRestore { ENABLED, DISABLED, UNSUPPORTED, DEGRADED, CONFLICT, UNKNOWN }
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
@@ -214,7 +228,7 @@ internal class FirewallClient(private val context: Context) {
     }
 
     /** Read-only, one-root-session refresh. Does not inspect boot/VPN or modify rules. */
-    fun refreshCounterActivity(): RuleActivity = try {
+    override fun refreshCounterActivity(): RuleActivity = try {
         prepareEngine()
         val result = bridge("counters")
         val values = fields(result.text)
@@ -256,16 +270,7 @@ internal class FirewallClient(private val context: Context) {
             "DEGRADED" -> UdpConfigMode.DEGRADED
             else -> UdpConfigMode.UNKNOWN
         }
-        val details = when (protection) {
-            Protection.ACTIVE ->
-                "IPv4 and IPv6 rules, hooks and default inbound policy verified."
-            Protection.INACTIVE -> "PocketUFW has not installed any firewall chains."
-            Protection.ROOT_REQUIRED ->
-                "Root access is needed to inspect and manage the firewall."
-            Protection.DEGRADED ->
-                "Firewall state could not be verified. Review root access and installed rules."
-            Protection.CHECKING -> "Checking the firewall."
-        }
+        val details = protectionDetails(protection)
 
         val activity = if (protection == Protection.ACTIVE) parseCounterActivity(values)
             else null
@@ -291,7 +296,7 @@ internal class FirewallClient(private val context: Context) {
     }
 
     /** One Magisk root request returns current policy, boot status and counters. */
-    fun inspectDashboard(): Dashboard {
+    override fun inspectDashboard(): Dashboard {
         val vpn = readVpn()
         return (try {
             prepareEngine()
@@ -347,20 +352,20 @@ internal class FirewallClient(private val context: Context) {
         }).also { TileStatusStore.publish(context, it.dashboard.snapshot) }
     }
 
-    fun changeProtection(activate: Boolean): Operation =
+    override fun changeProtection(activate: Boolean): Operation =
         performAction(if (!activate) "disable" else if (bootOptedIn()) "enable-restore" else "enable")
 
     /** Toggle from verified *live* rules in a single privileged session. */
     fun toggleProtection(): Operation =
         performAction(if (bootOptedIn()) "toggle-restore" else "toggle")
 
-    fun changeBootRestoration(enabled: Boolean): Operation =
+    override fun changeBootRestoration(enabled: Boolean): Operation =
         performAction(if (enabled) "boot-enable" else "boot-disable")
 
-    fun refreshVerifiedPorts(): Operation = performAction("vpn-refresh")
+    override fun refreshVerifiedPorts(): Operation = performAction("vpn-refresh")
 
     /** Reset ONLY PocketUFW-owned netfilter counters, with no rule changes. */
-    fun resetCounters(): Operation = performAction("reset-counters")
+    override fun resetCounters(): Operation = performAction("reset-counters")
 
     private fun normalizeManualPort(value: String): String {
         val candidate = value.trim()
@@ -372,7 +377,7 @@ internal class FirewallClient(private val context: Context) {
         return candidate
     }
 
-    fun updateUdpExceptions(ipv4: String, ipv6: String, committed: Boolean): Operation =
+    override fun updateUdpExceptions(ipv4: String, ipv6: String, committed: Boolean): Operation =
         try {
             performAction("set-ports", listOf(
                 normalizeManualPort(ipv4), normalizeManualPort(ipv6),
@@ -382,5 +387,5 @@ internal class FirewallClient(private val context: Context) {
             Operation(false, e.message ?: "Invalid UDP port.", inspectDashboard())
         }
 
-    fun restoreAutomaticUdpExceptions(): Operation = performAction("use-auto")
+    override fun restoreAutomaticUdpExceptions(): Operation = performAction("use-auto")
 }

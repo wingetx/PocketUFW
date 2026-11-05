@@ -18,10 +18,13 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallClient.KernelReport?,
-                            busy: Boolean, recheck: () -> Unit, onExceptions: () -> Unit) {
+                            busy: Boolean, recheck: () -> Unit, onExceptions: () -> Unit,
+                            verificationInDoubt: Boolean = false) {
     var ipv6 by rememberSaveable { mutableStateOf(false) }
     var raw by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (verificationInDoubt) TideNotice(
+            "Last known rule report only. Current kernel protection needs rechecking.", true)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("IPv4", "IPv6").forEachIndexed { index, name ->
@@ -38,7 +41,7 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
             }
         }
         if (report == null) {
-            TideNotice(if (state.protection == FirewallClient.Protection.INACTIVE) "No PocketUFW rules are installed."
+            TideNotice(if (state.protection == FirewallClient.Protection.INACTIVE && !verificationInDoubt) "No PocketUFW rules are installed."
                 else "A complete kernel rule report is unavailable. Recheck before relying on the detailed policy.")
         } else {
             val family = if (ipv6) report.ipv6 else report.ipv4
@@ -121,7 +124,9 @@ private fun describeRule(rule: String): Pair<String, String> = when {
     rule.contains("--ctstate") &&
         rule.contains("ESTABLISHED") && rule.contains("RELATED") ->
         "ALLOW" to "Established / related replies"
-    rule.contains("--ctstate INVALID") -> "DROP" to "Invalid packets"
+    rule.endsWith("-j NFLOG") || rule.contains("-j NFLOG ") ->
+        "LOG" to "Temporary diagnostic probe (non-verdict)"
+    rule.contains("--ctstate INVALID") && rule.endsWith("-j DROP") -> "DROP" to "Invalid packets"
     rule.contains("-p ipv6-icmp") -> "ALLOW" to "ICMPv6 control traffic"
     rule.contains("-p icmp") -> "ALLOW" to "ICMP control traffic"
     rule.contains("--sport 67") && rule.contains("--dport 68") ->
@@ -134,7 +139,7 @@ private fun describeRule(rule: String): Pair<String, String> = when {
     rule.endsWith("-j DROP") -> "DROP" to "Other incoming packets"
     rule.startsWith("-A POCKETUFW_TS ") &&
         rule.contains("--dport ") && rule.endsWith("-j ACCEPT") ->
-        "ALLOW" to ("Verified VPN UDP port " +
+        "ALLOW" to ("VPN UDP exception, port " +
             rule.substringAfter("--dport ").substringBefore(' '))
     else -> "RULE" to rule
 }

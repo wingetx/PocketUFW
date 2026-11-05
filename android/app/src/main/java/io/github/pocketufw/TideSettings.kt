@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.dp
 internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: String, onExceptions: () -> Unit) {
     val state = ui.snapshot
     var tileHelp by rememberSaveable { mutableStateOf(false) }
-    val active = state.protection == FirewallClient.Protection.ACTIVE && state.rootReady
+    val active = state.protection == FirewallClient.Protection.ACTIVE &&
+        state.rootReady && !ui.verificationInDoubt
     TideHeading("Settings.")
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("STARTUP", color = Muted, style = MaterialTheme.typography.labelSmall)
@@ -24,30 +25,34 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
                 Text("Restore after reboot", style = MaterialTheme.typography.titleMedium)
                 Text("Uses Magisk at startup. No background app.", style = MaterialTheme.typography.bodySmall, color = Muted)
             }
-            Switch(checked = state.bootRestore == FirewallClient.BootRestore.ENABLED,
-                onCheckedChange = { next -> if (!ui.busy) actions.changeBootRestoration(next) },
-                enabled = active && state.bootRestore in listOf(FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED),
-                modifier = Modifier.semantics { contentDescription = "Restore after reboot" })
+            if (bootProblemText(state.bootRestore) == null) {
+                Switch(checked = state.bootRestore == FirewallClient.BootRestore.ENABLED,
+                    onCheckedChange = { next -> if (!ui.busy && active) actions.changeBootRestoration(next) },
+                    enabled = active && !ui.busy,
+                    modifier = Modifier.semantics { contentDescription = "Restore after reboot" })
+            }
         }
         if (!active) Text("Enable the firewall to change boot restoration.", color = Muted, style = MaterialTheme.typography.bodySmall)
-        else if (state.bootRestore !in listOf(FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED)) {
-            TideNotice("Magisk boot restoration: ${bootLabel(state.bootRestore)}. Unavailable or needs inspection.", true)
-        }
+        bootProblemText(state.bootRestore)?.let { TideNotice(it, true) }
+
         TideDivider()
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("CONNECTIONS", color = Muted, style = MaterialTheme.typography.labelSmall)
         TideSettingLink("VPN UDP exceptions", when (state.udpConfigMode) {
-            FirewallClient.UdpConfigMode.AUTOMATIC -> "Automatic · verified Tailscale listeners"
+            FirewallClient.UdpConfigMode.AUTOMATIC -> "Saved mode: Automatic · live ports may differ"
             FirewallClient.UdpConfigMode.COMMITTED -> "Committed · saved ports"
             FirewallClient.UdpConfigMode.DEGRADED -> "Saved configuration needs inspection"
             FirewallClient.UdpConfigMode.UNKNOWN -> "Saved configuration not verified"
         }, onExceptions)
         TidePolicyRow(R.drawable.tide_up, "VPN connection", if (state.vpnActive) "Connected" else "Not detected")
-        OutlinedButton(onClick = actions.refreshVpn, enabled = active && !ui.busy,
+        val vpnReason = vpnRefreshBlockedReason(state.udpConfigMode)
+        OutlinedButton(onClick = actions.refreshVpn,
+            enabled = active && !ui.busy && vpnReason == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(9.dp)) {
-            Text("Refresh VPN")
+            Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
         }
+        if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall, color = Muted)
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)

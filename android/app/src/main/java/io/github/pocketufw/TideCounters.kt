@@ -20,19 +20,22 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
     var resetConfirmation by rememberSaveable { mutableStateOf(false) }
     var repliesExpanded by rememberSaveable { mutableStateOf(false) }
     val active = ui.snapshot.protection == FirewallClient.Protection.ACTIVE
-    val canReset = active && ui.snapshot.rootReady && !ui.busy
+    val verified = active && !ui.verificationInDoubt
+    val canReset = verified && ui.snapshot.rootReady && !ui.busy
     // A pending dialog must not outlive a verified, actionable state.
-    LaunchedEffect(active, ui.snapshot.rootReady) {
-        if (!active || !ui.snapshot.rootReady) resetConfirmation = false
+    LaunchedEffect(verified, ui.snapshot.rootReady) {
+        if (!verified || !ui.snapshot.rootReady) resetConfirmation = false
     }
     val activity = ui.counters
     val large = LocalDensity.current.fontScale > 1.2f ||
         listOf(activity?.totalBlocked, activity?.totalReplies, activity?.ipv4Blocked, activity?.ipv6Blocked)
             .any { count(it).length > 8 }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (ui.verificationInDoubt) TideNotice(
+            "Last known reading only. Current kernel protection is not verified; recheck before acting.", true)
         if (active && activity?.measured == true) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("INCOMING PACKETS DROPPED", style = MaterialTheme.typography.labelSmall,
+                Text("PACKETS MATCHED DROP RULES", style = MaterialTheme.typography.labelSmall,
                     color = Muted, letterSpacing = 1.sp)
                 val bytes = if (activity.ipv4Bytes != null && activity.ipv6Bytes != null)
                     byteCount(activity.ipv4Bytes + activity.ipv6Bytes) else "Bytes unavailable"
@@ -82,7 +85,7 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
         }
         val refresh: @Composable (Modifier) -> Unit = { modifier ->
             TidePrimaryButton(if (ui.counterRefreshing) "Refreshing…" else "Refresh counters",
-                actions.refreshCounters, modifier, enabled = active && ui.snapshot.rootReady && !ui.busy)
+                actions.refreshCounters, modifier, enabled = verified && ui.snapshot.rootReady && !ui.busy)
         }
         val reset: @Composable (Modifier) -> Unit = { modifier ->
             OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
@@ -94,7 +97,6 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
         } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             refresh(Modifier.weight(1f)); reset(Modifier.weight(1f))
         }
-        if (ui.counterRefreshNote.isNotEmpty()) TideNotice(ui.counterRefreshNote, ui.counterRefreshError)
         Text("Rule matches, not attack detections. Counts reset on request or when rules are reinstalled.",
             style = MaterialTheme.typography.bodySmall, color = Muted)
         Text("Updated when opened or refreshed. No continuous monitoring. Earlier Android/OEM rules and other interfaces may bypass PocketUFW’s hooks.",

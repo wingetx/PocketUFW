@@ -39,7 +39,10 @@ internal data class TideUiState(
     val failed: Boolean = false,
     val counterRefreshing: Boolean = false,
     val counterRefreshNote: String = "",
-    val counterRefreshError: Boolean = false
+    val counterRefreshError: Boolean = false,
+    val verificationInDoubt: Boolean = false,
+    val checkedAt: Long = 0L,
+    val vpnRefreshing: Boolean = false
 )
 
 internal data class TideActions(
@@ -51,7 +54,8 @@ internal data class TideActions(
     val refreshVpn: () -> Unit = {},
     val removePartialRules: () -> Unit = {},
     val setUdpPorts: (String, String, Boolean) -> Unit = { _, _, _ -> },
-    val restoreAutomatic: () -> Unit = {}
+    val restoreAutomatic: () -> Unit = {},
+    val dismissMessage: () -> Unit = {}
 )
 
 internal enum class TideDestination(val label: String, val icon: Int) {
@@ -72,6 +76,11 @@ internal fun TideScreen(
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
     var inspection by rememberSaveable { mutableStateOf(initialInspection) }
     var exceptions by rememberSaveable { mutableStateOf(false) }
+    var removeConfirmOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt) {
+        if (ui.snapshot.protection != FirewallClient.Protection.DEGRADED ||
+            !ui.snapshot.rootReady || ui.verificationInDoubt) removeConfirmOpen = false
+    }
     val scroll = rememberScrollState()
     LaunchedEffect(destination, inspection, exceptions) { scroll.scrollTo(0) }
     BackHandler(exceptions || destination != TideDestination.FIREWALL) {
@@ -79,6 +88,28 @@ internal fun TideScreen(
     }
 
     Scaffold(
+        snackbarHost = {
+            val note = when {
+                ui.busy && !ui.counterRefreshing ->
+                    if (ui.vpnRefreshing) "Refreshing VPN…" else "Working…"
+                ui.message.isNotEmpty() -> ui.message
+                ui.counterRefreshNote.isNotEmpty() -> ui.counterRefreshNote
+                else -> ""
+            }
+            if (note.isNotEmpty()) {
+                Surface(color = if (ui.failed || ui.counterRefreshError)
+                    MaterialTheme.colorScheme.secondaryContainer else Panel,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        .padding(bottom = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }) {
+                    Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(note, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        if (!ui.busy) TextButton(onClick = actions.dismissMessage) { Text("Dismiss") }
+                    }
+                }
+            }
+        },
         containerColor = Background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -123,27 +154,24 @@ internal fun TideScreen(
         Column(Modifier.fillMaxSize().padding(inset).verticalScroll(scroll)
             .padding(horizontal = 24.dp).padding(top = 12.dp, bottom = 28.dp)
             .testTag("tide-content"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            if (ui.message.isNotEmpty()) TideNotice(ui.message, ui.failed)
-            if (ui.busy && !ui.counterRefreshing) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("Working…", style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                }
-            }
             when {
                 exceptions -> {
                     TideHeading("UDP exceptions.", "Allow a listener through incoming rules.")
-                    UdpExceptionsPanel(ui.snapshot, ui.report, ui.busy,
+                    UdpExceptionsPanel(ui.snapshot, ui.report, ui.busy || ui.verificationInDoubt,
                         actions.setUdpPorts, actions.restoreAutomatic, initiallyExpanded = true)
-                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = actions.refreshVpn, enabled = !ui.busy &&
-                        ui.snapshot.protection == FirewallClient.Protection.ACTIVE,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                        Text("Refresh VPN")
+                    val vpnReason = vpnRefreshBlockedReason(ui.snapshot.udpConfigMode)
+                    val vpnAllowed = !ui.busy && !ui.verificationInDoubt &&
+                        ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
+                        ui.snapshot.rootReady && vpnReason == null
+                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = actions.refreshVpn,
+                        enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
                     }
+                    if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
+                        color = Muted)
                 }
                 destination == TideDestination.FIREWALL -> TideFirewall(ui, actions, appVersion,
-                    showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
+                    requestRemoval = { removeConfirmOpen = true }, showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
                     showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
                     showSettings = { destination = TideDestination.SETTINGS })
                 destination == TideDestination.ACTIVITY -> {
@@ -153,37 +181,56 @@ internal fun TideScreen(
                     }
                     if (inspection == TideInspection.COUNTERS) TideCounters(ui, actions)
                     else KernelStatusTab(ui.snapshot, ui.report, ui.busy,
-                        actions.recheck, onExceptions = { exceptions = true })
+                        actions.recheck, onExceptions = { exceptions = true },
+                        verificationInDoubt = ui.verificationInDoubt)
                 }
                 else -> TideSettings(ui, actions, appVersion, onExceptions = { exceptions = true })
             }
         }
     }
+    if (removeConfirmOpen) AlertDialog(
+        containerColor = Background, tonalElevation = 0.dp,
+        onDismissRequest = { removeConfirmOpen = false },
+        title = { Text("Remove partial PocketUFW rules?") },
+        text = { Text("This removes PocketUFW's partial firewall rules and disarms the " +
+            "Magisk boot hook. Android's own rules remain unchanged.") },
+        confirmButton = {
+            TextButton(onClick = {
+                removeConfirmOpen = false
+                if (!ui.busy && !ui.verificationInDoubt && ui.snapshot.rootReady &&
+                    ui.snapshot.protection == FirewallClient.Protection.DEGRADED) actions.removePartialRules()
+            }) { Text("Remove rules") }
+        },
+        dismissButton = { TextButton(onClick = { removeConfirmOpen = false }) { Text("Cancel") } }
+    )
 }
 
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
-                         showCounters: () -> Unit, showRules: () -> Unit, showSettings: () -> Unit) {
+                         requestRemoval: () -> Unit, showCounters: () -> Unit,
+                         showRules: () -> Unit, showSettings: () -> Unit) {
     val state = ui.snapshot
     val active = state.protection == FirewallClient.Protection.ACTIVE
+    val verified = active && !ui.verificationInDoubt
     val checking = state.protection == FirewallClient.Protection.CHECKING
-    val attention = state.protection in listOf(FirewallClient.Protection.DEGRADED, FirewallClient.Protection.ROOT_REQUIRED)
-    val accent = if (active) Mint else if (attention) Amber else Muted
-    val title = when (state.protection) {
+    val attention = ui.verificationInDoubt || state.protection in listOf(
+        FirewallClient.Protection.DEGRADED, FirewallClient.Protection.ROOT_REQUIRED)
+    val accent = if (verified) Mint else if (attention) Amber else Muted
+    val title = if (ui.verificationInDoubt) "Not\nverified." else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> "Active."
         FirewallClient.Protection.INACTIVE -> "Off."
         FirewallClient.Protection.CHECKING -> "Checking…"
         FirewallClient.Protection.DEGRADED -> "Needs\nattention."
         FirewallClient.Protection.ROOT_REQUIRED -> "Root\nrequired."
     }
-    val label = when (state.protection) {
+    val label = if (ui.verificationInDoubt) "Recheck required" else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> "Kernel rules verified"
         FirewallClient.Protection.INACTIVE -> "PocketUFW is inactive"
         FirewallClient.Protection.CHECKING -> "Reading kernel state"
         FirewallClient.Protection.DEGRADED -> "Protection not verified"
         FirewallClient.Protection.ROOT_REQUIRED -> "Root permission needed"
     }
-    val icon = when (state.protection) {
+    val icon = if (ui.verificationInDoubt) R.drawable.tide_warning else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> R.drawable.tide_check
         FirewallClient.Protection.INACTIVE -> R.drawable.tide_off
         FirewallClient.Protection.CHECKING -> R.drawable.tide_refresh
@@ -191,7 +238,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         FirewallClient.Protection.ROOT_REQUIRED -> R.drawable.tide_key
     }
     Column(Modifier.semantics(mergeDescendants = true) {
-        stateDescription = state.protection.name.replace('_', ' ')
+        stateDescription = if (ui.verificationInDoubt) "Not verified; recheck required"
+            else state.protection.name.replace('_', ' ')
         liveRegion = LiveRegionMode.Polite
     }, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -202,7 +250,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val showMascot = maxWidth >= 310.dp && LocalDensity.current.fontScale <= 1.2f
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = accent, style = if (active || state.protection == FirewallClient.Protection.INACTIVE)
+                Text(title, color = accent, style = if (!attention && (active || state.protection == FirewallClient.Protection.INACTIVE))
                     MaterialTheme.typography.displayLarge else MaterialTheme.typography.headlineLarge,
                     modifier = Modifier.weight(1f))
                 if (showMascot) {
@@ -222,6 +270,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     }
     Text(when {
         checking -> "Reading firewall rules and Magisk boot status. Protection has not yet been verified."
+        ui.verificationInDoubt -> "A later read failed or the Quick Settings tile changed. " +
+            "Last known status is not proof of current protection. Recheck the kernel."
         active -> "Unsolicited incoming traffic is blocked on supported physical interfaces."
         state.protection == FirewallClient.Protection.INACTIVE -> "PocketUFW rules are not installed. Android’s own firewall remains unchanged."
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
@@ -231,22 +281,26 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     TidePrimaryButton(
         label = when {
             checking -> "Checking kernel protection"
+            attention && ui.verificationInDoubt -> "Recheck status"
             active -> "Turn firewall off"
             state.protection == FirewallClient.Protection.INACTIVE -> "Turn firewall on"
             state.protection == FirewallClient.Protection.ROOT_REQUIRED -> "Check root access"
             else -> "Recheck status"
-        }, icon = if (active || state.protection == FirewallClient.Protection.INACTIVE) R.drawable.tide_power else icon,
+        }, icon = if (!attention && (active || state.protection == FirewallClient.Protection.INACTIVE))
+            R.drawable.tide_power else icon,
         enabled = !checking && (attention || state.rootReady),
         modifier = Modifier.testTag("firewall-action"),
         onClick = { if (!ui.busy) { if (attention) actions.recheck() else actions.changeProtection(!active) } }
     )
     if (state.protection == FirewallClient.Protection.DEGRADED) {
         TideLink("Inspect kernel rules", onClick = showRules)
-        if (state.rootReady) OutlinedButton(onClick = actions.removePartialRules, enabled = !ui.busy,
+        if (state.rootReady && !ui.verificationInDoubt)
+            OutlinedButton(onClick = requestRemoval, enabled = !ui.busy,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Remove partial PocketUFW rules") }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", if (active) "Blocked¹" else "Not verified")
+        TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", if (verified) "Matched deny policy¹" else
+            if (!ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE) "Not installed" else "Not verified")
         TidePolicyRow(R.drawable.tide_up, "Outgoing", "Unchanged")
     }
     if (active) {
@@ -270,7 +324,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         Text(when {
             checking -> "Reading root access"
             state.rootReady -> "Root access granted · $appVersion"
-            else -> "Root access not granted · $appVersion"
+            else -> "Root access not confirmed · $appVersion"
         }, style = MaterialTheme.typography.bodySmall, color = Muted)
     }
     Text("¹ Supported physical interfaces only. Earlier Android/OEM rules may accept traffic before PocketUFW’s hooks.",

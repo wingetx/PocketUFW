@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.text.NumberFormat
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 
 internal fun count(value: Long?): String = value?.let { NumberFormat.getIntegerInstance().format(it) } ?: "—"
@@ -28,7 +29,36 @@ internal fun byteCount(value: Long?): String = when {
     value < 1024L * 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f MiB", value / (1024.0 * 1024))
     else -> String.format(Locale.getDefault(), "%.1f GiB", value / (1024.0 * 1024 * 1024))
 }
-internal fun readTime(time: Long): String = DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(time))
+/** Historical readings must include a date, not just a potentially misleading clock time. */
+internal fun readTime(time: Long, now: Long = System.currentTimeMillis()): String {
+    val date = { value: Long ->
+        Calendar.getInstance().apply { timeInMillis = value }.let {
+            it.get(Calendar.YEAR) to it.get(Calendar.DAY_OF_YEAR)
+        }
+    }
+    val fmt = if (date(time) == date(now)) DateFormat.getTimeInstance(DateFormat.MEDIUM)
+        else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM)
+    return fmt.format(Date(time))
+}
+
+internal fun bootProblemText(boot: FirewallClient.BootRestore): String? = when (boot) {
+    FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED -> null
+    FirewallClient.BootRestore.UNSUPPORTED -> "Magisk boot restoration isn't available on this device."
+    FirewallClient.BootRestore.DEGRADED -> "The boot hook is incomplete; restoring after reboot isn't verified."
+    FirewallClient.BootRestore.CONFLICT -> "Something else owns the boot hook path; PocketUFW won't overwrite it."
+    FirewallClient.BootRestore.UNKNOWN -> "Boot restoration status couldn't be read."
+}
+
+internal fun vpnRefreshBlockedReason(mode: FirewallClient.UdpConfigMode): String? = when (mode) {
+    FirewallClient.UdpConfigMode.COMMITTED ->
+        "Refresh VPN is unavailable while Committed UDP exceptions are saved. Edit them or reset to automatic."
+    FirewallClient.UdpConfigMode.DEGRADED ->
+        "Refresh VPN is unavailable until the saved UDP configuration is inspected."
+    FirewallClient.UdpConfigMode.UNKNOWN ->
+        "Refresh VPN is unavailable until the saved UDP configuration is verified."
+    FirewallClient.UdpConfigMode.AUTOMATIC -> null
+}
+
 internal fun bootLabel(boot: FirewallClient.BootRestore): String = when (boot) {
     FirewallClient.BootRestore.ENABLED -> "On"
     FirewallClient.BootRestore.DISABLED -> "Off"

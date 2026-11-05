@@ -27,7 +27,12 @@ class LoadingUiContractTests(unittest.TestCase):
         self.assertIn('DateFormat.MEDIUM', path)
         counters = (SOURCE.parent / 'TideCounters.kt').read_text()
         self.assertIn('if (ui.counterRefreshing) "Refreshing…"', counters)
-        self.assertIn('if (ui.counterRefreshNote.isNotEmpty())', counters)
+        screen = (SOURCE.parent / 'TideScreen.kt').read_text()
+        # Feedback is now fixed outside the scroll, so Reset cannot move under
+        # a second tap. It is deliberately not inserted in TideCounters.
+        self.assertIn('ui.counterRefreshNote.isNotEmpty()', screen)
+        self.assertIn('snackbarHost = {', screen)
+        self.assertNotIn('if (ui.counterRefreshNote.isNotEmpty())', counters)
         self.assertIn('Last checked:', counters)
         self.assertIn('DateFormat.getTimeInstance(DateFormat.MEDIUM)', code)
 

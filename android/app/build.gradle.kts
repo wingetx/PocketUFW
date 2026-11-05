@@ -31,6 +31,7 @@ android {
         buildConfig = true
     }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.8" }
+    testOptions { unitTests { isIncludeAndroidResources = true } }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/firewallAssets"))
 }
@@ -60,4 +61,9 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    // Audit regression tooling is test-only; never bundled into the APK.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(platform("androidx.compose:compose-bom:2024.04.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
 }

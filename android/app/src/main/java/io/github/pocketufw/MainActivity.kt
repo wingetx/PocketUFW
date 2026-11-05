@@ -11,9 +11,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -29,8 +33,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Authoritative firewall state and user operations. Tide owns only presentation.
+ * No change is made to the tile, boot scripts, netfilter engine, or root behavior.
+ *
+ * Exposed to JVM tests through FirewallGateway rather than running root commands.
+ */
 @Composable
-private fun PocketScreen(client: FirewallClient) {
+internal fun PocketScreen(client: FirewallGateway) {
     var state by remember { mutableStateOf(FirewallClient.Snapshot()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -40,47 +50,106 @@ private fun PocketScreen(client: FirewallClient) {
     var counterRefreshNote by remember { mutableStateOf("") }
     var counterRefreshError by remember { mutableStateOf(false) }
     var kernelReport by remember { mutableStateOf<FirewallClient.KernelReport?>(null) }
-    val scope = rememberCoroutineScope()
+    var checkedAt by remember { mutableStateOf(0L) }
+    var tileStamp by remember { mutableStateOf<Long?>(null) }
+    var verificationInDoubt by remember { mutableStateOf(false) }
+    var vpnRefreshing by remember { mutableStateOf(false) }
 
+    // Preserve Claude's tested guarantee that observable UI state is written
+    // on the main dispatcher, even under Robolectric's unusual test scheduler.
+    val scope = rememberCoroutineScope { Dispatchers.Main.immediate }
+    val context = LocalContext.current.applicationContext
+    val windowInfo = LocalWindowInfo.current
 
-    LaunchedEffect(client) {
-        val dashboard = withContext(Dispatchers.IO) { client.inspectDashboard() }
+    suspend fun adopt(dashboard: FirewallClient.Dashboard) {
+        // Read the stamp before publishing state, so a subsequent focus check
+        // cannot pair a new verification time with an old tile stamp.
+        val stamp = withContext(Dispatchers.IO) { TileStatusStore.read(context)?.checkedAt }
         state = dashboard.snapshot
         counters = dashboard.activity
         kernelReport = dashboard.kernelReport
+        checkedAt = System.currentTimeMillis()
+        tileStamp = stamp
+        verificationInDoubt = false
+        counterRefreshNote = ""
+        counterRefreshError = false
     }
 
-    fun perform(work: () -> FirewallClient.Operation) {
+    LaunchedEffect(client) {
+        try {
+            adopt(withContext(Dispatchers.IO) { client.inspectDashboard() })
+        } catch (_: Exception) {
+            verificationInDoubt = true
+            failed = true
+            message = "Could not inspect live firewall state. Check root access and try again."
+        }
+    }
+
+    fun perform(vpn: Boolean = false, work: () -> FirewallClient.Operation) {
         if (busy) return
         busy = true
+        message = ""
+        counterRefreshNote = ""
+        vpnRefreshing = vpn
         scope.launch {
-            val outcome = withContext(Dispatchers.IO) { work() }
-            state = outcome.dashboard.snapshot
-            counters = outcome.dashboard.activity
-            kernelReport = outcome.dashboard.kernelReport
-            failed = !outcome.success
-            message = outcome.explanation
-            busy = false
+            try {
+                val outcome = withContext(Dispatchers.IO) { work() }
+                adopt(outcome.dashboard)
+                failed = !outcome.success
+                message = outcome.explanation
+            } catch (_: Exception) {
+                verificationInDoubt = true
+                failed = true
+                message = "Firewall operation could not be verified. Recheck kernel state."
+            } finally {
+                busy = false
+                vpnRefreshing = false
+            }
         }
     }
 
     fun recheck() {
         if (busy) return
         busy = true
+        message = ""
+        counterRefreshNote = ""
         scope.launch {
-            val dashboard = withContext(Dispatchers.IO) { client.inspectDashboard() }
-            state = dashboard.snapshot
-            counters = dashboard.activity
-            kernelReport = dashboard.kernelReport
-            message = ""
-            failed = false
-            busy = false
+            try {
+                adopt(withContext(Dispatchers.IO) { client.inspectDashboard() })
+                message = ""
+                failed = false
+            } catch (_: Exception) {
+                verificationInDoubt = true
+                failed = true
+                message = "Live firewall state could not be verified."
+            } finally {
+                busy = false
+            }
         }
     }
 
-    // Counter-only root read: never reset packet counts or reconfigure the firewall.
+    // Shade-open never requests root. Regaining focus inspects the inexpensive
+    // tile status cache first; root is requested ONLY when that stamp changed.
+    LaunchedEffect(windowInfo) {
+        snapshotFlow { windowInfo.isWindowFocused }.filter { it }.collect {
+            // Keep reads and subsequent state changes on the main dispatcher.
+            // This matches the original audited behavior under JVM Compose.
+            scope.launch {
+                if (checkedAt != 0L && !busy) {
+                    val latest = withContext(Dispatchers.IO) { TileStatusStore.read(context)?.checkedAt }
+                    if (latest != tileStamp) {
+                        verificationInDoubt = true
+                        recheck()
+                    }
+                }
+            }
+        }
+    }
+
+    // Read-only counter refresh. Failure invalidates a verified claim but
+    // retains the last measured values instead of silently showing zero.
     fun refreshCounters() {
-        if (busy || state.protection != FirewallClient.Protection.ACTIVE) return
+        if (busy || verificationInDoubt || state.protection != FirewallClient.Protection.ACTIVE) return
         busy = true
         counterRefreshing = true
         counterRefreshNote = ""
@@ -89,16 +158,19 @@ private fun PocketScreen(client: FirewallClient) {
                 val fresh = withContext(Dispatchers.IO) { client.refreshCounterActivity() }
                 if (fresh.measured) {
                     counters = fresh
+                    checkedAt = fresh.checkedAt
+                    verificationInDoubt = false
                     counterRefreshError = false
                     val whenChecked = DateFormat.getTimeInstance(DateFormat.MEDIUM)
                         .format(Date(fresh.checkedAt))
                     counterRefreshNote = "Counters refreshed at $whenChecked"
                 } else {
-                    // Preserve the last verified measurement instead of showing zeros.
                     counterRefreshError = true
+                    verificationInDoubt = true
                     counterRefreshNote = fresh.error ?: "Counter refresh failed; previous counts kept."
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
+                verificationInDoubt = true
                 counterRefreshError = true
                 counterRefreshNote = "Counter refresh failed; previous counts kept."
             } finally {
@@ -108,33 +180,63 @@ private fun PocketScreen(client: FirewallClient) {
         }
     }
 
+    val verifiedActive = state.protection == FirewallClient.Protection.ACTIVE && !verificationInDoubt
+
     TideScreen(
-        ui = TideUiState(state, counters, kernelReport, busy, message, failed,
-            counterRefreshing, counterRefreshNote, counterRefreshError),
+        ui = TideUiState(
+            snapshot = state, counters = counters, report = kernelReport,
+            busy = busy, message = message, failed = failed,
+            counterRefreshing = counterRefreshing, counterRefreshNote = counterRefreshNote,
+            counterRefreshError = counterRefreshError, verificationInDoubt = verificationInDoubt,
+            checkedAt = checkedAt, vpnRefreshing = vpnRefreshing
+        ),
         appVersion = BuildConfig.VERSION_NAME,
         actions = TideActions(
             recheck = { recheck() },
             changeProtection = { next ->
-                if (!busy && state.rootReady && state.protection in listOf(
-                        FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)) {
-                    perform { client.changeProtection(next) }
-                }
+                if (!busy && !verificationInDoubt && state.rootReady &&
+                    state.protection in listOf(
+                        FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE
+                    )) perform { client.changeProtection(next) }
             },
             changeBootRestoration = { next ->
-                if (!busy) perform { client.changeBootRestoration(next) }
+                if (!busy && verifiedActive && state.bootRestore in listOf(
+                        FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED
+                    )) perform { client.changeBootRestoration(next) }
             },
             refreshCounters = { refreshCounters() },
             resetCounters = {
-                if (!busy && state.rootReady && state.protection == FirewallClient.Protection.ACTIVE) {
+                if (!busy && verifiedActive && state.rootReady) {
                     perform { client.resetCounters() }
                 }
             },
-            refreshVpn = { perform { client.refreshVerifiedPorts() } },
-            removePartialRules = { perform { client.changeProtection(false) } },
-            setUdpPorts = { ipv4, ipv6, committed ->
-                perform { client.updateUdpExceptions(ipv4, ipv6, committed) }
+            refreshVpn = {
+                if (!busy && verifiedActive &&
+                    state.udpConfigMode == FirewallClient.UdpConfigMode.AUTOMATIC) {
+                    perform(vpn = true) { client.refreshVerifiedPorts() }
+                }
             },
-            restoreAutomatic = { perform { client.restoreAutomaticUdpExceptions() } }
+            removePartialRules = {
+                if (!busy && !verificationInDoubt && state.rootReady &&
+                    state.protection == FirewallClient.Protection.DEGRADED) {
+                    perform { client.changeProtection(false) }
+                }
+            },
+            setUdpPorts = { ipv4, ipv6, committed ->
+                if (verifiedActive && !busy) perform {
+                    client.updateUdpExceptions(ipv4, ipv6, committed)
+                }
+            },
+            restoreAutomatic = {
+                if (verifiedActive && !busy) perform {
+                    client.restoreAutomaticUdpExceptions()
+                }
+            },
+            dismissMessage = {
+                message = ""
+                failed = false
+                counterRefreshNote = ""
+            }
         )
     )
 }

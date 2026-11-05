@@ -162,6 +162,32 @@ class TideAuditRegressionTest {
         node("Live ports come from Tailscale detection", substring = true).assertExists()
     }
 
+    @Test fun rectangularActionsHaveUniformHeightAcrossScreens() {
+        // These are actions, not variable-length notices or bottom navigation.
+        // Compare actual measured Compose layout across the three screens.
+        open(FakeGateway())
+        val heights = linkedMapOf<String, Int>()
+        fun measure(name: String, key: String = name) {
+            heights[key] = node(name).fetchSemanticsNode().size.height
+        }
+        measure("Turn firewall off")
+        activity()
+        measure("Refresh counters")
+        measure("Reset counters")
+        scrollClick("Kernel rules")
+        measure("Recheck kernel rules")
+        settings()
+        measure("Refresh VPN", "Settings / Refresh VPN")
+        scrollClick("VPN UDP exceptions")
+        measure("Advanced: Edit UDP exceptions")
+        measure("Reset to automatic VPN exceptions")
+        measure("Refresh VPN", "Exceptions / Refresh VPN")
+        val baseline = heights.getValue("Turn firewall off")
+        heights.forEach { (name, height) ->
+            assertEquals("$name has a different button height: $heights", baseline, height)
+        }
+    }
+
     @Test fun oldReadingsIncludeCalendarDateRatherThanOnlyTime() {
         val old = System.currentTimeMillis() - 4L * 24 * 60 * 60 * 1000
         val label = readTime(old)

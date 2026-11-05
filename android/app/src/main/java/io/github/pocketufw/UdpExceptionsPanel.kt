@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -85,7 +86,8 @@ internal fun UdpExceptionsPanel(
     Surface(color = Background, shape = RoundedCornerShape(0.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!initiallyExpanded) {
-                OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { expanded = !expanded },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                     Text(if (expanded) "Hide VPN UDP exceptions ▲" else "About / edit VPN UDP exceptions ▼",
                         fontSize = 13.sp)
                 }
@@ -137,7 +139,7 @@ internal fun UdpExceptionsPanel(
                 if (!editorOpen) {
                     OutlinedButton(shape = RoundedCornerShape(9.dp),
                         onClick = { warningOpen = true }, enabled = editable,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
                     ) { Text("Advanced: Edit UDP exceptions", fontSize = 13.sp) }
                 } else {
                     Text("One incoming UDP port per address family. Blank means none.",
@@ -184,9 +186,11 @@ internal fun UdpExceptionsPanel(
                     }
                     if (inputError.isNotBlank()) Text(inputError, color = Amber, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { editorOpen = false }, modifier = Modifier.weight(1f),
+                        OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { editorOpen = false },
+                            modifier = Modifier.weight(1f).heightIn(min = TideActionMinHeight),
                             enabled = !busy) { Text("Cancel") }
-                        Button(shape = RoundedCornerShape(9.dp), onClick = { submit() }, modifier = Modifier.weight(1f),
+                        Button(shape = RoundedCornerShape(9.dp), onClick = { submit() },
+                            modifier = Modifier.weight(1f).heightIn(min = TideActionMinHeight),
                             enabled = editable) { Text(if (committed) "Review save" else "Apply now") }
                     }
                 }
@@ -195,7 +199,7 @@ internal fun UdpExceptionsPanel(
                 // saved AUTOMATIC/COMMITTED preference.
                 if (!editorOpen) {
                     OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { autoConfirmation = true }, enabled = active,
-                        modifier = Modifier.fillMaxWidth()) {
+                        modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                         Text("Reset to automatic VPN exceptions", fontSize = 12.sp)
                     }
                 }

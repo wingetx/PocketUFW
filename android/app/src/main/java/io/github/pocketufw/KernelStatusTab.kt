@@ -86,7 +86,7 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
             }
         }
         OutlinedButton(onClick = recheck, enabled = !busy && state.protection != FirewallClient.Protection.CHECKING,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(9.dp)) {
+            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = RoundedCornerShape(9.dp)) {
             TideIcon(R.drawable.tide_refresh, tint = LocalContentColor.current)
             Spacer(Modifier.width(8.dp)); Text("Recheck kernel rules")
         }

@@ -89,7 +89,7 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
         }
         val reset: @Composable (Modifier) -> Unit = { modifier ->
             OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
-                shape = RoundedCornerShape(9.dp), modifier = modifier.fillMaxWidth().heightIn(min = 52.dp)
+                shape = RoundedCornerShape(9.dp), modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
                     .testTag("reset-counters")) { Text("Reset counters") }
         }
         if (large) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

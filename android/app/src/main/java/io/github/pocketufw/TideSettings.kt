@@ -49,7 +49,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         val vpnReason = vpnRefreshBlockedReason(state.udpConfigMode)
         OutlinedButton(onClick = actions.refreshVpn,
             enabled = active && !ui.busy && vpnReason == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(9.dp)) {
+            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = RoundedCornerShape(9.dp)) {
             Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
         }
         if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall, color = Muted)

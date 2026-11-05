@@ -21,6 +21,11 @@ import java.util.Date
 import java.util.Calendar
 import java.util.Locale
 
+/** Common minimum for Tide's rectangular action controls.
+ * Grow for large accessibility text instead of clipping labels.
+ */
+internal val TideActionMinHeight = 52.dp
+
 internal fun count(value: Long?): String = value?.let { NumberFormat.getIntegerInstance().format(it) } ?: "—"
 internal fun byteCount(value: Long?): String = when {
     value == null -> "—"
@@ -98,7 +103,7 @@ internal fun TideNotice(message: String, error: Boolean = false) {
 @Composable
 internal fun TidePrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
                               icon: Int? = null, enabled: Boolean = true) {
-    Button(onClick, modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = enabled,
+    Button(onClick, modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), enabled = enabled,
         shape = RoundedCornerShape(9.dp), contentPadding = PaddingValues(14.dp)) {
         if (icon != null) {
             TideIcon(icon, tint = LocalContentColor.current)

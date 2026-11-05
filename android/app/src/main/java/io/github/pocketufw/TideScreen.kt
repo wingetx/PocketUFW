@@ -164,7 +164,7 @@ internal fun TideScreen(
                         ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
                         ui.snapshot.rootReady && vpnReason == null
                     OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = actions.refreshVpn,
-                        enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                         Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
                     }
                     if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
@@ -296,7 +296,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TideLink("Inspect kernel rules", onClick = showRules)
         if (state.rootReady && !ui.verificationInDoubt)
             OutlinedButton(onClick = requestRemoval, enabled = !ui.busy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Remove partial PocketUFW rules") }
+            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove partial PocketUFW rules") }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", if (verified) "Matched deny policy¹" else

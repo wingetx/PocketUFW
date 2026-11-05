@@ -200,7 +200,7 @@ internal fun UdpExceptionsPanel(
                 if (!editorOpen) {
                     OutlinedButton(shape = TideActionShape, onClick = { autoConfirmation = true }, enabled = active,
                         modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                        Text("Reset to automatic VPN exceptions", fontSize = 12.sp)
+                        Text("Restore automatic Tailscale ports", fontSize = 12.sp)
                     }
                 }
                 Text("Tailscale listener ports may change, making committed manual ports stale. " +
@@ -250,7 +250,7 @@ internal fun UdpExceptionsPanel(
     if (autoConfirmation) {
         AlertDialog(
             onDismissRequest = { autoConfirmation = false },
-            title = { Text("Reset to automatic VPN exceptions?") },
+            title = { Text("Restore automatic Tailscale ports?") },
             text = { Text("Replace the current UDP exceptions with ports verified from " +
                 "running Tailscale listeners and clear any Committed setting? " +
                 "If Tailscale has no verified listeners, no UDP exception will be installed. " +
@@ -259,7 +259,7 @@ internal fun UdpExceptionsPanel(
                 TextButton(onClick = {
                     autoConfirmation = false
                     onUseAutomatic()
-                }, enabled = active) { Text("Reset exceptions") }
+                }, enabled = active) { Text("Restore ports") }
             },
             dismissButton = { TextButton(onClick = { autoConfirmation = false }) { Text("Cancel") } }
         )

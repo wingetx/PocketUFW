@@ -180,6 +180,21 @@ class TideAuditRegressionTest {
         node("Live ports come from Tailscale detection", substring = true).assertExists()
     }
 
+    @Test fun restoreAutomaticTailscalePortsIsExplicitAndConfirmed() {
+        val fake = FakeGateway()
+        open(fake); settings(); scrollClick("VPN UDP exceptions")
+        scrollClick("Restore automatic Tailscale ports")
+        node("Restore automatic Tailscale ports?").assertExists()
+        node("If Tailscale has no verified listeners", substring = true).assertExists()
+        assertEquals(0, fake.count("use-auto"))
+        node("Cancel").performClick()
+        assertEquals(0, fake.count("use-auto"))
+        scrollClick("Restore automatic Tailscale ports")
+        node("Restore ports").performClick()
+        compose.settle { fake.count("use-auto") == 1 }
+        assertEquals(1, fake.count("use-auto"))
+    }
+
     @Test fun rectangularActionsHaveUniformHeightAcrossScreens() {
         // These are actions, not variable-length notices or bottom navigation.
         // Compare actual measured Compose layout across the three screens.
@@ -197,7 +212,7 @@ class TideAuditRegressionTest {
         settings()
         scrollClick("VPN UDP exceptions")
         measure("Advanced: Edit UDP exceptions")
-        measure("Reset to automatic VPN exceptions")
+        measure("Restore automatic Tailscale ports")
         measure("Refresh Tailscale ports")
         val baseline = heights.getValue("Turn firewall off")
         heights.forEach { (name, height) ->

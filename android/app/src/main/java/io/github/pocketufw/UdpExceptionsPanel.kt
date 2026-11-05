@@ -119,7 +119,7 @@ internal fun UdpExceptionsPanel(
                     // An Experimental edit changes live rules but not this saved mode,
                     // and detected ports aren't re-checked once installed.
                     Text("Live ports come from Tailscale detection when the firewall starts or " +
-                        "Refresh VPN runs, or from an Experimental edit. Tailscale can change " +
+                        "Refresh Tailscale ports runs, or from an Experimental edit. Tailscale can change " +
                         "ports later, so they may not match its current listeners.",
                         color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 }
@@ -166,7 +166,7 @@ internal fun UdpExceptionsPanel(
                             Text("Experimental", fontSize = 14.sp)
                             Text(
                                 "Temporary: resets when you turn the firewall off/on or reboot. " +
-                                    "Refresh VPN may replace it. Closing this app or reconnecting " +
+                                    "Refresh Tailscale ports may replace it. Closing this app or reconnecting " +
                                     "Tailscale does not reset it.",
                                 color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                             )
@@ -206,7 +206,7 @@ internal fun UdpExceptionsPanel(
                 }
                 Text("Tailscale listener ports may change, making committed manual ports stale. " +
                     "Changing a port may interrupt direct connections; the engine attempts " +
-                    "rollback on failed edits. Refresh VPN won't overwrite committed ports.",
+                    "rollback on failed edits. Refresh Tailscale ports won't overwrite committed ports.",
                     color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }

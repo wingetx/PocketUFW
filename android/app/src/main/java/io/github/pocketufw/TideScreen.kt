@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -83,20 +84,25 @@ internal fun TideScreen(
         if (exceptions) exceptions = false else destination = TideDestination.FIREWALL
     }
 
+    val note = when {
+        ui.busy && !ui.counterRefreshing ->
+            if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Working…"
+        ui.message.isNotEmpty() -> ui.message
+        ui.counterRefreshNote.isNotEmpty() -> ui.counterRefreshNote
+        else -> ""
+    }
+    val density = LocalDensity.current
+    var bannerHeight by remember { mutableStateOf(0.dp) }
+
     Scaffold(
         snackbarHost = {
-            val note = when {
-                ui.busy && !ui.counterRefreshing ->
-                    if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Working…"
-                ui.message.isNotEmpty() -> ui.message
-                ui.counterRefreshNote.isNotEmpty() -> ui.counterRefreshNote
-                else -> ""
-            }
             if (note.isNotEmpty()) {
-                Surface(color = if (ui.failed || ui.counterRefreshError)
-                    MaterialTheme.colorScheme.secondaryContainer else Panel,
+                val problem = ui.failed || ui.counterRefreshError
+                Surface(color = if (problem) MaterialTheme.colorScheme.secondaryContainer else Panel,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    modifier = Modifier.onSizeChanged { bannerHeight = with(density) { it.height.toDp() } }
+                        .testTag(if (problem) "banner-failed" else "banner")
+                        .fillMaxWidth().padding(horizontal = 16.dp)
                         .padding(bottom = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }) {
                     Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -147,7 +153,10 @@ internal fun TideScreen(
             }
         }
     ) { inset ->
-        Column(Modifier.fillMaxSize().padding(inset).verticalScroll(scroll)
+        // The banner overlays this area. Shrinking the scrolling viewport by its height
+        // leaves nothing under it, at any scroll position, to be hidden or to lose a tap.
+        Column(Modifier.fillMaxSize().padding(inset)
+            .padding(bottom = if (note.isEmpty()) 0.dp else bannerHeight).verticalScroll(scroll)
             .padding(horizontal = 24.dp).padding(top = 12.dp, bottom = 28.dp)
             .testTag("tide-content"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             when {
@@ -214,7 +223,11 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     val checking = state.protection == FirewallClient.Protection.CHECKING
     val attention = ui.verificationInDoubt || state.protection in listOf(
         FirewallClient.Protection.DEGRADED, FirewallClient.Protection.ROOT_REQUIRED)
-    val accent = if (verified) Mint else if (attention) Amber else Muted
+    // Rules can verify while traffic still goes around them. The state stays ACTIVE;
+    // only what it's allowed to imply changes.
+    val bypass = bypassRules(ui.report)
+    val coverageGap = active && (state.uncoveredInterfaces.isNotEmpty() || bypass.isNotEmpty())
+    val accent = if (coverageGap || attention) Amber else if (verified) Mint else Muted
     val title = if (ui.verificationInDoubt) "Not\nverified." else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> "Active."
         FirewallClient.Protection.INACTIVE -> "Off."
@@ -223,13 +236,14 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         FirewallClient.Protection.ROOT_REQUIRED -> "Root\nrequired."
     }
     val label = if (ui.verificationInDoubt) "Recheck required" else when (state.protection) {
-        FirewallClient.Protection.ACTIVE -> "Kernel rules verified"
+        FirewallClient.Protection.ACTIVE ->
+            if (coverageGap) "Rules verified · not all traffic filtered" else "Kernel rules verified"
         FirewallClient.Protection.INACTIVE -> "PocketUFW is inactive"
         FirewallClient.Protection.CHECKING -> "Reading kernel state"
         FirewallClient.Protection.DEGRADED -> "Protection not verified"
         FirewallClient.Protection.ROOT_REQUIRED -> "Root permission needed"
     }
-    val icon = if (ui.verificationInDoubt) R.drawable.tide_warning else when (state.protection) {
+    val icon = if (ui.verificationInDoubt || coverageGap) R.drawable.tide_warning else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> R.drawable.tide_check
         FirewallClient.Protection.INACTIVE -> R.drawable.tide_off
         FirewallClient.Protection.CHECKING -> R.drawable.tide_refresh
@@ -237,8 +251,11 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         FirewallClient.Protection.ROOT_REQUIRED -> R.drawable.tide_key
     }
     Column(Modifier.semantics(mergeDescendants = true) {
-        stateDescription = if (ui.verificationInDoubt) "Not verified; recheck required"
-            else state.protection.name.replace('_', ' ')
+        stateDescription = when {
+            ui.verificationInDoubt -> "Not verified; recheck required"
+            coverageGap -> "Active; not all traffic filtered"
+            else -> state.protection.name.replace('_', ' ')
+        }
         liveRegion = LiveRegionMode.Polite
     }, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -269,10 +286,16 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         checking -> "Reading firewall rules and Magisk boot status. Protection has not yet been verified."
         ui.verificationInDoubt -> "A later read failed or the Quick Settings tile changed. " +
             "Last known status is not proof of current protection. Recheck the kernel."
+        coverageGap -> "Unsolicited incoming traffic is blocked only where PocketUFW's rules see it."
         active -> "Unsolicited incoming traffic is blocked on supported physical interfaces."
         state.protection == FirewallClient.Protection.INACTIVE -> "PocketUFW rules are not installed. Android’s own firewall remains unchanged."
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
+    if (active && state.uncoveredInterfaces.isNotEmpty()) {
+        TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") + ".", true)
+    }
+    if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
+    restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
 
     // Keep verified appearance steady during other operations; the existing busy guard ignores taps.
     TidePrimaryButton(
@@ -296,8 +319,12 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove partial PocketUFW rules") }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", if (verified) "Matched deny policy¹" else
-            if (!ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE) "Not installed" else "Not verified")
+        TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {
+            verified && coverageGap -> "Partly filtered¹"
+            verified -> "Matched deny policy¹"
+            !ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE -> "Not installed"
+            else -> "Not verified"
+        })
         TidePolicyRow(R.drawable.tide_up, "Outgoing", "Unchanged")
     }
     if (active) {

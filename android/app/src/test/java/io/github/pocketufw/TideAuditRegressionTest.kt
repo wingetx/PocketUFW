@@ -15,6 +15,7 @@ import io.github.pocketufw.FirewallClient.UdpConfigMode
 import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -35,6 +36,8 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34])
 class TideAuditRegressionTest {
     @get:Rule val compose = createEmptyComposeRule()
+
+    @After fun drain() = drainMainLooper()
 
     private fun node(value: String, substring: Boolean = false) =
         compose.onNodeWithText(value, substring = substring)
@@ -86,14 +89,16 @@ class TideAuditRegressionTest {
         val fake = FakeGateway(stateDashboard(Protection.DEGRADED, true, "Incomplete firewall."))
         open(fake, expect = "Needs")
         scrollClick("Remove partial PocketUFW rules")
-        assertEquals(0, fake.count("disable"))
+        assertEquals(0, fake.count("remove-partial"))
         node("Remove partial PocketUFW rules?").assertExists()
         node("Magisk boot hook", substring = true).assertExists()
         node("Cancel").performClick()
-        assertEquals(0, fake.count("disable"))
+        assertEquals(0, fake.count("remove-partial"))
         scrollClick("Remove partial PocketUFW rules")
         node("Remove rules").performClick()
-        compose.settle { fake.count("disable") == 1 }
+        compose.settle { fake.count("remove-partial") == 1 }
+        // The plain switch would act on a firewall that had recovered meanwhile.
+        assertEquals(0, fake.count("disable"))
     }
 
     @Test fun failedCounterReadWithdrawsVerifiedClaimButRetainsLastMeasurement() {

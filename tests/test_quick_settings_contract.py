@@ -52,6 +52,31 @@ class QuickSettingsContractTests(unittest.TestCase):
         self.assertNotIn('android.permission.FOREGROUND_SERVICE', permissions)
         self.assertNotIn('android.permission.POST_NOTIFICATIONS', permissions)
 
+    def test_boot_receiver_is_private_and_only_requests_a_tile_rebind(self):
+        permissions = {p.attrib[NAMESPACE + 'name'] for p in
+                       self.root.findall('./uses-permission')}
+        self.assertIn('android.permission.RECEIVE_BOOT_COMPLETED', permissions)
+        receivers = self.root.findall('./application/receiver')
+        self.assertEqual(len(receivers), 1)
+        receiver = receivers[0]
+        self.assertEqual(receiver.attrib[NAMESPACE + 'name'], '.BootTileReceiver')
+        self.assertEqual(receiver.attrib[NAMESPACE + 'exported'], 'false')
+        actions = [node.attrib[NAMESPACE + 'name'] for node in
+                   receiver.findall('./intent-filter/action')]
+        self.assertEqual(actions, ['android.intent.action.BOOT_COMPLETED'])
+        code = (PROJECT / 'android/app/src/main/java/io/github/pocketufw/BootTileReceiver.kt').read_text()
+        self.assertIn('TileStatusStore.request(context)', code)
+        for forbidden in ('FirewallClient', 'startService', 'startForeground',
+                          'ProcessBuilder', 'goAsync'):
+            self.assertNotIn(forbidden, code.split('internal class', 1)[1])
+
+    def test_rotation_does_not_recreate_the_activity(self):
+        main = self.root.findall('./application/activity')[0]
+        changes = set(main.attrib[NAMESPACE + 'configChanges'].split('|'))
+        self.assertEqual(changes, {'orientation', 'screenSize', 'smallestScreenSize',
+                                   'screenLayout', 'keyboard', 'keyboardHidden',
+                                   'navigation', 'uiMode', 'density', 'fontScale'})
+
     @classmethod
     def tile_code(cls):
         return (PROJECT / 'android/app/src/main/java/io/github/pocketufw/FirewallTileService.kt').read_text()
@@ -89,7 +114,7 @@ class QuickSettingsContractTests(unittest.TestCase):
     def test_tile_unlocks_before_security_sensitive_toggle(self):
         code = self.tile_code()
         self.assertIn('if (isLocked) unlockAndRun', code)
-        self.assertIn('rootMutex.withLock { client.toggleProtection() }', code)
+        self.assertIn('rootMutex.withLock {', code)
         self.assertNotIn('startForeground(', code)
 
     def test_active_tile_never_requests_root_to_render(self):
@@ -99,26 +124,42 @@ class QuickSettingsContractTests(unittest.TestCase):
         self.assertNotIn('inspectDashboard()', listening)
         self.assertNotIn('toggleProtection()', listening)
         self.assertNotIn('withContext(Dispatchers.IO)', listening)
-        self.assertNotIn('client.inspectDashboard()', code)
+        self.assertNotIn('client.', listening)
         self.assertIn('override fun onTileAdded()', code)
         self.assertIn('TileStatusStore.request(applicationContext)', code)
         self.assertNotIn('delay(', code)
 
-    def test_cached_status_cannot_drive_kernel_toggle(self):
+    def test_tap_never_toggles_blindly(self):
         code = self.tile_code()
-        self.assertIn('client.toggleProtection()', code)
+        # A tap passes on the state it showed, and the bridge decides. It has no
+        # way to name a direction, and nothing it can do without a known state.
+        self.assertIn('client.toggleProtection(expected)', code)
         self.assertNotIn('client.changeProtection(', code)
+        self.assertIn('if (expected != null) toggleFrom(expected) else verify()', code)
+        self.assertIn('client.inspectDashboard()', code)
         self.assertIn('TileStatusStore.read(applicationContext)', code)
         self.assertIn('Tile.STATE_ACTIVE', code)
         self.assertIn('Tile.STATE_INACTIVE', code)
-        self.assertIn('Tile.STATE_UNAVAILABLE', code)
         self.assertIn('Not verified this boot', code)
         self.assertNotIn('Verified now', code)
 
+    def test_no_state_makes_the_tile_ignore_taps(self):
+        # SystemUI drops taps on an unavailable tile, so it could never recover.
+        self.assertNotIn('STATE_UNAVAILABLE', self.tile_code())
+
+    def test_tile_writes_are_tagged_as_coming_from_the_tile(self):
+        self.assertIn('FirewallClient(it, TileStatusStore.SOURCE_TILE)', self.tile_code())
+
+    def test_root_timeout_invalidates_rather_than_caching_a_false_state(self):
+        client = self.client_code()
+        self.assertIn('TileStatusStore.invalidate(context, source)', client)
+        self.assertIn('fun invalidate(', self.store_code())
+
     def test_tile_cache_only_changes_on_existing_root_actions(self):
         client = self.client_code()
-        self.assertIn('}).also { TileStatusStore.publish(context, it.snapshot) }', client)
-        self.assertIn('}).also { TileStatusStore.publish(context, it.dashboard.snapshot) }', client)
+        self.assertEqual(client.count('TileStatusStore.publish('), 1)
+        self.assertIn('TileStatusStore.publish(context, dashboard.snapshot, readStartedAt, source)', client)
+        self.assertEqual(client.count('saveForTile('), 3)
         self.assertIn('ProcessBuilder("su", "-c", command)', client)
         store = self.store_code()
         self.assertIn('TileService.requestListeningState(', store)

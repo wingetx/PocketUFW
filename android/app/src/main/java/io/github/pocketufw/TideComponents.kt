@@ -55,6 +55,21 @@ internal fun bootProblemText(boot: FirewallClient.BootRestore): String? = when (
     FirewallClient.BootRestore.UNKNOWN -> "Boot restoration status couldn't be read."
 }
 
+/**
+ * Turning off always disarms the boot hook, so off with the hook still armed can
+ * only mean the last boot's restoration failed or the rules were removed elsewhere.
+ */
+internal fun restoreFailureNotice(state: FirewallClient.Snapshot, verificationInDoubt: Boolean): String? =
+    if (!verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE &&
+        state.bootRestore == FirewallClient.BootRestore.ENABLED) {
+        "Restore after reboot is on, but the firewall isn't running. It may not have started at the last boot."
+    } else null
+
+internal const val BYPASS_NOTICE = "An earlier rule accepts traffic before PocketUFW's hooks."
+
+internal fun bypassRules(report: FirewallClient.KernelReport?): List<String> =
+    report?.let { it.ipv4.bypass + it.ipv6.bypass }.orEmpty()
+
 internal fun vpnRefreshBlockedReason(mode: FirewallClient.UdpConfigMode): String? = when (mode) {
     FirewallClient.UdpConfigMode.COMMITTED ->
         "Tailscale port refresh is unavailable while Committed UDP exceptions are saved. Edit them or reset to automatic."

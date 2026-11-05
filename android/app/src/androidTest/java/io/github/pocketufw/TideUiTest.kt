@@ -30,12 +30,12 @@ class TideUiTest {
             "-A POCKETUFW_IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
             "-A POCKETUFW_IN -p ${if (ipv6) "ipv6-icmp" else "icmp"} -j ACCEPT",
             "-A POCKETUFW_IN -m conntrack --ctstate INVALID -j DROP",
-            "-A POCKETUFW_IN -p udp --sport ${if (ipv6) "547 --dport 546" else "67 --dport 68"} -j ACCEPT",
-            "-A POCKETUFW_IN -p udp -d ${if (ipv6) "ff02::fb" else "224.0.0.251"} --dport 5353 -j ACCEPT",
+            "-A POCKETUFW_IN -p udp -m udp --sport ${if (ipv6) "547 --dport 546" else "67 --dport 68"} -j ACCEPT",
+            "-A POCKETUFW_IN -d ${if (ipv6) "ff02::fb/128" else "224.0.0.251/32"} -p udp -m udp --dport 5353 -j ACCEPT",
             "-A POCKETUFW_IN -p esp -j ACCEPT",
             "-A POCKETUFW_IN -j POCKETUFW_TS",
             "-A POCKETUFW_IN -j DROP"
-        ), vpnExceptions = listOf("-A POCKETUFW_TS -p udp --dport 41641 -j ACCEPT")
+        ), vpnExceptions = listOf("-A POCKETUFW_TS -p udp -m udp --dport 41641 -j ACCEPT")
     )
 
     private fun sample() = TideUiState(

@@ -38,7 +38,7 @@ class TideAuditContractTests(unittest.TestCase):
         screen = SCREENS["TideScreen.kt"]
         self.assertIn('snackbarHost = {', screen)
         self.assertLess(screen.index('snackbarHost = {'),
-                        screen.index('Column(Modifier.fillMaxSize().padding(inset).verticalScroll(scroll)'))
+                        screen.index('Column(Modifier.fillMaxSize().padding(inset)'))
         self.assertNotIn('if (ui.message.isNotEmpty()) TideNotice(', screen)
         self.assertNotIn('if (ui.counterRefreshNote.isNotEmpty()) TideNotice(',
                          SCREENS["TideCounters.kt"])
@@ -63,10 +63,10 @@ class TideAuditContractTests(unittest.TestCase):
 
     def test_manual_recheck_feedback_is_read_only_and_background_recheck_silent(self):
         main = SCREENS["MainActivity.kt"]
-        block = main[main.index('fun recheck(showFeedback: Boolean = false) {'):
+        block = main[main.index('fun recheck(showFeedback: Boolean = false'):
                      main.index('    // Shade-open never requests root.')]
         self.assertIn('client.inspectDashboard()', block)
-        self.assertIn('if (showFeedback) when', block)
+        self.assertIn('if (showFeedback) message = when', block)
         self.assertIn('No rules changed.', block)
         self.assertNotIn('client.changeProtection(', block)
         self.assertNotIn('client.resetCounters()', block)
@@ -75,6 +75,39 @@ class TideAuditContractTests(unittest.TestCase):
                      main.index('    // Read-only counter refresh.')]
         self.assertIn('recheck()', focus)
         self.assertNotIn('recheck(showFeedback = true)', focus)
+
+    def test_tile_writes_are_followed_without_polling_or_blaming_root(self):
+        main = SCREENS["MainActivity.kt"]
+        self.assertIn('DisposableEffect(context, client)', main)
+        self.assertIn('registerOnSharedPreferenceChangeListener(listener)', main)
+        self.assertIn('unregisterOnSharedPreferenceChangeListener(listener)', main)
+        block = main[main.index('val listener = SharedPreferences'):
+                     main.index('onDispose {')]
+        self.assertIn('windowInfo.isWindowFocused', block)
+        self.assertIn('TileStatusStore.SOURCE_APP', block)
+        self.assertNotIn('client.', block)
+        self.assertNotIn('showFeedback', block)
+
+    def test_counter_feedback_and_dismissal_clear_older_results(self):
+        main = SCREENS["MainActivity.kt"]
+        counters = main[main.index('fun refreshCounters() {'):main.index('scope.launch', main.index('fun refreshCounters() {'))]
+        self.assertIn('message = ""', counters)
+        self.assertIn('failed = false', counters)
+        dismiss = main[main.index('dismissMessage = {'):]
+        self.assertIn('counterRefreshError = false', dismiss)
+
+    def test_partial_removal_has_its_own_bridge_action(self):
+        main = SCREENS["MainActivity.kt"]
+        removal = main[main.index('removePartialRules = {'):main.index('setUdpPorts = {')]
+        self.assertIn('client.removePartialRules()', removal)
+        self.assertNotIn('client.changeProtection', removal)
+        client = (KOTLIN / "FirewallClient.kt").read_text(encoding="utf-8")
+        self.assertIn('performAction("remove-partial")', client)
+
+    def test_active_wording_claims_only_what_the_engine_checks(self):
+        client = (KOTLIN / "FirewallClient.kt").read_text(encoding="utf-8")
+        self.assertIn('"IPv4 and IPv6 rules and hooks verified."', client)
+        self.assertNotIn('default inbound policy', client)
 
     def test_failed_counter_read_retains_numbers_and_withdraws_claim(self):
         main = SCREENS["MainActivity.kt"]
@@ -106,6 +139,7 @@ class TideAuditContractTests(unittest.TestCase):
         self.assertEqual(screen.count('else "Refresh Tailscale ports"'), 1)
         self.assertNotIn('"Refresh VPN"', screen)
         self.assertIn('not your current VPN connection', screen)
+        self.assertNotIn('Refresh VPN', SCREENS["UdpExceptionsPanel.kt"])
 
     def test_historical_timestamps_have_date(self):
         self.assertIn('Calendar.getInstance()', SCREENS["TideComponents.kt"])

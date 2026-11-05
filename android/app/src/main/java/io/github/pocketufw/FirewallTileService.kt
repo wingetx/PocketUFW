@@ -1,5 +1,6 @@
 package io.github.pocketufw
 
+import android.content.Context
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -18,12 +19,15 @@ import kotlinx.coroutines.withContext
 
 /**
  * Active Quick Settings tile: NO root check on shade-open or listening.
- * Status comes from a previously completed app inspection or explicit tap;
- * taps still use the live kernel-verified root toggle (including lock guard).
+ * Status comes from a previously completed app inspection or explicit tap.
+ * A tap toggles only from a state the tile could honestly show as on or off,
+ * and the bridge refuses if the kernel disagrees. Otherwise a tap only checks.
  * No resident service, polling, periodic su, or inferred protection claims.
  */
 class FirewallTileService : TileService() {
-    private val client by lazy { FirewallClient(applicationContext) }
+    /** Replaced only by JVM tests, so that they never start a real `su`. */
+    internal var newClient: (Context) -> FirewallClient = { FirewallClient(it, TileStatusStore.SOURCE_TILE) }
+    private val client by lazy { newClient(applicationContext) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val rootMutex = Mutex()
     private var toggling = false
@@ -44,36 +48,58 @@ class FirewallTileService : TileService() {
         super.onClick()
         if (toggling) return
         // Turning OFF a firewall must not be possible from a locked screen.
-        if (isLocked) unlockAndRun { toggleFromLiveState() }
-        else toggleFromLiveState()
+        if (isLocked) unlockAndRun { actOnTap() }
+        else actOnTap()
     }
 
-    private fun toggleFromLiveState() {
+    private fun actOnTap() {
         if (toggling) return
         toggling = true
-        show(TileStatusStore.read(applicationContext), switching = true)
+        val last = TileStatusStore.read(applicationContext)
+        // Unknown looks like off, but it may be on: toggling blindly could switch
+        // off a firewall the user believed was off. Such a tap only checks.
+        val expected = last?.protection?.takeIf {
+            it == FirewallClient.Protection.ACTIVE || it == FirewallClient.Protection.INACTIVE
+        }
+        show(last, if (expected != null) "Switching..." else "Checking...")
         scope.launch {
-            // Never trust the cached tile state to determine what to toggle.
             // FirewallClient publishes the verified result to the tile cache.
-            val result = withContext(Dispatchers.IO) {
-                rootMutex.withLock { client.toggleProtection() }
+            val problem = withContext(Dispatchers.IO) {
+                rootMutex.withLock { if (expected != null) toggleFrom(expected) else verify() }
             }
             show(TileStatusStore.read(applicationContext))
-            if (!result.success) {
-                Toast.makeText(applicationContext, result.explanation, Toast.LENGTH_LONG).show()
-            }
+            if (problem != null) Toast.makeText(applicationContext, problem, Toast.LENGTH_LONG).show()
             toggling = false
         }
     }
 
-    private fun show(last: TileStatusStore.LastChecked?, switching: Boolean = false) {
+    /** Returns what went wrong, if anything. */
+    private fun toggleFrom(expected: FirewallClient.Protection): String? {
+        val result = client.toggleProtection(expected)
+        // A newer result reached the cache first, so the cache isn't this result.
+        if (result.dashboard.superseded) client.inspectDashboard()
+        return result.explanation.takeUnless { result.success }
+    }
+
+    /** Returns why the firewall still can't be called on or off, if it can't. */
+    private fun verify(): String? {
+        val snapshot = client.inspectDashboard().let { first ->
+            if (first.superseded) client.inspectDashboard() else first
+        }.snapshot
+        return snapshot.details.takeUnless {
+            snapshot.protection == FirewallClient.Protection.ACTIVE ||
+                snapshot.protection == FirewallClient.Protection.INACTIVE
+        }
+    }
+
+    private fun show(last: TileStatusStore.LastChecked?, pending: String? = null) {
         val tile = qsTile ?: return
         val status = last?.protection
         val checkedAt = last?.checkedAt?.let {
             DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
         }
         val detail = when {
-            switching -> "Switching..."
+            pending != null -> pending
             status == FirewallClient.Protection.ACTIVE -> "On · Checked $checkedAt"
             status == FirewallClient.Protection.INACTIVE -> "Off · Checked $checkedAt"
             status == FirewallClient.Protection.ROOT_REQUIRED -> "Root access needed"
@@ -83,16 +109,17 @@ class FirewallTileService : TileService() {
         tile.icon = Icon.createWithResource(this, R.drawable.shield_quick_tile)
         tile.label = "PocketUFW"
         // Only a completed verification may display green. Unknown means
-        // unknown, not a statement that kernel rules are switched off.
-        tile.state = when (status) {
-            FirewallClient.Protection.ACTIVE -> Tile.STATE_ACTIVE
-            FirewallClient.Protection.INACTIVE -> Tile.STATE_INACTIVE
-            FirewallClient.Protection.DEGRADED,
-            FirewallClient.Protection.ROOT_REQUIRED -> Tile.STATE_UNAVAILABLE
-            else -> Tile.STATE_INACTIVE
+        // unknown, not a statement that kernel rules are switched off: the subtitle
+        // says so. SystemUI drops taps on an unavailable tile, which would leave a
+        // tap no way to check the firewall again, so problem states stay tappable.
+        tile.state = if (status == FirewallClient.Protection.ACTIVE) Tile.STATE_ACTIVE
+            else Tile.STATE_INACTIVE
+        val tapMeaning = when (status) {
+            FirewallClient.Protection.ACTIVE -> "Tap to turn off."
+            FirewallClient.Protection.INACTIVE -> "Tap to turn on."
+            else -> "Tap to check the firewall. This doesn't change it."
         }
-        tile.contentDescription =
-            "PocketUFW: $detail. Tap to toggle using live kernel verification."
+        tile.contentDescription = "PocketUFW: $detail. $tapMeaning"
         if (Build.VERSION.SDK_INT >= 29) tile.subtitle = detail
         if (Build.VERSION.SDK_INT >= 30) tile.stateDescription = detail
         tile.updateTile()

@@ -9,6 +9,7 @@ internal interface FirewallGateway {
     fun inspectDashboard(): FirewallClient.Dashboard
     fun refreshCounterActivity(): FirewallClient.RuleActivity
     fun changeProtection(activate: Boolean): FirewallClient.Operation
+    fun removePartialRules(): FirewallClient.Operation
     fun changeBootRestoration(enabled: Boolean): FirewallClient.Operation
     fun refreshVerifiedPorts(): FirewallClient.Operation
     fun resetCounters(): FirewallClient.Operation

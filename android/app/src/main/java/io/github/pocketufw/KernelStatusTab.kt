@@ -25,6 +25,11 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (verificationInDoubt) TideNotice(
             "Last known rule report only. Current kernel protection needs rechecking.", true)
+        if (report != null && bypassRules(report).isNotEmpty()) {
+            val families = listOfNotNull("IPv4".takeIf { report.ipv4.bypass.isNotEmpty() },
+                "IPv6".takeIf { report.ipv6.bypass.isNotEmpty() })
+            TideNotice(BYPASS_NOTICE + " Listed under " + families.joinToString(" and ") + ".", true)
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("IPv4", "IPv6").forEachIndexed { index, name ->
@@ -60,6 +65,11 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                     SelectionContainer {
                         Column(Modifier.padding(16.dp).horizontalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (family.bypass.isNotEmpty()) {
+                                Text("Earlier INPUT rules · bypass PocketUFW", color = Amber,
+                                    style = MaterialTheme.typography.labelMedium)
+                                family.bypass.forEach { RawKernelRule(it) }
+                            }
                             Text("INPUT hooks", color = Mint, style = MaterialTheme.typography.labelMedium)
                             family.hooks.forEach { RawKernelRule(it) }
                             Text("POCKETUFW_IN", color = Mint, style = MaterialTheme.typography.labelMedium)
@@ -71,6 +81,12 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                     }
                 }
             } else {
+                if (family.bypass.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("EARLIER INPUT RULES · BYPASS POCKETUFW", style = MaterialTheme.typography.labelSmall,
+                        letterSpacing = 1.sp, color = Amber)
+                    family.bypass.forEachIndexed { index, rule -> KernelRuleRow(index, rule, "bypass") }
+                    TideDivider()
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("POCKETUFW · KERNEL ORDER", style = MaterialTheme.typography.labelSmall,
                         letterSpacing = 1.sp, color = Muted)
@@ -101,7 +117,12 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
 @Composable
 private fun KernelRuleRow(index: Int, rule: String, chain: String = "inbound") {
     val (action, detail) = describeRule(rule)
-    val color = when (action) { "ALLOW" -> Mint; "DROP" -> MaterialTheme.colorScheme.error; else -> Muted }
+    val color = when {
+        chain == "bypass" -> Amber
+        action == "ALLOW" -> Mint
+        action == "DROP" || action == "REJECT" -> MaterialTheme.colorScheme.error
+        else -> Muted
+    }
     val large = LocalDensity.current.fontScale > 1.2f
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("$chain-rule-$index")
         .semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -120,26 +141,39 @@ private fun RawKernelRule(rule: String) {
     Text(rule, fontFamily = TideMono, style = MaterialTheme.typography.bodySmall, color = Foreground, softWrap = false)
 }
 
-private fun describeRule(rule: String): Pair<String, String> = when {
-    rule.contains("--ctstate") &&
-        rule.contains("ESTABLISHED") && rule.contains("RELATED") ->
-        "ALLOW" to "Established / related replies"
-    rule.endsWith("-j NFLOG") || rule.contains("-j NFLOG ") ->
-        "LOG" to "Temporary diagnostic probe (non-verdict)"
-    rule.contains("--ctstate INVALID") && rule.endsWith("-j DROP") -> "DROP" to "Invalid packets"
-    rule.contains("-p ipv6-icmp") -> "ALLOW" to "ICMPv6 control traffic"
-    rule.contains("-p icmp") -> "ALLOW" to "ICMP control traffic"
-    rule.contains("--sport 67") && rule.contains("--dport 68") ->
-        "ALLOW" to "DHCP replies"
-    rule.contains("--sport 547") && rule.contains("--dport 546") ->
-        "ALLOW" to "DHCPv6 replies"
-    rule.contains("--dport 5353") -> "ALLOW" to "Multicast DNS"
-    rule.contains("-p esp") -> "ALLOW" to "ESP / IPsec"
-    rule.endsWith("-j POCKETUFW_TS") -> "CHECK" to "VPN listener exceptions"
-    rule.endsWith("-j DROP") -> "DROP" to "Other incoming packets"
-    rule.startsWith("-A POCKETUFW_TS ") &&
-        rule.contains("--dport ") && rule.endsWith("-j ACCEPT") ->
-        "ALLOW" to ("VPN UDP exception, port " +
-            rule.substringAfter("--dport ").substringBefore(' '))
-    else -> "RULE" to rule
+/**
+ * Plain words for the rules PocketUFW installs, exactly as the kernel lists them.
+ * A label is a claim about what a rule does, so a rule that differs in any way,
+ * target and destination included, is shown as itself rather than as the rule it
+ * resembles. `iptables -S` adds "-m udp" on some Android versions and not others.
+ */
+private val KNOWN_RULES = mapOf(
+    "-A POCKETUFW_IN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" to ("ALLOW" to "Established / related replies"),
+    "-A POCKETUFW_IN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT" to ("ALLOW" to "Established / related replies"),
+    "-A POCKETUFW_IN -m conntrack --ctstate INVALID -j DROP" to ("DROP" to "Invalid packets"),
+    "-A POCKETUFW_IN -p ipv6-icmp -j ACCEPT" to ("ALLOW" to "ICMPv6 control traffic"),
+    "-A POCKETUFW_IN -p icmp -j ACCEPT" to ("ALLOW" to "ICMP control traffic"),
+    "-A POCKETUFW_IN -p udp --sport 67 --dport 68 -j ACCEPT" to ("ALLOW" to "DHCP replies"),
+    "-A POCKETUFW_IN -p udp --sport 547 --dport 546 -j ACCEPT" to ("ALLOW" to "DHCPv6 replies"),
+    "-A POCKETUFW_IN -d 224.0.0.251/32 -p udp --dport 5353 -j ACCEPT" to ("ALLOW" to "Multicast DNS"),
+    "-A POCKETUFW_IN -d ff02::fb/128 -p udp --dport 5353 -j ACCEPT" to ("ALLOW" to "Multicast DNS"),
+    "-A POCKETUFW_IN -p esp -j ACCEPT" to ("ALLOW" to "ESP / IPsec"),
+    "-A POCKETUFW_IN -j POCKETUFW_TS" to ("CHECK" to "VPN listener exceptions"),
+    "-A POCKETUFW_IN -j DROP" to ("DROP" to "Other incoming packets"),
+)
+private val UDP_EXCEPTION = Regex("-A POCKETUFW_TS -p udp --dport ([1-9][0-9]{0,4}) -j ACCEPT")
+
+internal fun describeRule(rule: String): Pair<String, String> {
+    val form = rule.replace(" -p udp -m udp ", " -p udp ")
+    KNOWN_RULES[form]?.let { return it }
+    UDP_EXCEPTION.matchEntire(form)?.let {
+        return "ALLOW" to ("VPN UDP exception, port " + it.groupValues[1])
+    }
+    // iptables lists matches, comments included, before the target.
+    return when (val target = rule.substringAfterLast(" -j ", "").substringBefore(' ')) {
+        "" -> "RULE" to rule
+        "ACCEPT" -> "ALLOW" to rule
+        "NFLOG" -> "LOG" to "Temporary diagnostic probe (non-verdict)"
+        else -> target to rule
+    }
 }

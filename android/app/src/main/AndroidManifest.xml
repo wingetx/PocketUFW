@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Only so the tile can stop claiming last boot's state. See BootTileReceiver. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -11,8 +13,11 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false"
         android:supportsRtl="true">
+        <!-- Rotation must not recreate this: a new Activity meant a new root session,
+             and it dropped the guard against starting a second operation. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -43,5 +48,13 @@
                 android:name="android.service.quicksettings.ACTIVE_TILE"
                 android:value="true" />
         </service>
+        <!-- Runs once per boot and only asks SystemUI to rebind the tile. No root. -->
+        <receiver
+            android:name=".BootTileReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

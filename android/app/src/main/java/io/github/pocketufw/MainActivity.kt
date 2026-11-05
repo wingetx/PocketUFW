@@ -1,10 +1,12 @@
 package io.github.pocketufw
 
+import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +22,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * A superseded read gets read again, but a run of them must not become a root loop.
+ * Past this the screen stays "Recheck required" until the next explicit recheck.
+ */
+private const val MAX_SUPERSEDED_RECHECKS = 2
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +62,9 @@ internal fun PocketScreen(client: FirewallGateway) {
     var tileStamp by remember { mutableStateOf<Long?>(null) }
     var verificationInDoubt by remember { mutableStateOf(false) }
     var vpnRefreshing by remember { mutableStateOf(false) }
+    var firstRead by remember { mutableStateOf(true) }
+    var outsideWritePending by remember { mutableStateOf(false) }
+    var supersededRechecks by remember { mutableStateOf(0) }
 
     // Preserve Claude's tested guarantee that observable UI state is written
     // on the main dispatcher, even under Robolectric's unusual test scheduler.
@@ -75,13 +86,59 @@ internal fun PocketScreen(client: FirewallGateway) {
         counterRefreshError = false
     }
 
-    LaunchedEffect(client) {
-        try {
-            adopt(withContext(Dispatchers.IO) { client.inspectDashboard() })
-        } catch (_: Exception) {
-            verificationInDoubt = true
-            failed = true
-            message = "Could not inspect live firewall state. Check root access and try again."
+    /**
+     * Called when a root request ends. Decides whether what's on screen can stand:
+     * true means read again, because the tile wrote meanwhile or this read lost to
+     * a newer one. Until that read lands the old status isn't claimed as verified.
+     */
+    fun needsAnotherRead(finished: FirewallClient.Dashboard?): Boolean {
+        val outsideWrite = outsideWritePending
+        outsideWritePending = false
+        val superseded = finished?.superseded == true
+        supersededRechecks = if (superseded) supersededRechecks + 1 else 0
+        if (outsideWrite || superseded) verificationInDoubt = true
+        return outsideWrite || (superseded && supersededRechecks <= MAX_SUPERSEDED_RECHECKS)
+    }
+
+    /** With [keepResult], the banner still belongs to the operation this read follows. */
+    fun recheck(showFeedback: Boolean = false, keepResult: Boolean = false) {
+        if (busy) return
+        busy = true
+        if (!keepResult) message = ""
+        counterRefreshNote = ""
+        scope.launch {
+            var finished: FirewallClient.Dashboard? = null
+            try {
+                val inspected = withContext(Dispatchers.IO) { client.inspectDashboard() }
+                finished = inspected
+                adopt(inspected)
+                val snapshot = inspected.snapshot
+                // Only user-requested rechecks get feedback. Automatic tile/focus
+                // synchronization remains silent and does not add root requests.
+                if (showFeedback) message = when {
+                    snapshot.protection == FirewallClient.Protection.ROOT_REQUIRED ||
+                        (!snapshot.rootReady && snapshot.details.isEmpty()) ->
+                        "Couldn't check the firewall without root access."
+                    // Timed out or failed to run: missing root isn't what happened.
+                    !snapshot.rootReady -> snapshot.details
+                    snapshot.protection == FirewallClient.Protection.ACTIVE ->
+                        "Firewall status rechecked. No rules changed."
+                    snapshot.protection == FirewallClient.Protection.INACTIVE ->
+                        "Firewall is off. No rules changed."
+                    else ->
+                        "Status checked, but protection is not verified. No rules changed."
+                } else if (!keepResult) message = ""
+                val verifiedState = snapshot.protection in listOf(
+                    FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)
+                failed = !verifiedState || (keepResult && failed)
+            } catch (_: Exception) {
+                verificationInDoubt = true
+                failed = true
+                message = "Live firewall state could not be verified."
+            } finally {
+                busy = false
+            }
+            if (needsAnotherRead(finished)) recheck(showFeedback, keepResult)
         }
     }
 
@@ -92,8 +149,10 @@ internal fun PocketScreen(client: FirewallGateway) {
         counterRefreshNote = ""
         vpnRefreshing = vpn
         scope.launch {
+            var finished: FirewallClient.Dashboard? = null
             try {
                 val outcome = withContext(Dispatchers.IO) { work() }
+                finished = outcome.dashboard
                 adopt(outcome.dashboard)
                 failed = !outcome.success
                 message = outcome.explanation
@@ -105,38 +164,44 @@ internal fun PocketScreen(client: FirewallGateway) {
                 busy = false
                 vpnRefreshing = false
             }
+            if (needsAnotherRead(finished)) recheck(keepResult = true)
         }
     }
 
-    fun recheck(showFeedback: Boolean = false) {
-        if (busy) return
-        busy = true
-        message = ""
-        counterRefreshNote = ""
-        scope.launch {
-            try {
-                val inspected = withContext(Dispatchers.IO) { client.inspectDashboard() }
-                adopt(inspected)
-                // Only user-requested rechecks get feedback. Automatic tile/focus
-                // synchronization remains silent and does not add root requests.
-                message = if (showFeedback) when (inspected.snapshot.protection) {
-                    FirewallClient.Protection.ACTIVE ->
-                        "Firewall status rechecked. No rules changed."
-                    FirewallClient.Protection.INACTIVE ->
-                        "Firewall is off. No rules changed."
-                    else ->
-                        "Status checked, but protection is not verified. No rules changed."
-                } else ""
-                failed = inspected.snapshot.protection !in listOf(
-                    FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)
-            } catch (_: Exception) {
-                verificationInDoubt = true
-                failed = true
-                message = "Live firewall state could not be verified."
-            } finally {
-                busy = false
+    LaunchedEffect(client) {
+        var finished: FirewallClient.Dashboard? = null
+        try {
+            val inspected = withContext(Dispatchers.IO) { client.inspectDashboard() }
+            finished = inspected
+            adopt(inspected)
+        } catch (_: Exception) {
+            verificationInDoubt = true
+            failed = true
+            message = "Could not inspect live firewall state. Check root access and try again."
+        }
+        firstRead = false
+        if (needsAnotherRead(finished)) recheck(keepResult = true)
+    }
+
+    // A tile result can land after focus has already returned: a tile switch takes
+    // seconds and the shade closes sooner. Without this the app stays on "Active."
+    // with the firewall off. The listener itself requests no root; an unfocused
+    // window is left to the focus check below.
+    DisposableEffect(context, client) {
+        val preferences = TileStatusStore.preferences(context)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == TileStatusStore.WRITTEN_AT &&
+                TileStatusStore.lastWriteSource(context) != TileStatusStore.SOURCE_APP) {
+                if (busy || firstRead) {
+                    outsideWritePending = true
+                } else if (windowInfo.isWindowFocused) {
+                    verificationInDoubt = true
+                    recheck()
+                }
             }
         }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     // Shade-open never requests root. Regaining focus inspects the inexpensive
@@ -163,6 +228,9 @@ internal fun PocketScreen(client: FirewallGateway) {
         if (busy || verificationInDoubt || state.protection != FirewallClient.Protection.ACTIVE) return
         busy = true
         counterRefreshing = true
+        // Clear the last result, or it would hide this one and lend it its color.
+        message = ""
+        failed = false
         counterRefreshNote = ""
         scope.launch {
             try {
@@ -188,6 +256,7 @@ internal fun PocketScreen(client: FirewallGateway) {
                 counterRefreshing = false
                 busy = false
             }
+            if (needsAnotherRead(null)) recheck(keepResult = true)
         }
     }
 
@@ -230,7 +299,7 @@ internal fun PocketScreen(client: FirewallGateway) {
             removePartialRules = {
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.protection == FirewallClient.Protection.DEGRADED) {
-                    perform { client.changeProtection(false) }
+                    perform { client.removePartialRules() }
                 }
             },
             setUdpPorts = { ipv4, ipv6, committed ->
@@ -247,6 +316,7 @@ internal fun PocketScreen(client: FirewallGateway) {
                 message = ""
                 failed = false
                 counterRefreshNote = ""
+                counterRefreshError = false
             }
         )
     )

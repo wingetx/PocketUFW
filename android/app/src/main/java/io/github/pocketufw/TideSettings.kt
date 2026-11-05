@@ -31,6 +31,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
                     modifier = Modifier.semantics { contentDescription = "Restore after reboot" })
             }
         }
+        restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
         if (!active) Text("Enable the firewall to change boot restoration.", color = Muted, style = MaterialTheme.typography.bodySmall)
         bootProblemText(state.bootRestore)?.let { TideNotice(it, true) }
 
@@ -56,6 +57,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         style = MaterialTheme.typography.bodySmall, color = Muted)
     if (tileHelp) AlertDialog(onDismissRequest = { tileHelp = false }, title = { Text("Quick Settings") },
         text = { Text("Open Android’s Quick Settings editor and add PocketUFW. The shield tile lets you toggle the firewall. " +
-            "Its displayed state comes from the last check; tapping it verifies the current kernel state before switching.") },
+            "Its displayed state comes from the last check. A tap switches only if the kernel still matches what the tile " +
+            "shows. If the tile can't say whether the firewall is on or off, a tap only checks.") },
         confirmButton = { TextButton(onClick = { tileHelp = false }) { Text("Done") } })
 }

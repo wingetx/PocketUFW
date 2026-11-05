@@ -14,7 +14,7 @@ import io.github.pocketufw.FirewallClient.UdpConfigMode
 internal object BridgeMessages {
     const val VPN_OK = "Tailscale UDP exceptions already up to date. No changes needed."
     const val VPN_FAILED = "VPN exceptions could not be refreshed; inspect firewall state."
-    const val VPN_COMMITTED = "Committed UDP exceptions are active. Use the Status editor to " +
+    const val VPN_COMMITTED = "Committed UDP exceptions are active. Use the VPN UDP exceptions editor to " +
         "change them or return to automatic detection."
     const val RESET_OK = "PocketUFW counters reset. Rules and VPN exceptions are unchanged."
 }
@@ -68,7 +68,7 @@ internal fun activeDashboard(
 ) = Dashboard(
     Snapshot(
         protection = Protection.ACTIVE, rootReady = true, vpnActive = true,
-        details = "IPv4 and IPv6 rules, hooks and default inbound policy verified.",
+        details = "IPv4 and IPv6 rules and hooks verified.",
         bootRestore = boot, udpConfigMode = mode,
         committedUdp4 = committed4, committedUdp6 = committed6,
     ),
@@ -95,19 +95,38 @@ internal class FakeGateway(
     val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
     fun count(name: String) = synchronized(calls) { calls.count { it == name } }
 
+    /** Inspections served in order before falling back to [dashboard]. */
+    val nextInspections = java.util.concurrent.ConcurrentLinkedQueue<Dashboard>()
+    /** While set, inspections and firewall switches block here, to hold the UI busy. */
+    @Volatile var gate: java.util.concurrent.CountDownLatch? = null
+    /** The result of the next firewall switch, boot switch or removal. */
+    @Volatile var operationSuccess = true
+    @Volatile var operationMessage = "done"
+
     private fun publish(d: Dashboard) = d.also { dash ->
         tileContext?.let { TileStatusStore.publish(it, dash.snapshot) }
     }
+    private fun operation() = Operation(operationSuccess, operationMessage, dashboard)
+    private fun waitAtGate() { gate?.await(10, java.util.concurrent.TimeUnit.SECONDS) }
 
-    override fun inspectDashboard(): Dashboard { calls += "inspect"; return publish(dashboard) }
+    override fun inspectDashboard(): Dashboard {
+        calls += "inspect"
+        waitAtGate()
+        return publish(nextInspections.poll() ?: dashboard)
+    }
     override fun refreshCounterActivity(): RuleActivity { calls += "counters"; return counterRead }
     override fun changeProtection(activate: Boolean): Operation {
         calls += if (activate) "enable" else "disable"
-        return Operation(true, "done", dashboard)
+        waitAtGate()
+        return operation()
+    }
+    override fun removePartialRules(): Operation {
+        calls += "remove-partial"
+        return operation()
     }
     override fun changeBootRestoration(enabled: Boolean): Operation {
         calls += if (enabled) "boot-enable" else "boot-disable"
-        return Operation(true, "done", dashboard)
+        return operation()
     }
     override fun refreshVerifiedPorts(): Operation {
         calls += "vpn-refresh"

@@ -44,7 +44,8 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
             FirewallClient.UdpConfigMode.DEGRADED -> "Saved configuration needs inspection"
             FirewallClient.UdpConfigMode.UNKNOWN -> "Saved configuration not verified"
         }, onExceptions)
-        TidePolicyRow(R.drawable.tide_up, "VPN connection", if (state.vpnActive) "Connected" else "Not detected")
+        TidePolicyRow(R.drawable.tide_up, "VPN connection",
+            if (state.vpnActive) state.vpnProvider ?: "Unrecognized VPN" else "Not detected")
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)

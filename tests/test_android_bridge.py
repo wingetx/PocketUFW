@@ -42,6 +42,17 @@ class AndroidBridgeTests(unittest.TestCase):
             "exec /usr/bin/id \"$@\"\n"
         )
         fake_id.chmod(0o755)
+        # Android 15-style connected VPN owner records. Stubbed for every test
+        # so host ADB or actual VPN apps can never affect regression outcomes.
+        fake_dumpsys = self.bin / "dumpsys"
+        fake_dumpsys.write_text(
+            "#!/bin/sh\n"
+            "[ \"$1\" = connectivity ] || exit 2\n"
+            "for owner in $(printf '%s' \"${TEST_VPN_OWNERS:-}\" | tr , ' '); do\n"
+            "  printf 'NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:%s} created=x}\\n' \"$owner\"\n"
+            "done\n"
+        )
+        fake_dumpsys.chmod(0o755)
 
         (self.engine / "pocketufw").write_text(
             "#!/bin/sh\n"
@@ -121,6 +132,38 @@ class AndroidBridgeTests(unittest.TestCase):
 
     def log_lines(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_android_vpn_owner_is_read_in_existing_root_inspection(self):
+        result, values = self.run_bridge('inspect', {
+            'TEST_VPN_OWNERS': 'ch.protonvpn.android'
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values.get('vpn_owner'), 'ch.protonvpn.android')
+        self.assertEqual(self.log_lines(), ['engine:activity', 'boot:status'])
+
+    def test_tailscale_is_identified_by_its_vpn_owner_not_exit_node(self):
+        _, values = self.run_bridge('inspect', {
+            'TEST_VPN_OWNERS': 'com.tailscale.ipn'
+        })
+        self.assertEqual(values.get('vpn_owner'), 'com.tailscale.ipn')
+
+    def test_vpn_owner_is_not_guessed_if_multiple_tunnels_are_reported(self):
+        _, values = self.run_bridge('inspect', {
+            'TEST_VPN_OWNERS': 'com.tailscale.ipn,ch.protonvpn.android'
+        })
+        self.assertEqual(values.get('vpn_owner'), '')
+
+    def test_vpn_owner_absent_does_not_fake_an_installed_provider(self):
+        _, values = self.run_bridge('inspect')
+        self.assertEqual(values.get('vpn_owner'), '')
+
+    def test_counter_refresh_does_not_query_vpn_identity(self):
+        result, values = self.run_bridge('counters', {
+            'TEST_VPN_OWNERS': 'ch.protonvpn.android'
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('vpn_owner', values)
+        self.assertEqual(self.log_lines(), ['engine:activity'])
 
     def test_counter_refresh_is_read_only_and_skips_heavy_dashboard_work(self):
         result, values = self.run_bridge("counters")

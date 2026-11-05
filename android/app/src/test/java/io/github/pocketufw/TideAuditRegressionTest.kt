@@ -220,6 +220,34 @@ class TideAuditRegressionTest {
         }
     }
 
+    @Test fun vpnLabelsComeFromConfirmedOwnerAndHaveAnHonestFallback() {
+        val client = FirewallClient(RuntimeEnvironment.getApplication())
+        assertEquals("Proton VPN", client.vpnProviderLabel("ch.protonvpn.android"))
+        assertEquals("Mullvad VPN", client.vpnProviderLabel("net.mullvad.mullvadvpn"))
+        assertEquals("WireGuard", client.vpnProviderLabel("com.wireguard.android"))
+        assertEquals("Connected via Tailscale", client.vpnProviderLabel("com.tailscale.ipn"))
+        assertEquals("Unrecognized VPN", client.vpnProviderLabel("com.example.fakevpn"))
+        assertEquals("Unrecognized VPN", client.vpnProviderLabel(null))
+    }
+
+    @Test fun vpnConnectionSettingsNeverGuessFromAppInstallation() {
+        val model = mutableStateOf(TideUiState(snapshot = activeDashboard().snapshot.copy(
+            vpnActive = true, vpnProvider = "Proton VPN")))
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        controller.get().setContent { TideTheme { TideSettings(model.value, TideActions(), "beta", {}) } }
+        node("Proton VPN").assertExists()
+        compose.runOnIdle { model.value = model.value.copy(snapshot =
+            model.value.snapshot.copy(vpnProvider = "Connected via Tailscale")) }
+        node("Connected via Tailscale").assertExists()
+        compose.runOnIdle { model.value = model.value.copy(snapshot =
+            model.value.snapshot.copy(vpnProvider = null)) }
+        node("Unrecognized VPN").assertExists()
+        compose.runOnIdle { model.value = model.value.copy(snapshot =
+            model.value.snapshot.copy(vpnActive = false)) }
+        node("Not detected").assertExists()
+        node("Unrecognized VPN").assertDoesNotExist()
+    }
+
     @Test fun oldReadingsIncludeCalendarDateRatherThanOnlyTime() {
         val old = System.currentTimeMillis() - 4L * 24 * 60 * 60 * 1000
         val label = readTime(old)

@@ -319,7 +319,26 @@ fi
 if ! read_config; then
   MODE=DEGRADED; SAVED4=none; SAVED6=none
 fi
+# Read-only, best-effort Android-managed VPN owner identification.
+# This runs inside the root session already used for full dashboard inspection;
+# counter refresh remains a separate fast path. The OS limits owner metadata
+# for ordinary apps. Never infer ownership from merely installed packages.
+# Dumpsys output varies by Android release, so absence/ambiguity is expected.
+VPN_OWNER=''
+if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  vpn_matches=$(timeout 2 dumpsys connectivity 2>/dev/null |
+    sed -n 's/.*ni{VPN CONNECTED extra: VPN:\([A-Za-z0-9_.-]*\)}.*/\1/p' |
+    sort -u) || vpn_matches=''
+  case "$vpn_matches" in
+    ''|*'
+'*) : ;; # No recognized Android VPN, or multiple candidates: do not guess.
+    *[!A-Za-z0-9_.-]*) : ;;
+    *) VPN_OWNER=$vpn_matches ;;
+  esac
+fi
+
 echo 'root=GRANTED'
+echo "vpn_owner=$VPN_OWNER"
 echo "config_mode=$MODE"
 echo "committed_udp4=$SAVED4"
 echo "committed_udp6=$SAVED6"

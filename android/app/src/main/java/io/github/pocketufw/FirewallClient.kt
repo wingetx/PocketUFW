@@ -39,7 +39,9 @@ internal class FirewallClient(private val context: Context) : FirewallGateway {
         val bootRestore: BootRestore = BootRestore.UNKNOWN,
         val udpConfigMode: UdpConfigMode = UdpConfigMode.UNKNOWN,
         val committedUdp4: String = "none",
-        val committedUdp6: String = "none"
+        val committedUdp6: String = "none",
+        /** Identity of Android's active VPN when the OS provides its owner. */
+        val vpnProvider: String? = null
     )
     /**
      * Kernel rule counters are read-only measurements, not a universal proof
@@ -183,6 +185,15 @@ internal class FirewallClient(private val context: Context) : FirewallGateway {
         false
     }
 
+    /** Identify VPN service ownership, never infer a provider from installed apps. */
+    internal fun vpnProviderLabel(ownerPackage: String?): String = when (ownerPackage) {
+        "ch.protonvpn.android" -> "Proton VPN"
+        "net.mullvad.mullvadvpn" -> "Mullvad VPN"
+        "com.wireguard.android" -> "WireGuard"
+        "com.tailscale.ipn" -> "Connected via Tailscale"
+        else -> "Unrecognized VPN"
+    }
+
     private fun fields(output: String): Map<String, String> =
         output.lineSequence().mapNotNull { line ->
             val sep = line.indexOf('=')
@@ -287,6 +298,7 @@ internal class FirewallClient(private val context: Context) : FirewallGateway {
             protection = protection,
             rootReady = rootGranted,
             vpnActive = vpn,
+            vpnProvider = if (vpn) vpnProviderLabel(values["vpn_owner"]) else null,
             details = details,
             bootRestore = boot,
             udpConfigMode = udpMode,

@@ -278,6 +278,29 @@ class TideAuditRegressionTest {
         assertEquals(before, reset.fetchSemanticsNode().positionInRoot.y, 0.5f)
     }
 
+    @Test fun manualRecheckReportsItsResultWithoutLeavingSettings() {
+        val fake = FakeGateway()
+        open(fake); settings()
+        node("Settings.").assertExists()
+        compose.onNodeWithContentDescription("Recheck firewall status").performClick()
+        compose.settle { fake.count("inspect") == 2 &&
+            compose.hasText("Firewall status rechecked. No rules changed.") }
+        node("Settings.").assertExists()
+        assertEquals(listOf("inspect", "inspect"), fake.calls.toList())
+        node("Dismiss").performClick()
+        node("Firewall status rechecked. No rules changed.").assertDoesNotExist()
+    }
+
+    @Test fun recheckNeverClaimsVerifiedWhenFirewallIsDegraded() {
+        val fake = FakeGateway(stateDashboard(Protection.DEGRADED, true, "Incomplete firewall"))
+        open(fake, expect = "Needs")
+        compose.onNodeWithContentDescription("Recheck firewall status").performClick()
+        compose.settle { fake.count("inspect") == 2 && compose.hasText(
+            "Status checked, but protection is not verified. No rules changed.") }
+        assertFalse(compose.hasText("Firewall status rechecked. No rules changed."))
+        assertEquals(listOf("inspect", "inspect"), fake.calls.toList())
+    }
+
     @Test fun unchangedWindowFocusReturnNeverRequestsAnotherRootInspection() {
         val fake = FakeGateway()
         val controller = open(fake)
@@ -306,5 +329,7 @@ class TideAuditRegressionTest {
         compose.settle { compose.hasText("Off.") && fake.count("inspect") >= 2 }
         node("Turn firewall off").assertDoesNotExist()
         assertEquals(2, fake.count("inspect"))
+        // Automatic tile-triggered synchronization never displays a user-tap banner.
+        node("Firewall is off. No rules changed.").assertDoesNotExist()
     }
 }

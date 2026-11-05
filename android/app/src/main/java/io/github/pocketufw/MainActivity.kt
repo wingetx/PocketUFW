@@ -108,16 +108,27 @@ internal fun PocketScreen(client: FirewallGateway) {
         }
     }
 
-    fun recheck() {
+    fun recheck(showFeedback: Boolean = false) {
         if (busy) return
         busy = true
         message = ""
         counterRefreshNote = ""
         scope.launch {
             try {
-                adopt(withContext(Dispatchers.IO) { client.inspectDashboard() })
-                message = ""
-                failed = false
+                val inspected = withContext(Dispatchers.IO) { client.inspectDashboard() }
+                adopt(inspected)
+                // Only user-requested rechecks get feedback. Automatic tile/focus
+                // synchronization remains silent and does not add root requests.
+                message = if (showFeedback) when (inspected.snapshot.protection) {
+                    FirewallClient.Protection.ACTIVE ->
+                        "Firewall status rechecked. No rules changed."
+                    FirewallClient.Protection.INACTIVE ->
+                        "Firewall is off. No rules changed."
+                    else ->
+                        "Status checked, but protection is not verified. No rules changed."
+                } else ""
+                failed = inspected.snapshot.protection !in listOf(
+                    FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)
             } catch (_: Exception) {
                 verificationInDoubt = true
                 failed = true
@@ -192,7 +203,7 @@ internal fun PocketScreen(client: FirewallGateway) {
         ),
         appVersion = BuildConfig.VERSION_NAME,
         actions = TideActions(
-            recheck = { recheck() },
+            recheck = { recheck(showFeedback = true) },
             changeProtection = { next ->
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.protection in listOf(

@@ -61,6 +61,21 @@ class TideAuditContractTests(unittest.TestCase):
         self.assertIn('recheck()', focus)
         self.assertNotIn('client.inspectDashboard()', focus)
 
+    def test_manual_recheck_feedback_is_read_only_and_background_recheck_silent(self):
+        main = SCREENS["MainActivity.kt"]
+        block = main[main.index('fun recheck(showFeedback: Boolean = false) {'):
+                     main.index('    // Shade-open never requests root.')]
+        self.assertIn('client.inspectDashboard()', block)
+        self.assertIn('if (showFeedback) when', block)
+        self.assertIn('No rules changed.', block)
+        self.assertNotIn('client.changeProtection(', block)
+        self.assertNotIn('client.resetCounters()', block)
+        self.assertIn('recheck = { recheck(showFeedback = true) }', main)
+        focus = main[main.index('LaunchedEffect(windowInfo) {'):
+                     main.index('    // Read-only counter refresh.')]
+        self.assertIn('recheck()', focus)
+        self.assertNotIn('recheck(showFeedback = true)', focus)
+
     def test_failed_counter_read_retains_numbers_and_withdraws_claim(self):
         main = SCREENS["MainActivity.kt"]
         self.assertIn('if (fresh.measured)', main)

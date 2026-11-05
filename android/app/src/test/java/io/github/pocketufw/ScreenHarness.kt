@@ -20,7 +20,13 @@ internal fun ComposeTestRule.launchScreen(
     RuntimeEnvironment.setFontScale(fontScale)
     val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
     controller.get().setContent {
-        MaterialTheme(colorScheme = darkColorScheme()) { PocketScreen(gateway) }
+        MaterialTheme(
+            colorScheme = darkColorScheme(
+                primary = Mint, onPrimary = Background,
+                background = Background, onBackground = Foreground,
+                surface = Panel, onSurface = Foreground
+            )
+        ) { PocketScreen(gateway) }
     }
     return controller
 }

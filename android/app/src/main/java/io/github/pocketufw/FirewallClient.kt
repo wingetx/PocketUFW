@@ -13,6 +13,20 @@ import java.util.concurrent.TimeUnit
  * Shell scripts are copied from APK assets into private app storage.
  */
 internal class FirewallClient(private val context: Context) : FirewallGateway {
+    /** The sentence behind each state. Unknown states must not read as "off". */
+    fun protectionDetails(protection: Protection): String = when (protection) {
+        Protection.ACTIVE ->
+            "IPv4 and IPv6 rules, hooks and default inbound policy verified."
+        Protection.INACTIVE -> "PocketUFW has not installed any firewall chains."
+        Protection.ROOT_REQUIRED ->
+            "PocketUFW couldn't get root access, so it can't read the kernel. This doesn't " +
+                "mean the firewall is off: rules installed earlier stay in the kernel."
+        Protection.DEGRADED ->
+            "Firewall state could not be verified. Some rules may be installed. Don't assume " +
+                "packets are being filtered, or that they aren't."
+        Protection.CHECKING -> "Checking the firewall."
+    }
+
     enum class Protection { CHECKING, ACTIVE, INACTIVE, DEGRADED, ROOT_REQUIRED }
     enum class BootRestore { ENABLED, DISABLED, UNSUPPORTED, DEGRADED, CONFLICT, UNKNOWN }
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
@@ -256,16 +270,7 @@ internal class FirewallClient(private val context: Context) : FirewallGateway {
             "DEGRADED" -> UdpConfigMode.DEGRADED
             else -> UdpConfigMode.UNKNOWN
         }
-        val details = when (protection) {
-            Protection.ACTIVE ->
-                "IPv4 and IPv6 rules, hooks and default inbound policy verified."
-            Protection.INACTIVE -> "PocketUFW has not installed any firewall chains."
-            Protection.ROOT_REQUIRED ->
-                "Root access is needed to inspect and manage the firewall."
-            Protection.DEGRADED ->
-                "Firewall state could not be verified. Review root access and installed rules."
-            Protection.CHECKING -> "Checking the firewall."
-        }
+        val details = protectionDetails(protection)
 
         val activity = if (protection == Protection.ACTIVE) parseCounterActivity(values)
             else null

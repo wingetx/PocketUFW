@@ -103,12 +103,20 @@ internal fun UdpExceptionsPanel(
                     color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                 )
                 val mode = when (state.udpConfigMode) {
-                    FirewallClient.UdpConfigMode.AUTOMATIC -> "Automatic · verified Tailscale listeners"
-                    FirewallClient.UdpConfigMode.COMMITTED -> "Committed · saved for future sessions"
+                    FirewallClient.UdpConfigMode.AUTOMATIC -> "Saved mode: Automatic"
+                    FirewallClient.UdpConfigMode.COMMITTED -> "Saved mode: Committed · saved for future sessions"
                     FirewallClient.UdpConfigMode.DEGRADED -> "Saved configuration needs inspection"
                     FirewallClient.UdpConfigMode.UNKNOWN -> "Saved configuration not verified"
                 }
                 Text(mode, color = if (saved) Mint else Muted, fontSize = 13.sp)
+                if (state.udpConfigMode == FirewallClient.UdpConfigMode.AUTOMATIC) {
+                    // An Experimental edit changes live rules but not this saved mode,
+                    // and detected ports aren't re-checked once installed.
+                    Text("Live ports come from Tailscale detection when the firewall starts or " +
+                        "Refresh VPN runs, or from an Experimental edit. Tailscale can change " +
+                        "ports later, so they may not match its current listeners.",
+                        color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                }
                 if (saved) {
                     Text("Saved IPv4 UDP: ${state.committedUdp4} · IPv6 UDP: ${state.committedUdp6}",
                         color = Muted, fontSize = 12.sp)

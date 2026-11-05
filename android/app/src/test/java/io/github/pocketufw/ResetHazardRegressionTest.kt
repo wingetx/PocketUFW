@@ -10,6 +10,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,14 +21,15 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Taps the same physical coordinate twice, the way someone retrying Refresh VPN
- * would, and records which firewall operations actually fired.
+ * would. Before the fix, the result banner pushed Reset counters under that
+ * coordinate in 20 of these 24 cases and the second tap zeroed the counters.
  *
  * Positions use positionInRoot because boundsInRoot clips to the viewport.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34])
-class ResetHazardReproductionTest(
+class ResetHazardRegressionTest(
     private val qualifiers: String,
     private val fontScale: Float,
     private val label: String,
@@ -39,7 +42,7 @@ class ResetHazardReproductionTest(
         compose.onAllNodesWithText(text).fetchSemanticsNodes().firstOrNull()
             ?.let { it.positionInRoot.y / density }
 
-    @Test fun repeatTapOnRefreshVpn() {
+    @Test fun repeatTapOnRefreshVpnNeverReachesReset() {
         val fake = FakeGateway(vpnMessage = message)
         compose.launchScreen(fake, qualifiers, fontScale)
         compose.settle { compose.hasText("Firewall activity") }
@@ -65,30 +68,19 @@ class ResetHazardReproductionTest(
 
         val resetAfter = topDp("Reset counters", density)!!
         val banner = compose.onAllNodesWithText(message).fetchSemanticsNodes().first()
-        val bannerBottomDp = (banner.positionInRoot.y + banner.size.height) / density
+        val bannerTop = banner.positionInRoot.y
+        val bannerBottom = bannerTop + banner.size.height
 
         compose.onRoot().performTouchInput { click(tapPoint) }
         compose.waitForIdle()
         Thread.sleep(300)
         compose.waitForIdle()
 
-        val secondTap = when {
-            fake.count("reset-counters") > 0 -> "RESET COUNTERS"
-            fake.count("vpn-refresh") > 1 -> "Refresh VPN"
-            else -> "nothing"
-        }
-        println(
-            "HAZARD|$qualifiers|font=$fontScale|$label|" +
-                (if (scrolledToEnd) "scrolled-to-end" else "row-at-bottom-edge") +
-                "|shift=${"%.0f".format(resetAfter - resetBefore)}dp" +
-                "|banner=${if (bannerBottomDp <= 0) "off-screen" else "on-screen"}" +
-                "|second tap: $secondTap",
-        )
-
-        // Characterizes the shipped bug. Only the longest banner at 130% text
-        // moves far enough to clear Reset counters; every other case hits it.
-        val longBannerClearsReset = label == "committed" && fontScale > 1f
-        assertEquals(if (longBannerClearsReset) 0 else 1, fake.count("reset-counters"))
+        assertEquals("the result moved Reset counters", resetBefore, resetAfter, 0.5f)
+        assertEquals("the repeat tap reset the counters", 0, fake.count("reset-counters"))
+        assertFalse("the repeat tap reached Reset counters", compose.hasText("Reset counters?"))
+        assertTrue("the result is above the screen", bannerTop >= 0f)
+        assertTrue("the result is below the screen", bannerBottom <= root.size.height)
     }
 
     companion object {

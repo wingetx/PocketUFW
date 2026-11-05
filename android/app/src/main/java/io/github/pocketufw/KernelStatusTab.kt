@@ -19,6 +19,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,25 +34,28 @@ internal fun KernelStatusTab(
     state: FirewallClient.Snapshot,
     report: FirewallClient.KernelReport?,
     busy: Boolean,
+    verificationInDoubt: Boolean,
     recheck: () -> Unit,
     setUdpPorts: (String, String, Boolean) -> Unit,
     restoreAutomatic: () -> Unit
 ) {
     var showRaw by remember { mutableStateOf(false) }
-    val verified = state.protection == FirewallClient.Protection.ACTIVE
+    val verified = state.protection == FirewallClient.Protection.ACTIVE && !verificationInDoubt
+    val inactive = state.protection == FirewallClient.Protection.INACTIVE && !verificationInDoubt
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Surface(color = Panel, shape = RoundedCornerShape(20.dp),
             modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Firewall status", fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold)
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.semantics { heading() })
                 KernelStatusLine("Protection",
                     if (verified) "ACTIVE · Verified" else
-                        if (state.protection == FirewallClient.Protection.INACTIVE)
-                            "INACTIVE" else "NOT VERIFIED", verified)
+                        if (inactive) "INACTIVE" else "NOT VERIFIED", verified)
                 KernelStatusLine("PocketUFW incoming",
-                    if (verified) "DROP unsolicited¹" else "Not verified", verified)
+                    if (verified) "DROP unsolicited¹" else
+                        if (inactive) "No rules installed" else "Not verified", verified)
                 KernelStatusLine("Outgoing", "Unchanged", false)
                 KernelStatusLine("Packet logging", "Counters only", false)
                 KernelStatusLine("Boot restore",
@@ -58,11 +64,11 @@ internal fun KernelStatusTab(
                         FirewallClient.BootRestore.DISABLED -> "Disabled"
                         FirewallClient.BootRestore.UNSUPPORTED -> "Unsupported"
                         FirewallClient.BootRestore.CONFLICT -> "Conflict"
+                        FirewallClient.BootRestore.DEGRADED -> "Incomplete"
                         else -> "Unverified"
                     }, state.bootRestore == FirewallClient.BootRestore.ENABLED)
                 if (report != null) {
-                    Text("Rules read: " + DateFormat.getTimeInstance(DateFormat.SHORT)
-                        .format(Date(report.readAt)), color = Muted, fontSize = 12.sp)
+                    Text("Rules read: " + readingTime(report.readAt), color = Muted, fontSize = 12.sp)
                 }
                 OutlinedButton(onClick = recheck, enabled = !busy,
                     modifier = Modifier.fillMaxWidth()) {
@@ -75,7 +81,7 @@ internal fun KernelStatusTab(
             Surface(color = Panel, shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (state.protection == FirewallClient.Protection.INACTIVE)
+                    if (inactive)
                         "No PocketUFW rules are installed."
                     else "A complete kernel rule report is unavailable. " +
                         "Recheck before relying on the detailed policy.",
@@ -112,6 +118,20 @@ private fun KernelStatusLine(label: String, value: String, good: Boolean) {
 }
 
 
+/** The interfaces named by a family's INPUT hooks, as the kernel reported them. */
+internal fun hookInterfaces(family: FirewallClient.RuleFamily): List<String> =
+    family.hooks.map {
+        it.substringAfter(" -i ", "").substringBefore(' ')
+    }.filter { it.isNotEmpty() }.distinct()
+
+/** Read from the kernel report. A missing report is stated, never filled in with expected names. */
+internal fun hookSummaryLines(report: FirewallClient.KernelReport?): List<String> {
+    if (report == null) return listOf("Hooks: rule report unavailable")
+    val four = hookInterfaces(report.ipv4).joinToString(", ")
+    val six = hookInterfaces(report.ipv6).joinToString(", ")
+    return if (four == six) listOf("Hooks: $four") else listOf("IPv4 hooks: $four", "IPv6 hooks: $six")
+}
+
 private fun describeRule(rule: String): Pair<String, String> = when {
     rule.contains("--ctstate") &&
         rule.contains("ESTABLISHED") && rule.contains("RELATED") ->
@@ -129,7 +149,7 @@ private fun describeRule(rule: String): Pair<String, String> = when {
     rule.endsWith("-j DROP") -> "DROP" to "Other incoming packets"
     rule.startsWith("-A POCKETUFW_TS ") &&
         rule.contains("--dport ") && rule.endsWith("-j ACCEPT") ->
-        "ALLOW" to ("Verified VPN UDP port " +
+        "ALLOW" to ("VPN UDP exception, port " +
             rule.substringAfter("--dport ").substringBefore(' '))
     else -> "RULE" to rule
 }
@@ -141,9 +161,7 @@ private fun KernelFamilyPanel(
     rawVisible: Boolean,
     onToggleRaw: (() -> Unit)? = null
 ) {
-    val interfaces = family.hooks.map {
-        it.substringAfter(" -i ", "").substringBefore(' ')
-    }.filter { it.isNotEmpty() }.distinct()
+    val interfaces = hookInterfaces(family)
 
     Surface(color = Panel, shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth()) {
@@ -168,7 +186,9 @@ private fun KernelFamilyPanel(
                             "DROP" -> Amber
                             else -> Muted
                         },
-                        modifier = Modifier.width(52.dp))
+                        // Sized from the 12sp text it holds: Android 14+ scales large sp
+                        // values less than small ones, so a plain 52.sp column falls behind.
+                        modifier = Modifier.width(with(LocalDensity.current) { 12.sp.toDp() * (52f / 12f) }))
                     Text(detail, fontSize = 13.sp, lineHeight = 18.sp,
                         color = Foreground, modifier = Modifier.weight(1f))
                 }

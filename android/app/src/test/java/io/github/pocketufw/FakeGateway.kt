@@ -89,11 +89,17 @@ internal class FakeGateway(
     @Volatile var vpnMessage: String = BridgeMessages.VPN_OK,
     @Volatile var vpnSuccess: Boolean = true,
     @Volatile var counterRead: RuleActivity = sampleActivity(),
+    /** Set to behave like FirewallClient, which publishes every result to the tile cache. */
+    private val tileContext: android.content.Context? = null,
 ) : FirewallGateway {
     val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
     fun count(name: String) = synchronized(calls) { calls.count { it == name } }
 
-    override fun inspectDashboard(): Dashboard { calls += "inspect"; return dashboard }
+    private fun publish(d: Dashboard) = d.also { dash ->
+        tileContext?.let { TileStatusStore.publish(it, dash.snapshot) }
+    }
+
+    override fun inspectDashboard(): Dashboard { calls += "inspect"; return publish(dashboard) }
     override fun refreshCounterActivity(): RuleActivity { calls += "counters"; return counterRead }
     override fun changeProtection(activate: Boolean): Operation {
         calls += if (activate) "enable" else "disable"
@@ -105,7 +111,7 @@ internal class FakeGateway(
     }
     override fun refreshVerifiedPorts(): Operation {
         calls += "vpn-refresh"
-        return Operation(vpnSuccess, vpnMessage, dashboard)
+        return Operation(vpnSuccess, vpnMessage, publish(dashboard))
     }
     override fun resetCounters(): Operation {
         calls += "reset-counters"

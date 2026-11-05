@@ -1,17 +1,22 @@
 # PocketUFW 🐧
 
-**A UFW-inspired inbound-only firewall beta for rooted Android.**
+## Your phone runs Linux. Give it a Linux firewall.
 
-PocketUFW is independent software, not UFW and not affiliated with Canonical.
-The version 0.1.0-beta4 release is intended for testing, not unattended or
-production security use. It uses Android's existing IPv4 and IPv6 kernel
-firewall, leaves outgoing traffic unchanged and provides one protection switch,
-readable rules, counters, optional one-shot Magisk boot restoration, and manual
-verified Tailscale listener refresh. No VPN slot, packet capture, accounts,
-advertising, analytics, or continuous background app. Requires root access
-and compatible iptables/ip6tables. Shizuku-only operation is not supported.
-See the v1 scope, architecture, compatibility and hardware validation docs
-for details and limitations.
+**Real, stateful, kernel-level inbound packet filtering for rooted Android. Not another app-blocking switchboard.**
+
+Most Android firewall apps start with an app list. PocketUFW starts with the network itself. It uses Android's existing Linux `iptables` and `ip6tables` firewall to enforce a straightforward policy on supported physical interfaces:
+
+- **Outgoing traffic:** leave it alone.
+- **Replies to connections your phone initiated:** let them in.
+- **Unsolicited incoming packets:** drop them by default, with allowances for essential network protocols and explicitly permitted VPN listeners.
+
+**It's an actual packet-filtering firewall, not an app-by-app internet permission manager.** No sprawling allowlists, no occupying Android's VPN slot, and no continuous traffic-capture service. Once installed, the kernel enforces the rules even when PocketUFW's interface is closed.
+
+Think UFW's *deny incoming, allow outgoing* philosophy, adapted for rooted Android. PocketUFW is independent software, not UFW and not affiliated with Canonical.
+
+**What you get:** one protection switch, readable rules, live kernel packet counters, optional one-shot Magisk boot restoration, and manual verified Tailscale listener refresh. No accounts, advertising, analytics, or continuously running background app.
+
+> **Beta, not a security guarantee.** Version `0.1.0-beta4` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Coverage is limited to supported physical interfaces, and earlier Android/OEM `INPUT` rules can bypass PocketUFW. It does not directly filter traffic inside VPN tunnels or forwarded/tethered traffic. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
 
 **Permanent Android app identity:** Starting with `0.1.0-beta2`,
 the app ID is `io.github.pocketufw`. The earlier beta1 used the
@@ -60,7 +65,13 @@ Last checked down to the second. Refresh never resets counters or changes rules.
 
 ## Why this exists
 
-Most Android root firewalls use app allow/block lists. Linux users may instead prefer a network-facing, stateful firewall policy. PocketUFW attempts to implement the **inbound** half of that policy without taking over Android's firewall.
+On Android, "firewall" often means choosing which apps get Wi-Fi or mobile data. That can be useful, but **controlling an app's internet access is not the same job as denying unsolicited inbound connections**.
+
+PocketUFW takes the familiar Linux host-firewall approach: use connection tracking to recognize replies to traffic the phone initiated, allow essential network traffic, and deny other incoming packets on supported physical interfaces. Its rules live in the kernel's existing netfilter/iptables machinery. They don't depend on a packet-capture VPN, a constantly running Android service, or an app-by-app blocklist.
+
+Other Android tools can use genuine kernel firewall rules too. **PocketUFW's difference is its policy: connection state and direction, not app permissions.** It complements Android's existing security model rather than replacing it.
+
+**Default-deny incoming. Keep outgoing working. Verify the rules.**
 
 ### Important limitations in 0.1.0-beta1
 

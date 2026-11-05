@@ -88,6 +88,15 @@ clean_up() {
         fi
       fi
     done
+    # The probe's non-terminal verdict is only useful if the underlying
+    # firewall still matches the verified policy after instrumentation ends.
+    # Detect a concurrent enable/disable/rebuild or unexpected rule edit;
+    # never declare success from a capture taken against unknown semantics.
+    if [ "$failed" -eq 0 ] &&
+       [ "$(sh "$ENGINE" verify 2>/dev/null)" != ACTIVE ]; then
+      echo 'insights: firewall changed during capture; discard sample and inspect policy' >&2
+      failed=1
+    fi
     if [ "$failed" -eq 0 ]; then
       if ! rmdir "$LOCK" 2>/dev/null; then
         echo 'insights: could not release capture lock' >&2
@@ -133,11 +142,13 @@ for entry in "4:I:24" "6:I:44" "4:F:24" "6:F:44"; do
     { echo 'insights: probe verification failed' >&2; exit 8; }
 done
 
-# No persistent daemon and no PCAP file created by this script.
+# NFLOG frames contain netlink metadata AND the copied IP header; tcpdump's
+# snaplen must accommodate both. This 512-byte cap DOES NOT enlarge captured
+# network payload: --nflog-size above limits that separately to 24/44 bytes.
 # -c caps packet count; timeout sends INT to flush a valid PCAP.
 rc=0
 "$TIMEOUT" -s INT -k 2 10 "$DUMP" -i "nflog:$GROUP" \
-  -nn -s 128 -U -w - -c 1024 || rc=$?
+  -nn -s 512 -U -w - -c 1024 || rc=$?
 case "$rc" in
   0|124) : ;; # packet cap or expected timed stop
   *) echo "insights: capture failed (exit $rc)" >&2; exit 9 ;;

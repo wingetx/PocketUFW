@@ -26,7 +26,7 @@ The insights-capture capture action is a privileged developer-only action:
 
 Netfilter NFLOG is a nonterminal target. **Actual DROP remains the next intended verdict.** The diagnostic has no persistent service or scheduled monitoring.
 
-The maximum copied packet-header bytes are **24 for IPv4 and 44 for IPv6**, generally sufficient for IP addresses, protocol and destination port. Unusual IP protocols may still expose a few payload bytes; treat a raw PCAP as potentially sensitive. No raw capture is committed, sent over the network, or retained by the parser itself. The session prefix selects diagnostic events, **not cryptographic proof** of authenticity.
+The maximum copied packet-header bytes are **24 for IPv4 and 44 for IPv6**, generally sufficient for IP addresses, protocol and destination port. The tcpdump snaplen is 512 bytes to retain **NFLOG's own netlink metadata** alongside that limited header; it does not increase the packet bytes copied by the kernel. Unusual IP protocols may still expose a few payload bytes; treat a raw PCAP as potentially sensitive. No raw capture is committed, sent over the network, or retained by the parser itself. The session prefix selects diagnostic events, **not cryptographic proof** of authenticity.
 
 Usage for **offline test fixtures only**, not a suggestion to run live:
 
@@ -38,6 +38,7 @@ Usage for **offline test fixtures only**, not a suggestion to run live:
 - **Verifier conflict:** Current pocketufw verify requires exactly eight rules per family and reports **DEGRADED** while temporary NFLOG rules are installed. Do not ship the runner into the app unchanged. Coordinate a narrowly scoped, verifiable "diagnostic capture active" state with the audited engine, including an unambiguous cancel path.
 - **Recovery:** SIGKILL, a reboot, or power loss cannot run shell traps; unattended use is forbidden. A stale probe may cause verify to fail until manually examined and removed. Need guarded recovery that never deletes other owners' rules, and serialization with app enable/disable/reset/VPN-refresh operations.
 - **Collector availability:** tcpdump was present on Jay's rooted Pixel 9a during read-only preflight, but it is **not a portable Android dependency**. Production implementation will need a bundled or native NFLOG collector, scoped capability checks, and privacy-preserving metadata parsing on device.
+- **Concurrent changes:** After cleaning up probes, the runner independently re-verifies the original strict policy. If another process rewrites the rules during capture, the sample is rejected, the unexpected rule is not modified, and the session lock remains for inspection. Integrating with the app still requires real serialization to prevent mid-capture policy changes.
 - **Live safety:** Test ordering, byte-counter preservation and cleanup on a spare test device before allowing diagnostic activation on Frankenpixel. Keep app UI in an explicit "diagnostic" state for the entire run, and show failure if cleanup cannot be confirmed.
 - **No fabricated history:** There is no durable time-series in Beta 4. Insights must distinguish an *on-demand sample* from kernel counters, which can reset after reboot, rebuild, or command invocation.
 

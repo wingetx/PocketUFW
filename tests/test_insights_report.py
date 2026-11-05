@@ -80,6 +80,34 @@ class InsightsReportTests(unittest.TestCase):
         self.assertEqual(r["top_flows"][0]["destination_port"], 443)
         self.assertEqual(r["sampled_ip_bytes"], 48)
 
+    def test_truncated_ipv6_extension_is_still_counted_without_a_port(self):
+        # NFLOG deliberately copies only 44 bytes from an IPv6 packet.
+        # That preserves addresses and true packet length, but not an 8-byte
+        # fragmentation/extension header. It must not erase the DROP event.
+        for extension in (0, 43, 44, 60):
+            with self.subTest(extension=extension):
+                raw = bytearray(ip6())
+                raw[6] = extension
+                report = self.summary([packet(bytes(raw[:44]))])
+                self.assertEqual(report["samples_counted"], 1)
+                self.assertEqual(report["unreadable_packets"], 0)
+                self.assertEqual(report["sampled_ip_bytes"], 48)
+                flow = report["top_flows"][0]
+                self.assertEqual(flow["source"], "2001:db8::2")
+                self.assertIsNone(flow["destination_port"])
+                self.assertTrue(flow["protocol"].startswith("IPv6 extension"))
+
+    def test_complete_ipv6_extension_chain_can_show_real_udp_port(self):
+        base = bytearray(ip6(payload_len=16))
+        base[6] = 0  # hop-by-hop, followed by UDP
+        extended = bytes(base[:40]) + bytes([17, 0, 0, 0, 0, 0, 0, 0]) + bytes(base[40:])
+        report = self.summary([packet(extended)])
+        self.assertEqual(report["samples_counted"], 1)
+        flow = report["top_flows"][0]
+        self.assertEqual(flow["protocol"], "UDP")
+        self.assertEqual(flow["destination_port"], 443)
+        self.assertEqual(report["sampled_ip_bytes"], 56)
+
     def test_fragment_without_ports_does_not_invent_ports(self):
         r = self.summary([packet(ip4(frag=True))])
         self.assertEqual(r["samples_counted"], 1)

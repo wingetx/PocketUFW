@@ -60,7 +60,7 @@ TCPDUMP_MOCK = r'''#!/usr/bin/env python3
 import ipaddress,json,os,struct,sys
 from pathlib import Path
 args=sys.argv[1:]
-if args != ["-i","nflog:17","-nn","-s","128","-U","-w","-","-c","1024"]:
+if args != ["-i","nflog:17","-nn","-s","512","-U","-w","-","-c","1024"]:
     sys.exit(80)
 state=Path(os.environ["TEST_STATE"])
 for fam in ("iptables","ip6tables"):
@@ -75,6 +75,10 @@ for fam in ("iptables","ip6tables"):
     if rules[2][rules[2].index("--nflog-size")+1] != ("24" if fam=="iptables" else "44"):
         sys.exit(85)
 if os.environ.get("TEST_DUMP_ERROR")=="1":sys.exit(44)
+if os.environ.get("TEST_MUTATE_DURING_CAPTURE")=="1":
+    altered=json.loads((state/"iptables.json").read_text())
+    altered.insert(2, ["-j", "ACCEPT"])
+    (state/"iptables.json").write_text(json.dumps(altered))
 rules=json.loads((state/"iptables.json").read_text())
 prefix=rules[8][rules[8].index("--nflog-prefix")+1]
 ip=struct.pack("!BBHHHBBH4s4s",0x45,0,120,1,0,64,17,0,
@@ -83,7 +87,11 @@ ip=struct.pack("!BBHHHBBH4s4s",0x45,0,120,1,0,64,17,0,
 def attr(t,data):
     val=struct.pack("<HH",len(data)+4,t)+data
     return val+b"\0"*((-len(val))%4)
-record=bytes((2,0,0,17))+attr(10,prefix.encode()+b"\0")+attr(9,ip)
+# Simulate the non-payload NFLOG attributes which can make even a tiny
+# copied IP header exceed 128 bytes of PCAP frame data.
+record=(bytes((2,0,0,17))+attr(1,b"m"*108)
+        +attr(10,prefix.encode()+b"\0")+attr(9,ip))
+assert len(record)>128 and len(record)<512
 out=b"\xd4\xc3\xb2\xa1"+struct.pack("<HHiiII",2,4,0,0,65535,239)
 out+=struct.pack("<IIII",1790000000,0,len(record),len(record))+record
 sys.stdout.buffer.write(out)
@@ -100,11 +108,21 @@ class InsightsCaptureTests(unittest.TestCase):
         self.state = self.base / "mockstate"
         self.state.mkdir()
         self.engine = self.base / "pocketufw"
-        self.engine.write_text(
-            '#!/bin/sh\n[ "$1" = "verify" ] || exit 2\n'
-            '[ "${TEST_VERIFIED:-1}" = 1 ] || { echo DEGRADED; exit 4; }\n'
-            'echo ACTIVE\n'
-        )
+        self.engine.write_text("""#!/bin/sh
+[ "$1" = verify ] || exit 2
+[ "${TEST_VERIFIED:-1}" = 1 ] || { echo DEGRADED; exit 4; }
+python3 - "$TEST_STATE" <<'CHECK'
+import json, pathlib, sys
+root=pathlib.Path(sys.argv[1])
+expected=json.loads((root/'reference.json').read_text())
+for family in ('iptables', 'ip6tables'):
+    current=json.loads((root/(family+'.json')).read_text())
+    if current != expected:
+        print('DEGRADED')
+        sys.exit(4)
+print('ACTIVE')
+CHECK
+""")
         self.capture = self.base / "insights-capture"
         shutil.copy2(ROOT / "insights-capture", self.capture)
         baseline = [
@@ -118,6 +136,7 @@ class InsightsCaptureTests(unittest.TestCase):
             ["-j", "DROP"],
         ]
         self.baseline = baseline
+        (self.state / "reference.json").write_text(json.dumps(baseline))
         for fam in ("iptables", "ip6tables"):
             (self.state / f"{fam}.json").write_text(json.dumps(baseline))
             self.make_mock(fam, IPTABLES_MOCK)
@@ -181,6 +200,17 @@ class InsightsCaptureTests(unittest.TestCase):
                 r = self.run_capture(TEST_FAIL_INSERT=fail)
                 self.assertNotEqual(r.returncode, 0)
                 self.assert_clean()
+
+    def test_concurrent_kernel_edit_fails_closed_and_preserves_external_rule(self):
+        result = self.run_capture(TEST_MUTATE_DURING_CAPTURE=1)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertIn(b"firewall changed during capture", result.stderr)
+        self.assertIn(b"discard sample", result.stderr)
+        self.assertEqual(len(self.rules("iptables")), 9)
+        self.assertIn(["-j", "ACCEPT"], self.rules("iptables"))
+        self.assertEqual(self.rules("ip6tables"), self.baseline)
+        self.assertTrue((self.base / ".insights-capture.lock").exists())
+        self.assertFalse(any("NFLOG" in spec for row in self.rules("iptables") for spec in row))
 
     def test_capture_failure_keeps_original_firewall_rules(self):
         r = self.run_capture(TEST_DUMP_ERROR=1)

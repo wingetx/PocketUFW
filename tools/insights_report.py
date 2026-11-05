@@ -41,6 +41,7 @@ def _ip_info(raw: bytes):
     if not raw:
         raise ValueError("empty IP payload")
     version = raw[0] >> 4
+    unresolved_extension = None
     if version == 4:
         if len(raw) < 20:
             raise ValueError("truncated IPv4 header")
@@ -63,35 +64,48 @@ def _ip_info(raw: bytes):
         dst = str(ipaddress.IPv6Address(raw[24:40]))
         offset = 40
         fragmented = False
-        # Bounded extension walk; refuse to infer ports from unknown headers.
+        # NFLOG copies only the first 44 IPv6 bytes in development captures.
+        # An extension header may be intentionally clipped even though its
+        # source, destination and true packet length are still trustworthy.
+        # Keep that observation but NEVER invent a transport port.
         for _ in range(8):
             if proto in (0, 43, 60):  # hop-by-hop, routing, destination
                 if len(raw) < offset + 2:
-                    raise ValueError("truncated IPv6 extension")
+                    unresolved_extension = proto
+                    break
                 nxt, ext_len = raw[offset], (raw[offset + 1] + 1) * 8
             elif proto == 44:  # IPv6 fragment
                 if len(raw) < offset + 8:
-                    raise ValueError("truncated IPv6 fragment")
+                    unresolved_extension = proto
+                    break
                 nxt, ext_len = raw[offset], 8
                 fragmented = bool(struct.unpack_from("!H", raw, offset + 2)[0] & 0xFFF8)
-            elif proto == 51:  # AH
+            elif proto == 51:  # authentication header
                 if len(raw) < offset + 2:
-                    raise ValueError("truncated AH header")
+                    unresolved_extension = proto
+                    break
                 nxt, ext_len = raw[offset], (raw[offset + 1] + 2) * 4
             else:
                 break
             if len(raw) < offset + ext_len:
-                raise ValueError("truncated IPv6 extension body")
+                unresolved_extension = proto
+                break
             offset += ext_len
             proto = nxt
+        else:
+            # Pathological extension chains get a bounded, non-port-bearing
+            # classification rather than an unbounded parser walk.
+            unresolved_extension = proto
         family = 6
     else:
         raise ValueError("not IPv4 or IPv6")
 
     port = None
-    if proto in (6, 17) and not fragmented and len(raw) >= offset + 4:
+    if unresolved_extension is None and proto in (6, 17) and not fragmented and len(raw) >= offset + 4:
         port = struct.unpack_from("!H", raw, offset + 2)[0]
-    return (family, src, dst, PROTOCOLS.get(proto, str(proto)), port, length)
+    protocol = (f"IPv6 extension (unresolved {unresolved_extension})"
+                if unresolved_extension is not None else PROTOCOLS.get(proto, str(proto)))
+    return (family, src, dst, protocol, port, length)
 
 
 def _nflog_payload(record: bytes, endian: str):

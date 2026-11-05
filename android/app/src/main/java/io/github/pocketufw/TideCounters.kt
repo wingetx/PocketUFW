@@ -58,12 +58,12 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
             CounterFamily("IPv6", activity.ipv6Blocked, activity.ipv6Bytes, large)
             TideDivider()
             if (large) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Replies accepted", style = MaterialTheme.typography.titleMedium)
+                Text("Return traffic", style = MaterialTheme.typography.titleMedium)
                 Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
                 Text(count(activity.totalReplies), fontSize = 30.sp, lineHeight = 36.sp)
             } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text("Replies accepted", style = MaterialTheme.typography.titleMedium)
+                    Text("Return traffic", style = MaterialTheme.typography.titleMedium)
                     Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
                 Text(count(activity.totalReplies), fontSize = 28.sp, lineHeight = 34.sp)

@@ -161,7 +161,8 @@ internal fun TideScreen(
                         ui.snapshot.rootReady && vpnReason == null
                     OutlinedButton(shape = TideActionShape, onClick = actions.refreshVpn,
                         enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                        Text(if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Refresh Tailscale ports")
+                        Text(if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Refresh Tailscale ports",
+                            style = MaterialTheme.typography.labelLarge)
                     }
                     Text("Checks Tailscale's UDP listeners, not your current VPN connection.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)

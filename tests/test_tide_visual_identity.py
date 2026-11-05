@@ -23,6 +23,13 @@ class TideVisualIdentityTests(unittest.TestCase):
         settings = (KOTLIN / 'TideSettings.kt').read_text()
         self.assertNotIn('OutlinedButton(', settings)
 
+    def test_udp_actions_share_the_same_button_label_typography(self):
+        udp = (KOTLIN / 'UdpExceptionsPanel.kt').read_text()
+        screen = (KOTLIN / 'TideScreen.kt').read_text()
+        self.assertIn('Text("Advanced: Edit UDP exceptions", style = MaterialTheme.typography.labelLarge)', udp)
+        self.assertIn('Text("Restore automatic Tailscale ports", style = MaterialTheme.typography.labelLarge)', udp)
+        self.assertIn('else "Refresh Tailscale ports",\n                            style = MaterialTheme.typography.labelLarge)', screen)
+
     def test_main_screen_shares_the_original_shield_penguin_identity(self):
         source = (KOTLIN / 'TideScreen.kt').read_text()
         self.assertIn('R.drawable.pocket_penguin_neon_badge', source)

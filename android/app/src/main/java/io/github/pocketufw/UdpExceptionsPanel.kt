@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -140,7 +141,7 @@ internal fun UdpExceptionsPanel(
                     OutlinedButton(shape = TideActionShape,
                         onClick = { warningOpen = true }, enabled = editable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
-                    ) { Text("Advanced: Edit UDP exceptions", fontSize = 13.sp) }
+                    ) { Text("Advanced: Edit UDP exceptions", style = MaterialTheme.typography.labelLarge) }
                 } else {
                     Text("One incoming UDP port per address family. Blank means none.",
                         color = Muted, fontSize = 12.sp)
@@ -200,7 +201,7 @@ internal fun UdpExceptionsPanel(
                 if (!editorOpen) {
                     OutlinedButton(shape = TideActionShape, onClick = { autoConfirmation = true }, enabled = active,
                         modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                        Text("Restore automatic Tailscale ports", fontSize = 12.sp)
+                        Text("Restore automatic Tailscale ports", style = MaterialTheme.typography.labelLarge)
                     }
                 }
                 Text("Tailscale listener ports may change, making committed manual ports stale. " +

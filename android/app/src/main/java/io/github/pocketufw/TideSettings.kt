@@ -45,13 +45,6 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
             FirewallClient.UdpConfigMode.UNKNOWN -> "Saved configuration not verified"
         }, onExceptions)
         TidePolicyRow(R.drawable.tide_up, "VPN connection", if (state.vpnActive) "Connected" else "Not detected")
-        val vpnReason = vpnRefreshBlockedReason(state.udpConfigMode)
-        OutlinedButton(onClick = actions.refreshVpn,
-            enabled = active && !ui.busy && vpnReason == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = TideActionShape) {
-            Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
-        }
-        if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall, color = Muted)
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)

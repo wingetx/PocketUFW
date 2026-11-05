@@ -78,8 +78,19 @@ class TideAuditContractTests(unittest.TestCase):
         for name in ("UdpExceptionsPanel.kt", "KernelStatusTab.kt", "TideSettings.kt"):
             self.assertNotIn('Automatic · verified Tailscale listeners', SCREENS[name])
             self.assertNotIn('Verified VPN UDP port', SCREENS[name])
-        self.assertIn('vpnRefreshBlockedReason', SCREENS["TideSettings.kt"])
-        self.assertIn('vpnReason == null', SCREENS["TideSettings.kt"])
+        self.assertIn('vpnRefreshBlockedReason', SCREENS["TideScreen.kt"])
+        self.assertIn('vpnReason == null', SCREENS["TideScreen.kt"])
+
+    def test_only_one_tailscale_specific_refresh_button(self):
+        settings = SCREENS["TideSettings.kt"]
+        screen = SCREENS["TideScreen.kt"]
+        self.assertNotIn('actions.refreshVpn', settings)
+        self.assertNotIn('Refresh VPN', settings)
+        self.assertNotIn('Refresh Tailscale ports', settings)
+        self.assertEqual(screen.count('onClick = actions.refreshVpn'), 1)
+        self.assertEqual(screen.count('else "Refresh Tailscale ports"'), 1)
+        self.assertNotIn('"Refresh VPN"', screen)
+        self.assertIn('not your current VPN connection', screen)
 
     def test_historical_timestamps_have_date(self):
         self.assertIn('Calendar.getInstance()', SCREENS["TideComponents.kt"])

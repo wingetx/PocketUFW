@@ -12,11 +12,14 @@ class TideVisualIdentityTests(unittest.TestCase):
         shared = (KOTLIN / 'TideComponents.kt').read_text()
         self.assertIn('TideActionShape = RoundedCornerShape(12.dp)', shared)
         for name in ('TideComponents.kt', 'TideScreen.kt', 'TideCounters.kt',
-                     'TideSettings.kt', 'UdpExceptionsPanel.kt', 'KernelStatusTab.kt'):
+                     'UdpExceptionsPanel.kt', 'KernelStatusTab.kt'):
             with self.subTest(file=name):
                 source = (KOTLIN / name).read_text()
                 self.assertIn('shape = TideActionShape', source)
                 self.assertNotIn('RoundedCornerShape(9.dp)', source)
+        # Settings no longer contains a rectangular VPN refresh action.
+        settings = (KOTLIN / 'TideSettings.kt').read_text()
+        self.assertNotIn('OutlinedButton(', settings)
 
     def test_main_screen_shares_the_original_shield_penguin_identity(self):
         source = (KOTLIN / 'TideScreen.kt').read_text()

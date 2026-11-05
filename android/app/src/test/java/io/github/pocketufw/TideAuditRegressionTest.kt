@@ -143,13 +143,31 @@ class TideAuditRegressionTest {
             snapshot = activeDashboard(mode = UdpConfigMode.COMMITTED).snapshot
         ))
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
-        controller.get().setContent { TideTheme { TideSettings(model.value, TideActions(), "beta", {}) } }
-        node("Refresh VPN").assertIsNotEnabled()
+        controller.get().setContent { TideTheme { TideScreen(model.value, TideActions(),
+            initialDestination = TideDestination.SETTINGS) } }
+        node("Refresh Tailscale ports").assertDoesNotExist()
+        scrollClick("VPN UDP exceptions")
+        node("Refresh Tailscale ports").assertIsNotEnabled()
         node("Committed UDP exceptions", substring = true).assertExists()
         compose.runOnIdle { model.value = model.value.copy(snapshot =
             model.value.snapshot.copy(udpConfigMode = UdpConfigMode.DEGRADED)) }
-        node("Refresh VPN").assertIsNotEnabled()
+        node("Refresh Tailscale ports").assertIsNotEnabled()
         node("saved UDP configuration", substring = true).assertExists()
+    }
+
+    @Test fun onlyTailscaleExceptionsScreenOffersListenerRefresh() {
+        var calls = 0
+        val model = TideUiState(snapshot = activeDashboard().snapshot, report = sampleReport())
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        controller.get().setContent { TideTheme { TideScreen(model,
+            TideActions(refreshVpn = { calls++ }), initialDestination = TideDestination.SETTINGS) } }
+        node("Refresh Tailscale ports").assertDoesNotExist()
+        node("Refresh VPN").assertDoesNotExist()
+        scrollClick("VPN UDP exceptions")
+        assertEquals(1, compose.onAllNodesWithText("Refresh Tailscale ports").fetchSemanticsNodes().size)
+        node("Checks Tailscale's UDP listeners", substring = true).assertExists()
+        scrollClick("Refresh Tailscale ports")
+        assertEquals(1, calls)
     }
 
     @Test fun automaticVpnLabelDoesNotClaimLivePortVerification() {
@@ -177,11 +195,10 @@ class TideAuditRegressionTest {
         scrollClick("Kernel rules")
         measure("Recheck kernel rules")
         settings()
-        measure("Refresh VPN", "Settings / Refresh VPN")
         scrollClick("VPN UDP exceptions")
         measure("Advanced: Edit UDP exceptions")
         measure("Reset to automatic VPN exceptions")
-        measure("Refresh VPN", "Exceptions / Refresh VPN")
+        measure("Refresh Tailscale ports")
         val baseline = heights.getValue("Turn firewall off")
         heights.forEach { (name, height) ->
             assertEquals("$name has a different button height: $heights", baseline, height)

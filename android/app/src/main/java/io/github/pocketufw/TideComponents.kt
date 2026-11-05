@@ -57,11 +57,11 @@ internal fun bootProblemText(boot: FirewallClient.BootRestore): String? = when (
 
 internal fun vpnRefreshBlockedReason(mode: FirewallClient.UdpConfigMode): String? = when (mode) {
     FirewallClient.UdpConfigMode.COMMITTED ->
-        "Refresh VPN is unavailable while Committed UDP exceptions are saved. Edit them or reset to automatic."
+        "Tailscale port refresh is unavailable while Committed UDP exceptions are saved. Edit them or reset to automatic."
     FirewallClient.UdpConfigMode.DEGRADED ->
-        "Refresh VPN is unavailable until the saved UDP configuration is inspected."
+        "Tailscale port refresh is unavailable until the saved UDP configuration is inspected."
     FirewallClient.UdpConfigMode.UNKNOWN ->
-        "Refresh VPN is unavailable until the saved UDP configuration is verified."
+        "Tailscale port refresh is unavailable until the saved UDP configuration is verified."
     FirewallClient.UdpConfigMode.AUTOMATIC -> null
 }
 

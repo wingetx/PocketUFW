@@ -87,7 +87,7 @@ internal fun TideScreen(
         snackbarHost = {
             val note = when {
                 ui.busy && !ui.counterRefreshing ->
-                    if (ui.vpnRefreshing) "Refreshing VPN…" else "Working…"
+                    if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Working…"
                 ui.message.isNotEmpty() -> ui.message
                 ui.counterRefreshNote.isNotEmpty() -> ui.counterRefreshNote
                 else -> ""
@@ -161,8 +161,10 @@ internal fun TideScreen(
                         ui.snapshot.rootReady && vpnReason == null
                     OutlinedButton(shape = TideActionShape, onClick = actions.refreshVpn,
                         enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                        Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
+                        Text(if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Refresh Tailscale ports")
                     }
+                    Text("Checks Tailscale's UDP listeners, not your current VPN connection.",
+                        style = MaterialTheme.typography.bodySmall, color = Muted)
                     if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
                         color = Muted)
                 }

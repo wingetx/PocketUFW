@@ -270,7 +270,9 @@ class PocketUFWTests(unittest.TestCase):
         data_dir.mkdir(exist_ok=True)
         uid = data_dir.stat().st_uid
         (proc / '6283' / 'status').write_text(f'Name:\tm.tailscale.ipn\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n')
-        self.env['POCKETUFW_TS_DATA_DIR'] = str(data_dir)
+        packages = self.base / 'packages.list'
+        packages.write_text(f'com.tailscale.ipn {uid} 0\n')
+        self.env['POCKETUFW_PACKAGES_LIST'] = str(packages)
         (self.base / 'ss4').write_text(
             'UNCONN 0 0 0.0.0.0:46867 0.0.0.0:* '
             'users:(("m.tailscale.ipn",pid=6283,fd=128))\n'

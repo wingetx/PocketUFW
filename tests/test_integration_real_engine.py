@@ -54,12 +54,14 @@ class RealEngineTests(unittest.TestCase):
         (self.proc / '6283').mkdir(parents=True)
         self.ts_data = self.root / 'tailscale-data'
         self.ts_data.mkdir()
+        self.packages = self.root / 'packages.list'
+        self.packages.write_text(f'com.tailscale.ipn {self.ts_data.stat().st_uid} 0\n')
         self.env = {
             **self.device.env(dict(os.environ)),
             'PUFW_TEST_DIR': str(self.kernel),
             'POCKETUFW_SS_BIN': 'ss',
             'POCKETUFW_PROC_ROOT': str(self.proc),
-            'POCKETUFW_TS_DATA_DIR': str(self.ts_data),
+            'POCKETUFW_PACKAGES_LIST': str(self.packages),
         }
         self.power_cycle_kernel()
         self.tailscale(None, None)

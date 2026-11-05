@@ -245,13 +245,16 @@ class RealKernelTests(unittest.TestCase):
         self.device = Device(self.work / 'device', PATH_TAIL)
         self.ts_data = self.work / 'tailscale-data'
         self.ts_data.mkdir()
+        # Inside the namespace this process is mapped to UID 0.
+        self.packages = self.work / 'packages.list'
+        self.packages.write_text('com.tailscale.ipn 0 0\n')
 
     def namespace(self, body, timeout=90):
         """Run a scenario in fresh namespaces. It reports through key=value lines."""
         script = self.work / 'scenario.sh'
         script.write_text(PRELUDE + body)
         env = {**self.device.env(dict(os.environ)), 'WORK': str(self.work), 'DEVICE': str(self.device.root),
-               'POCKETUFW_TS_DATA_DIR': str(self.ts_data)}
+               'POCKETUFW_PACKAGES_LIST': str(self.packages)}
         # Its own session, so that a hang cannot leave namespace helpers behind.
         process = subprocess.Popen(['unshare', '-Urn', 'bash', str(script)], stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
@@ -549,11 +552,12 @@ class RealKernelTests(unittest.TestCase):
 
     @unittest.skipIf(os.geteuid() == 0, 'for real root, /etc is inside the mapping this scenario relies on')
     def test_spoofed_tailscale_is_refused_its_port(self):
-        # /etc belongs to a UID outside this namespace's single mapping, so here it
-        # stands for a package data directory owned by a different app UID.
+        # /etc's owner is a UID outside this namespace's single mapping, so listing it
+        # as Tailscale's makes this process a different app.
         values = self.namespace(r'''
         link wlan0 9
-        export POCKETUFW_TS_DATA_DIR=/etc
+        printf 'com.tailscale.ipn %s 0\n' "$(stat -c %u /etc)" > "$WORK/other.list"
+        export POCKETUFW_PACKAGES_LIST="$WORK/other.list"
         say owner_uid "$(stat -c %u /etc)"
         bash -c 'exec -a "$0" python3 -I "$@"' com.tailscale.ipn "$WORK/net.py" fakeapp m.tailscale.ipn 4:31337 "$WORK/app.ready" "$WORK/app.stop" > "$WORK/app.out" &
         APP=$!

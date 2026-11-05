@@ -27,6 +27,8 @@ class VPNProbeTests(unittest.TestCase):
         self.data_dir.mkdir()
         self.uid = self.data_dir.stat().st_uid
         self.write_status(self.uid)
+        self.packages = self.root / 'packages.list'
+        self.packages.write_text(f'com.tailscale.ipn {self.uid} 0 /data/user/0/com.tailscale.ipn default:targetSdkVersion=34 3003\n')
         (self.root / 'ss4').write_text(V4)
         (self.root / 'ss6').write_text(V6)
         (self.bindir / 'id').write_text('#!/bin/sh\nif [ "$1" = "-u" ]; then echo "${PUFW_TEST_UID:-0}"; fi\n')
@@ -48,7 +50,7 @@ class VPNProbeTests(unittest.TestCase):
             'PATH': str(self.bindir) + os.pathsep + os.environ.get('PATH', ''),
             'POCKETUFW_PROC_ROOT': str(self.proc),
             'POCKETUFW_SS_BIN': 'ss',
-            'POCKETUFW_TS_DATA_DIR': str(self.data_dir),
+            'POCKETUFW_PACKAGES_LIST': str(self.packages),
             'PUFW_TEST_DIR': str(self.root),
         }
 
@@ -138,16 +140,32 @@ class VPNProbeTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=46867', 'tailscale_udp6=43504'])
 
-    def test_real_android_uid_sample_matches_data_dir_owner(self):
-        (self.bindir / 'stat').write_text(
-            '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$POCKETUFW_TS_DATA_DIR" ] || exit 9\necho 10429\n')
-        (self.bindir / 'stat').chmod(0o755)
+    def test_real_android_uid_sample_matches_package_list(self):
+        self.packages.write_text('com.tailscale.ipn 10429 0 /data/user/0/com.tailscale.ipn default:targetSdkVersion=34 3003\n')
         (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\nUid:\t10429\t10429\t10429\t10429\n')
         out = self.run_probe()
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=46867', 'tailscale_udp6=43504'])
         (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\nUid:\t10430\t10430\t10430\t10430\n')
         self.assert_refused_as_unverified(self.run_probe())
+
+    def test_secondary_user_uid_matches_by_app_id(self):
+        self.packages.write_text('com.tailscale.ipn 10429 0\n')
+        (self.proc / '6283' / 'status').write_text('Uid:\t1010429\t1010429\t1010429\t1010429\n')
+        self.assertEqual(self.run_probe().returncode, 0)
+
+    def test_only_the_exact_package_counts(self):
+        self.packages.write_text(f'com.tailscale.ipn.evil {self.uid} 0\nxcom.tailscale.ipn {self.uid} 0\n')
+        self.assert_refused_as_unverified(self.run_probe())
+
+    def test_other_apps_data_directories_are_never_consulted(self):
+        # Regression, found on a real phone: su from the app inherits its mount
+        # namespace, where data isolation hides other apps' data directories, so a
+        # check based on them rejected real Tailscale whenever the app asked.
+        self.assertNotIn('/data/user_de', SCRIPT.read_text())
+        (self.bindir / 'stat').write_text('#!/bin/sh\nexit 1\n')
+        (self.bindir / 'stat').chmod(0o755)
+        self.assertEqual(self.run_probe().returncode, 0)
 
     def test_unreadable_or_malformed_status_is_refused(self):
         for content in ('Name:\tm.tailscale.ipn\n', 'Uid:\n', 'XUid:\t{0}\n', '', 'Uid:\tabc\t1\n'):
@@ -157,21 +175,19 @@ class VPNProbeTests(unittest.TestCase):
         (self.proc / '6283' / 'status').unlink()
         self.assert_refused_as_unverified(self.run_probe())
 
-    def test_missing_package_data_dir_is_refused(self):
+    def test_package_not_in_list_is_refused(self):
         # A process merely named like Tailscale, with Tailscale not installed.
-        out = self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')})
-        self.assert_refused_as_unverified(out)
-
-    def test_failing_stat_is_refused(self):
-        (self.bindir / 'stat').write_text('#!/bin/sh\nexit 1\n')
-        (self.bindir / 'stat').chmod(0o755)
+        self.packages.write_text('com.example.other 10001 0\n')
         self.assert_refused_as_unverified(self.run_probe())
+
+    def test_unreadable_package_list_is_refused(self):
+        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_PACKAGES_LIST': str(self.root / 'missing')}))
 
     def test_unknown_owner_and_unknown_process_uid_are_not_a_match(self):
         (self.proc / '6283' / 'status').write_text('Name:\tm.tailscale.ipn\n')
-        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')}))
+        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_PACKAGES_LIST': str(self.root / 'missing')}))
         (self.proc / '6283' / 'status').unlink()
-        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')}))
+        self.assert_refused_as_unverified(self.run_probe({'POCKETUFW_PACKAGES_LIST': str(self.root / 'missing')}))
 
     def test_one_spoofed_socket_among_real_ones_refuses_the_family(self):
         spoof = V4.replace(':46867', ':31337').replace('pid=6283', 'pid=7000')
@@ -181,15 +197,15 @@ class VPNProbeTests(unittest.TestCase):
         (self.root / 'ss4').write_text(V4 + spoof)
         self.assert_refused_as_unverified(self.run_probe())
 
-    def test_absent_tailscale_needs_no_data_dir(self):
+    def test_absent_tailscale_needs_no_package_entry(self):
         (self.root / 'ss4').write_text('')
         (self.root / 'ss6').write_text('')
-        out = self.run_probe({'POCKETUFW_TS_DATA_DIR': str(self.root / 'not-installed')})
+        out = self.run_probe({'POCKETUFW_PACKAGES_LIST': str(self.root / 'missing')})
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stdout.splitlines(), ['tailscale_udp4=', 'tailscale_udp6='])
 
-    def test_default_data_dir_is_the_tailscale_package(self):
-        self.assertIn('${POCKETUFW_TS_DATA_DIR:-/data/user_de/0/com.tailscale.ipn}', SCRIPT.read_text())
+    def test_default_package_list_is_androids(self):
+        self.assertIn('${POCKETUFW_PACKAGES_LIST:-/data/system/packages.list}', SCRIPT.read_text())
 
     def test_ipv6_failure_is_not_treated_as_no_listener(self):
         (self.root / 'ss6').write_text(V6.replace(':43504', ':99999'))

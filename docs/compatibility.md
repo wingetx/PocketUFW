@@ -35,11 +35,11 @@ Do not infer firewall capabilities from an installed APK or an `su` binary. Veri
 
 ## Safe VPN port discovery
 
-The read-only `vpn-probe` helper asks `ss` for bound UDP sockets separately for IPv4 and IPv6, then validates the process PID against `/proc/PID/cmdline` using the full Android Tailscale package name.
+The read-only `vpn-probe` helper asks `ss` for bound UDP sockets separately for IPv4 and IPv6, then validates the process PID against `/proc/PID/cmdline` using the full Android Tailscale package name, and requires the process UID to own Tailscale's package data directory. Process names alone prove nothing, because any app can set them with `android:process`. A failed probe only withholds the exception; it never stops the firewall.
 
 It prints only verified port numbers. An ambiguous or unverifiable listener is an **error**, never a guessed exception. A missing Tailscale process is not an error; both ports are empty.
 
-**Implemented experimentally:** manual `refresh` of verified IPv4/IPv6 exceptions, with rollback after detected update errors. **Not implemented yet:** automatic port monitoring, safe concurrency locking, persistent recovery, secure per-user allow/deny rules, or a production watchdog. Avoid calling any version production-ready until these are tested.
+**Implemented experimentally:** manual `refresh` of verified IPv4/IPv6 exceptions, with rollback after detected update errors. **Not implemented yet:** automatic port monitoring, persistent recovery, secure per-user allow/deny rules, or a production watchdog. Avoid calling any version production-ready until these are tested.
 
 ## Before wider release
 

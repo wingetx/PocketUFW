@@ -181,7 +181,7 @@ See `LICENSE` for PocketUFW's own source. No UFW source code is copied into this
 
 ### Alpha11 UI clarity
 
-The optional Quick Settings tile's **long press** resolves to PocketUFW's main dashboard through Android's `ACTION_QS_TILE_PREFERENCES` activity intent filter (instead of the default App Info). A short tap still toggles the verified kernel firewall. Initial app launch displays a neutral, explicit kernel-checking panel until the first live root inspection completes, rather than showing false OFF switches. Changing Magisk boot restoration no longer temporarily dims the unrelated firewall switch. Pending the tester's visual confirmation on the Moto.
+The optional Quick Settings tile's **long press** resolves to PocketUFW's main dashboard through Android's `ACTION_QS_TILE_PREFERENCES` activity intent filter (instead of the default App Info). A short tap acts on the state the tile showed, after checking the live kernel state, and only verifies when that state is unknown. Initial app launch displays a neutral, explicit kernel-checking panel until the first live root inspection completes, rather than showing false OFF switches. Changing Magisk boot restoration no longer temporarily dims the unrelated firewall switch. Pending the tester's visual confirmation on the Moto.
 
 ### Alpha12: optional advanced UDP exception editor
 

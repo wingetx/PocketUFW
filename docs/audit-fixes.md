@@ -159,7 +159,29 @@ commit `301c393` and were replaced in the integration snapshot by
 release build, full JVM unit tests and lint pass offline as of this integration.
 **This is not a claim that all 78 old tests also pass on Tide.**
 
-The Quick Settings tile, packet-filtering engine, boot scripts, signing,
+(Superseded: `fix/integration-audit` changes the tile, engine, boot scripts and bridge. See "Integration audit fixes" below.) The Quick Settings tile, packet-filtering engine, boot scripts, signing,
 release behavior and Android bridge remain unchanged. The `STATE_UNAVAILABLE`
 tile trade-off is deliberately out of scope. User testing of focus changes,
 root prompts, large text and live VPN recovery is still required.
+
+## Integration audit fixes (2026-11-05)
+
+Branch `fix/integration-audit`, from `integration/pocketufw-next` at `c1a1d9e`. Not merged and not released. Verified on real netfilter in a namespace and on a Moto G 5G, Android 15, with Magisk.
+
+Changed behavior:
+
+- A failed Tailscale probe or unreadable saved ports withholds only the UDP exception. The firewall still starts, by hand and at boot.
+- Engine operations are serialized with a lock in `/dev`, so simultaneous requests can't destroy each other and reads don't see a half-installed firewall.
+- `vpn-probe` requires the process UID to own Tailscale's data directory.
+- `bootctl status` reports stale boot copies, and the bridge refreshes them. Armed phones get the fixed boot scripts the next time the app runs a full inspection while the firewall is on.
+- After boot the tile shows "Not verified", not last boot's state. A tap from an unknown state only verifies, and other taps carry the state the tile showed.
+- A root timeout no longer reads as missing root, and it warns that the operation may still finish.
+
+Run the real-kernel tests with `python3 -m unittest tests.test_real_kernel`. They skip when unprivileged namespaces aren't available.
+
+Still open, because each needs a decision:
+
+- A netd restart removes PocketUFW's hooks, and nothing notices until the app opens. Fixing that needs a resident watcher.
+- A hotspot on a `wlan+` interface probably can't serve DHCP or DNS to clients. This isn't tested with a real client.
+- A UDP exception stays open after its listener stops, until refresh or rebuild.
+- An operation can't be cancelled once its root shell is running, so a timed-out one may still finish.

@@ -2,7 +2,9 @@
 
 **Branch:** integration/pocketufw-next
 **Baseline:** GitHub main 55283ab (published Beta 4 source).
-**Status:** all three development branches merged *locally*, validation green, **not pushed, not released, not installed on a phone**.
+**Status:** all three development branches merged *locally*, not pushed, not released. An independent audit then found defects this document's "validation green" didn't catch. Fixes are on `fix/integration-audit`, and that debug build has run on the Moto test phone. See `docs/audit-fixes.md`.
+
+**Out of date below:** the statements that the bridge, engine, tile and boot scripts match `main`, and the test counts. Commits `bf0df24` and `2647d6d` changed `pocketufw` and `android-bridge` after this was written, and `fix/integration-audit` changes the rest.
 
 ## Integration history
 

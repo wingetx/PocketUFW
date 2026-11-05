@@ -506,9 +506,20 @@ case "$CMD" in
       fail 'Unrecognized IPv4 VPN exception chain; no changes made'
     old6=$(current_tailscale_port "$IPT6") ||
       fail 'Unrecognized IPv6 VPN exception chain; no changes made'
+    # Only report a change when the desired listener ports differ from the
+    # ports read from our live child chains. Do not mutate a second time just
+    # to determine whether the first refresh changed anything.
+    if [ "$old4" = "$TS4" ] && [ "$old6" = "$TS6" ]; then
+      refresh_result=UNCHANGED
+    else
+      refresh_result=UPDATED
+    fi
     if ! apply_verified_refresh; then
       fail 'refresh incomplete; inspect status before retrying'
     fi
+    # This marker is emitted ONLY after a successful transactional refresh.
+    # android-bridge consumes it to distinguish updates from no-ops.
+    say "refresh_result=$refresh_result"
     say "PocketUFW: Tailscale exceptions refreshed (IPv4: ${TS4:-none}, IPv6: ${TS6:-none})."
     ;;
   get-ports)

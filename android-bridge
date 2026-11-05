@@ -195,9 +195,21 @@ case "$ACTION" in
     elif [ "$MODE" = COMMITTED ]; then
       outcome='FAILED'
       message='Committed UDP exceptions are active. Use the Status editor to change them or return to automatic detection.'
-    elif sh "$ENGINE" refresh >/dev/null 2>&1; then
-      outcome='SUCCESS'
-      message='Verified Tailscale listener exceptions refreshed.'
+    elif refresh_output=$(sh "$ENGINE" refresh 2>/dev/null); then
+      # The engine reports a result only after a successful refresh. Do not
+      # claim a change if the listener ports were already installed.
+      refresh_result=$(printf '%s\n' "$refresh_output" | sed -n 's/^refresh_result=//p')
+      case "$refresh_result" in
+        UNCHANGED)
+          outcome='SUCCESS'
+          message='Tailscale UDP exceptions already up to date. No changes needed.' ;;
+        UPDATED)
+          outcome='SUCCESS'
+          message='Tailscale UDP exceptions updated.' ;;
+        *)
+          outcome='FAILED'
+          message='VPN refresh result could not be verified; inspect firewall state.' ;;
+      esac
     else
       outcome='FAILED'
       message='VPN exceptions could not be refreshed; inspect firewall state.'

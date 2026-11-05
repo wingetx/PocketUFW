@@ -12,7 +12,7 @@ import io.github.pocketufw.FirewallClient.UdpConfigMode
 
 /** Messages copied verbatim from android-bridge, so banner heights are realistic. */
 internal object BridgeMessages {
-    const val VPN_OK = "Verified Tailscale listener exceptions refreshed."
+    const val VPN_OK = "Tailscale UDP exceptions already up to date. No changes needed."
     const val VPN_FAILED = "VPN exceptions could not be refreshed; inspect firewall state."
     const val VPN_COMMITTED = "Committed UDP exceptions are active. Use the Status editor to " +
         "change them or return to automatic detection."

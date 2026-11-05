@@ -62,7 +62,9 @@ class AndroidBridgeTests(unittest.TestCase):
             "disable) echo INACTIVE > \"$TEST_ENGINE_STATE\" ;;\n"
             "get-ports) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] || exit 4; "
             "echo udp4=none; echo udp6=none ;;\n"
-            "refresh) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] ;;\n"
+            "refresh) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] || exit 9; "
+            "[ \"$TEST_ENGINE_REFRESH_FAIL\" = 1 ] && exit 7; "
+            "printf 'refresh_result=%s\\n' \"${TEST_ENGINE_REFRESH_RESULT:-UNCHANGED}\" ;;\n"
             "reset-counters) [ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] || exit 6; "
             "[ \"$TEST_ENGINE_FAIL_RESET\" = 1 ] && exit 9; "
             "echo yes > \"$TEST_BRIDGE_RESET\" ;;\n"
@@ -308,6 +310,34 @@ class AndroidBridgeTests(unittest.TestCase):
             self.assertEqual(values["operation"], "SUCCESS")
             self.assertEqual(values["boot"], expected)
             self.assertEqual(values["state"], "ACTIVE")
+
+    def test_vpn_refresh_reports_no_change_when_listeners_match(self):
+        result, values = self.run_bridge('vpn-refresh',
+                                         {'TEST_ENGINE_REFRESH_RESULT': 'UNCHANGED'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values['operation'], 'SUCCESS')
+        self.assertIn('already up to date', values['message'])
+        self.assertIn('No changes needed', values['message'])
+        self.assertEqual(self.log_lines(), ['engine:refresh', 'engine:activity', 'boot:status'])
+
+    def test_vpn_refresh_reports_an_actual_update(self):
+        result, values = self.run_bridge('vpn-refresh',
+                                         {'TEST_ENGINE_REFRESH_RESULT': 'UPDATED'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(values['operation'], 'SUCCESS')
+        self.assertIn('exceptions updated', values['message'])
+        self.assertNotIn('No changes needed', values['message'])
+
+    def test_vpn_refresh_unknown_result_never_claims_success(self):
+        _, values = self.run_bridge('vpn-refresh',
+                                     {'TEST_ENGINE_REFRESH_RESULT': 'AMBIGUOUS'})
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('could not be verified', values['message'])
+
+    def test_vpn_refresh_failed_engine_never_claims_success(self):
+        _, values = self.run_bridge('vpn-refresh', {'TEST_ENGINE_REFRESH_FAIL': '1'})
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('could not be refreshed', values['message'])
 
     def test_reset_counters_uses_one_verified_root_action(self):
         result, values = self.run_bridge('reset-counters')

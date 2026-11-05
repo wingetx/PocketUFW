@@ -35,9 +35,10 @@ internal fun UdpExceptionsPanel(
     report: FirewallClient.KernelReport?,
     busy: Boolean,
     onSetPorts: (String, String, Boolean) -> Unit,
-    onUseAutomatic: () -> Unit
+    onUseAutomatic: () -> Unit,
+    initiallyExpanded: Boolean = false
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
     var warningOpen by remember { mutableStateOf(false) }
     var editorOpen by remember { mutableStateOf(false) }
     var commitConfirmation by remember { mutableStateOf(false) }
@@ -81,11 +82,13 @@ internal fun UdpExceptionsPanel(
     val live4 = report?.ipv4?.vpnExceptions?.let(::currentPort) ?: ""
     val live6 = report?.ipv6?.vpnExceptions?.let(::currentPort) ?: ""
 
-    Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (expanded) "Hide VPN UDP exceptions ▲" else "About / edit VPN UDP exceptions ▼",
-                    fontSize = 13.sp)
+    Surface(color = Background, shape = RoundedCornerShape(0.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!initiallyExpanded) {
+                OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (expanded) "Hide VPN UDP exceptions ▲" else "About / edit VPN UDP exceptions ▼",
+                        fontSize = 13.sp)
+                }
             }
             if (expanded) {
                 Text("Incoming VPN UDP exceptions", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -124,7 +127,7 @@ internal fun UdpExceptionsPanel(
                     color = Foreground, fontSize = 12.sp)
 
                 if (!editorOpen) {
-                    OutlinedButton(
+                    OutlinedButton(shape = RoundedCornerShape(9.dp),
                         onClick = { warningOpen = true }, enabled = editable,
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Advanced: Edit UDP exceptions", fontSize = 13.sp) }
@@ -173,9 +176,9 @@ internal fun UdpExceptionsPanel(
                     }
                     if (inputError.isNotBlank()) Text(inputError, color = Amber, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { editorOpen = false }, modifier = Modifier.weight(1f),
+                        OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { editorOpen = false }, modifier = Modifier.weight(1f),
                             enabled = !busy) { Text("Cancel") }
-                        Button(onClick = { submit() }, modifier = Modifier.weight(1f),
+                        Button(shape = RoundedCornerShape(9.dp), onClick = { submit() }, modifier = Modifier.weight(1f),
                             enabled = editable) { Text(if (committed) "Review save" else "Apply now") }
                     }
                 }
@@ -183,7 +186,7 @@ internal fun UdpExceptionsPanel(
                 // That edit changes live kernel rules without changing the
                 // saved AUTOMATIC/COMMITTED preference.
                 if (!editorOpen) {
-                    OutlinedButton(onClick = { autoConfirmation = true }, enabled = active,
+                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { autoConfirmation = true }, enabled = active,
                         modifier = Modifier.fillMaxWidth()) {
                         Text("Reset to automatic VPN exceptions", fontSize = 12.sp)
                     }

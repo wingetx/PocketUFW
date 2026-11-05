@@ -10,10 +10,10 @@ BOOT = ROOT / 'boot-service'
 
 
 class AdvancedUdpContractTests(unittest.TestCase):
-    def test_editor_stays_in_status_tab_and_gates_manual_updates(self):
+    def test_editor_stays_in_presentation_and_gates_manual_updates(self):
         ui = UI.read_text()
         main = MAIN.read_text()
-        self.assertIn('UdpExceptionsPanel(', (ROOT / 'android/app/src/main/java/io/github/pocketufw/KernelStatusTab.kt').read_text())
+        self.assertIn('UdpExceptionsPanel(', (ROOT / 'android/app/src/main/java/io/github/pocketufw/TideScreen.kt').read_text())
         self.assertIn('About / edit VPN UDP exceptions', ui)
         self.assertIn('Warning: advanced users only', ui)
         self.assertIn('I understand', ui)
@@ -36,7 +36,7 @@ class AdvancedUdpContractTests(unittest.TestCase):
         self.assertIn("Tailscale packets. Choose only ports with trusted listeners.", ui)
         # The reset is not exclusive to Committed: Experimental leaves the
         # persisted mode unchanged, so we must be able to undo live edits.
-        self.assertIn('if (!editorOpen) {\n                    OutlinedButton(onClick = { autoConfirmation = true }', ui)
+        self.assertIn('if (!editorOpen) {\n                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { autoConfirmation = true }', ui)
         self.assertNotIn('if ((saved || state.udpConfigMode == FirewallClient.UdpConfigMode.DEGRADED) && !editorOpen)', ui)
         self.assertIn('client.updateUdpExceptions(ipv4, ipv6, committed)', main)
 

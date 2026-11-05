@@ -1,0 +1,321 @@
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<div id="pufw-designs">
+  <div class="viz-carousel viz-dotted-background" aria-label="PocketUFW design directions">
+    <section data-variant="Tide" aria-label="Tide design">
+      <div class="pufw-stage"><div class="pufw-phone tide" data-design="tide" aria-label="Tide Android preview"></div></div>
+    </section>
+    <section data-variant="Relay" aria-label="Relay design" hidden>
+      <div class="pufw-stage"><div class="pufw-phone relay" data-design="relay" aria-label="Relay Android preview"></div></div>
+    </section>
+  </div>
+</div>
+<style>
+#pufw-designs .pufw-stage{padding:24px 4px 20px;display:flex;justify-content:center;min-height:888px}
+#pufw-designs .pufw-phone{--scale:1;box-sizing:border-box;width:390px;max-width:100%;height:844px;position:relative;display:flex;flex-direction:column;overflow:hidden;border-radius:32px;border:1px solid var(--line);font:400 calc(16px * var(--scale))/1.45 'DM Sans',sans-serif;background:var(--paper);color:var(--ink);box-shadow:0 16px 50px #00000013;text-align:left;isolation:isolate}
+#pufw-designs .tide{--paper:light-dark(#f7f6ef,#141b29);--surface:light-dark(#eeeee5,#202a3b);--ink:light-dark(#202c3b,#f1f2ed);--quiet:light-dark(#59606b,#b3bdce);--line:light-dark(#d5d8cf,#3d495c);--accent:light-dark(#244bc4,#a9bfff);--accent-on:light-dark(#ffffff,#152c65);--tint:light-dark(#e4eaff,#273852);--warn:light-dark(#8f4915,#f3b778);--warnbg:light-dark(#faebd8,#423123);--bad:light-dark(#ac3930,#ffb5a6)}
+#pufw-designs .relay{--paper:light-dark(#26252d,#201f27);--surface:light-dark(#34323c,#2c2a34);--ink:light-dark(#fff2e2,#fff2e2);--quiet:light-dark(#c2bac2,#c2bac2);--line:light-dark(#57505b,#514a56);--accent:light-dark(#f3b390,#f3b390);--accent-on:light-dark(#35251d,#35251d);--tint:light-dark(#48382f,#48382f);--warn:light-dark(#f7ce87,#f7ce87);--warnbg:light-dark(#483c2e,#483c2e);--bad:light-dark(#ffb9b3,#ffb9b3);font-family:'Space Grotesk',sans-serif}
+#pufw-designs .pufw-phone *{box-sizing:border-box}
+#pufw-designs .pufw-phone button,#pufw-designs .pufw-phone input{font:inherit}
+#pufw-designs .pufw-phone button{color:inherit;min-height:48px;border:0;background:none;cursor:pointer;border-radius:0;padding:8px 0;text-align:left}
+#pufw-designs .pufw-phone button:disabled{opacity:.5;cursor:default}
+#pufw-designs .pufw-phone h1,#pufw-designs .pufw-phone h2,#pufw-designs .pufw-phone h3,#pufw-designs .pufw-phone p{margin:0}
+#pufw-designs .pufw-phone h1{font-size:2.5em;line-height:1.12;font-weight:500;letter-spacing:-1.6px}
+#pufw-designs .tide h1{font-family:'Fraunces',serif}
+#pufw-designs .pufw-phone h2{font-size:1.12em;font-weight:600;line-height:1.3}
+#pufw-designs .pufw-phone h3{font-size:1em;font-weight:600}
+#pufw-designs .pufw-phone p{font-size:.875em;color:var(--quiet);line-height:1.5}
+#pufw-designs .pufw-phone .muted{color:var(--quiet)}
+#pufw-designs .pufw-phone .mono{font-family:'DM Mono',monospace;font-variant-numeric:tabular-nums}
+#pufw-designs .pufw-phone .eyebrow{font-size:.69em;letter-spacing:1.4px;text-transform:uppercase;font-weight:600}
+#pufw-designs .pufw-phone .tiny{font-size:.75em;line-height:1.5}
+#pufw-designs .pufw-phone .accent{color:var(--accent)}
+#pufw-designs .pufw-phone .row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+#pufw-designs .pufw-phone .row>div{min-width:0}
+#pufw-designs .pufw-phone .stack{display:flex;flex-direction:column;gap:8px}
+#pufw-designs .pufw-phone .grow{flex:1}
+#pufw-designs .pufw-phone .icon{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+#pufw-designs .pufw-phone .icon svg{width:20px;height:20px;stroke-width:1.8}
+#pufw-designs .pufw-phone .statusbar{height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 25px;font:600 13px 'DM Sans',sans-serif;color:var(--ink)}
+#pufw-designs .pufw-phone .statusbar .system-icons{display:flex;gap:7px;align-items:center}
+#pufw-designs .pufw-phone .statusbar .icon{width:15px;height:15px}
+#pufw-designs .pufw-phone .statusbar svg{width:15px;height:15px}
+#pufw-designs .pufw-phone .appbar{display:flex;gap:12px;align-items:center;padding:4px 24px;height:62px;flex-shrink:0}
+#pufw-designs .pufw-phone .wordmark{font-weight:700;letter-spacing:-.6px;font-size:1.12em;flex:1}
+#pufw-designs .pufw-phone .wordmark span{font-weight:400}
+#pufw-designs .pufw-phone .appbar button{width:48px;display:flex;justify-content:center;align-items:center}
+#pufw-designs .pufw-phone .appbar .edition{border:1px solid var(--line);border-radius:4px;padding:3px 7px;font-size:.625em;letter-spacing:1px}
+#pufw-designs .pufw-phone .body{flex:1;overflow:auto;scrollbar-width:none;min-height:0;overscroll-behavior:contain}
+#pufw-designs .pufw-phone .body::-webkit-scrollbar{display:none}
+#pufw-designs .pufw-phone .page{padding:16px 24px 24px}
+#pufw-designs .pufw-phone .page-title{margin-bottom:22px}
+#pufw-designs .pufw-phone .page-title p{margin-top:9px}
+#pufw-designs .pufw-phone .bottomnav{min-height:72px;flex-shrink:0;display:flex;padding:0 15px;border-top:1px solid var(--line);background:var(--paper)}
+#pufw-designs .pufw-phone .bottomnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;position:relative;color:var(--quiet);font-size:.7em;min-width:0;line-height:1.3;padding:10px 2px}
+#pufw-designs .pufw-phone .bottomnav button[aria-current=page]{color:var(--accent);font-weight:600}
+#pufw-designs .tide .bottomnav button[aria-current=page]:before{content:'';position:absolute;top:-1px;width:30px;height:3px;background:var(--accent)}
+#pufw-designs .relay .bottomnav{padding:8px 20px;gap:12px}
+#pufw-designs .relay .bottomnav button{flex-direction:row;gap:9px;font-size:.875em;border-radius:10px;min-height:52px}
+#pufw-designs .relay .bottomnav button[aria-current=page]{background:var(--accent);color:var(--accent-on)}
+#pufw-designs .pufw-phone .gesture{height:20px;display:flex;justify-content:center;align-items:center;flex-shrink:0;background:var(--paper)}
+#pufw-designs .pufw-phone .gesture:after{content:'';width:100px;height:4px;border-radius:8px;background:var(--ink)}
+#pufw-designs .pufw-phone .primary,#pufw-designs .pufw-phone .secondary{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:13px 15px;min-height:52px;border-radius:9px;font-size:.875em;font-weight:600;text-align:center}
+#pufw-designs .pufw-phone .primary{background:var(--accent);color:var(--accent-on)}
+#pufw-designs .pufw-phone .secondary{border:1px solid var(--line);color:var(--ink)}
+#pufw-designs .pufw-phone .text-action{color:var(--accent);font-size:.875em;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px}
+#pufw-designs .pufw-phone .inline-action{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid var(--line)}
+#pufw-designs .pufw-phone .inline-action .sub{display:block;font-size:.75em;color:var(--quiet);margin-top:4px}
+#pufw-designs .pufw-phone .dot{width:7px;height:7px;display:inline-block;border-radius:50%;background:currentColor;flex-shrink:0}
+#pufw-designs .pufw-phone .verification{display:flex;align-items:center;gap:8px;font-size:.69em;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--accent)}
+#pufw-designs .pufw-phone .verification .icon{width:16px;height:16px}
+#pufw-designs .pufw-phone .verification svg{width:16px;height:16px}
+#pufw-designs .pufw-phone .mascot{object-fit:contain;width:90px;height:90px;mix-blend-mode:darken}
+#pufw-designs .tide .hero{padding-top:18px}
+#pufw-designs .tide .headline{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:18px 0 10px}
+#pufw-designs .tide .headline h1{font-size:4.1em;letter-spacing:-3.7px;color:var(--accent)}
+#pufw-designs .tide[data-state=ROOT_REQUIRED] .headline h1,#pufw-designs .tide[data-state=DEGRADED] .headline h1,#pufw-designs .tide[data-state=CHECKING] .headline h1{font-size:2.6em;letter-spacing:-1.6px}
+#pufw-designs .tide .hero-copy{max-width:290px;margin-bottom:22px}
+#pufw-designs .tide .boundary{height:3px;background:var(--accent);position:relative;margin:0 0 18px}
+#pufw-designs .tide .boundary:after{content:'';display:block;position:absolute;right:0;top:-5px;width:13px;height:13px;background:var(--accent);border-radius:50%}
+#pufw-designs .pufw-phone .policy-list{margin:18px 0}
+#pufw-designs .pufw-phone .policy-row{display:flex;gap:11px;align-items:center;padding:7px 0;font-size:.8125em}
+#pufw-designs .pufw-phone .policy-row .icon{color:var(--accent)}
+#pufw-designs .pufw-phone .policy-row span:last-child{margin-left:auto;color:var(--quiet);text-align:right}
+#pufw-designs .tide .counter-link{border-block:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:18px 0;margin-top:23px}
+#pufw-designs .tide .counter-link .count{font-size:2.65em;line-height:1.1;letter-spacing:-1.9px;font-variant-numeric:tabular-nums}
+#pufw-designs .tide .counter-link .counter-caption{font-size:.75em;display:block;margin-top:5px;color:var(--quiet)}
+#pufw-designs .pufw-phone .footer-note{padding-top:16px;display:flex;align-items:center;gap:8px;color:var(--quiet);font-size:.75em}
+#pufw-designs .pufw-phone .warning{background:var(--warnbg);color:var(--warn);padding:14px 16px;border-radius:7px;font-size:.8125em;line-height:1.5;margin:14px 0}
+#pufw-designs .pufw-phone .spaced{margin-top:20px}
+#pufw-designs .pufw-phone[data-state=DEGRADED] .verification,#pufw-designs .pufw-phone[data-state=ROOT_REQUIRED] .verification{color:var(--warn)}
+#pufw-designs .pufw-phone[data-state=INACTIVE] .verification,#pufw-designs .pufw-phone[data-state=CHECKING] .verification{color:var(--quiet)}
+#pufw-designs .tide[data-state=DEGRADED] .headline h1,#pufw-designs .tide[data-state=ROOT_REQUIRED] .headline h1{color:var(--warn)}
+#pufw-designs .tide[data-state=INACTIVE] .headline h1,#pufw-designs .tide[data-state=CHECKING] .headline h1{color:var(--quiet)}
+#pufw-designs .relay .appbar{border-bottom:1px solid var(--line);margin:0 20px;padding:4px 0;height:66px}
+#pufw-designs .relay .brand-mascot{width:34px;height:34px;background:#f7f6ef;border-radius:50%;overflow:hidden;flex-shrink:0}
+#pufw-designs .relay .brand-mascot img{width:34px;height:34px;object-fit:contain;mix-blend-mode:multiply}
+#pufw-designs .relay .page{padding:22px 20px 24px}
+#pufw-designs .relay .hero-label{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+#pufw-designs .relay .switchplate{background:var(--accent);color:var(--accent-on);border-radius:3px 3px 22px 3px;padding:18px;position:relative}
+#pufw-designs .relay .switchplate .verification{color:var(--accent-on);font-size:.69em;letter-spacing:1.2px}
+#pufw-designs .relay .switchplate h1{font-size:2.6em;letter-spacing:-2.4px;font-weight:500;line-height:1.04;margin:12px 0}
+#pufw-designs .relay .switchplate p{color:var(--accent-on);font-size:.8125em;max-width:220px}
+#pufw-designs .relay .switchplate .power-button{width:64px;height:88px;min-height:88px;background:var(--accent-on);color:var(--accent);border-radius:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;margin-left:12px;flex-shrink:0;box-shadow:inset 0 0 0 5px #ffffff17}
+#pufw-designs .relay .power-button .icon svg{width:26px;height:26px}
+#pufw-designs .relay .power-button .tiny{font-size:11px;font-weight:600;letter-spacing:1px}
+#pufw-designs .relay .state-action{display:block;color:var(--accent-on);border-top:1px solid #35251d55;margin-top:14px;padding-top:10px;font-size:.75em;min-height:48px;width:100%;text-align:center}
+#pufw-designs .relay[data-state=INACTIVE] .switchplate,#pufw-designs .relay[data-state=CHECKING] .switchplate{background:#d1c9cd;--accent:#d1c9cd;--accent-on:#302c32}
+#pufw-designs .relay[data-state=DEGRADED] .switchplate,#pufw-designs .relay[data-state=ROOT_REQUIRED] .switchplate{background:#f7ce87;--accent:#f7ce87;--accent-on:#3d2e17}
+#pufw-designs .relay .policy-list{margin:14px 0 18px}
+#pufw-designs .relay .policy-row{font-size:.75em}
+#pufw-designs .relay .mini-counters{display:grid;grid-template-columns:1fr 1fr;border-block:1px solid var(--line);margin:0 0 8px;padding:15px 0}
+#pufw-designs .relay .mini-counters button{padding:0 14px;min-height:50px}
+#pufw-designs .relay .mini-counters button:first-child{padding-left:0;border-right:1px solid var(--line)}
+#pufw-designs .relay .mini-counters b{display:block;font-size:1.7em;font-weight:500;letter-spacing:-1.5px}
+#pufw-designs .relay .mini-counters span{font-size:.69em;color:var(--quiet)}
+#pufw-designs .relay .inline-action{padding:13px 0;font-size:.875em}
+#pufw-designs .pufw-phone .subnav{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:0 0 24px}
+#pufw-designs .pufw-phone .subnav button{font-size:.875em;color:var(--quiet);position:relative;padding:8px 0 12px}
+#pufw-designs .pufw-phone .subnav button[aria-pressed=true]{color:var(--accent);font-weight:600}
+#pufw-designs .pufw-phone .subnav button[aria-pressed=true]:after{content:'';height:3px;background:var(--accent);position:absolute;bottom:-1px;inset-inline:0}
+#pufw-designs .relay .subnav{padding:4px;gap:0;background:var(--surface);border:0;border-radius:9px}
+#pufw-designs .relay .subnav button{flex:1;text-align:center;border-radius:6px;min-height:42px;padding:8px;font-size:.8125em}
+#pufw-designs .relay .subnav button[aria-pressed=true]{color:var(--accent-on);background:var(--accent)}
+#pufw-designs .relay .subnav button[aria-pressed=true]:after{display:none}
+#pufw-designs .pufw-phone .counter-total{margin-bottom:22px}
+#pufw-designs .pufw-phone .counter-total .value{font-size:3.7em;line-height:1.15;font-weight:500;letter-spacing:-3px;display:block;font-variant-numeric:tabular-nums;color:var(--accent)}
+#pufw-designs .pufw-phone .counter-total .row{align-items:flex-end}
+#pufw-designs .pufw-phone .counter-total .bytes{font-size:.8125em;padding-bottom:10px;color:var(--quiet)}
+#pufw-designs .pufw-phone .counter-table{width:100%;border-collapse:collapse;font-size:.8125em}
+#pufw-designs .pufw-phone .counter-table th{font-size:.85em;color:var(--quiet);font-weight:400;padding:0 0 10px;text-align:right}
+#pufw-designs .pufw-phone .counter-table th:first-child,#pufw-designs .pufw-phone .counter-table td:first-child{text-align:left}
+#pufw-designs .pufw-phone .counter-table td{text-align:right;padding:13px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+#pufw-designs .pufw-phone .counter-table td:first-child{font-weight:600}
+#pufw-designs .pufw-phone .replies{border-top:1px solid var(--line);padding:18px 0;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:14px}
+#pufw-designs .pufw-phone .replies strong{font-size:1.6em;letter-spacing:-1px;font-weight:500;font-variant-numeric:tabular-nums}
+#pufw-designs .pufw-phone details{border-block:1px solid var(--line);padding:14px 0;margin-bottom:16px;font-size:.75em;color:var(--quiet)}
+#pufw-designs .pufw-phone summary{min-height:20px;cursor:pointer;color:var(--ink)}
+#pufw-designs .pufw-phone details p{font-size:1em;padding-top:10px}
+#pufw-designs .pufw-phone .timestamp{font-size:.69em;font-family:'DM Mono',monospace;color:var(--quiet);margin:15px 0 12px}
+#pufw-designs .pufw-phone .actions{display:flex;gap:10px}
+#pufw-designs .pufw-phone .actions>*{flex:1;min-width:0}
+#pufw-designs .relay .counter-total{border-left:3px solid var(--accent);padding-left:15px}
+#pufw-designs .relay .counter-total .value{font-family:'DM Mono',monospace;letter-spacing:-4px;font-size:3.3em}
+#pufw-designs .pufw-phone .family-tabs{display:flex;align-items:center;gap:8px;margin-bottom:17px}
+#pufw-designs .pufw-phone .family-tabs button{border:1px solid var(--line);border-radius:7px;padding:9px 18px;min-height:44px;font-size:.8125em}
+#pufw-designs .pufw-phone .family-tabs button[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+#pufw-designs .pufw-phone .family-tabs .text-action{margin-left:auto;padding:9px 6px;border:0;background:none;color:var(--accent)}
+#pufw-designs .pufw-phone .rule-context{padding:0 0 16px;border-bottom:1px solid var(--line);margin-bottom:8px}
+#pufw-designs .pufw-phone .rule-context p{font-size:.75em;margin-top:7px}
+#pufw-designs .pufw-phone .rule-context .mono{font-size:.69em;overflow-wrap:anywhere}
+#pufw-designs .pufw-phone .rule-list{list-style:none;padding:0;margin:12px 0 18px}
+#pufw-designs .pufw-phone .rule-list li{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:.8125em;min-height:34px}
+#pufw-designs .pufw-phone .rule-list .rule-no{font:400 11px 'DM Mono',monospace;color:var(--quiet)}
+#pufw-designs .pufw-phone .rule-list .rule-name{flex:1}
+#pufw-designs .pufw-phone .rule-list .rule-action{font:500 .85em 'DM Mono',monospace;letter-spacing:.3px;color:var(--accent)}
+#pufw-designs .pufw-phone .rule-list .drop .rule-action{color:var(--bad)}
+#pufw-designs .pufw-phone .rule-list .drop:last-child{border-top:1px solid var(--line);margin-top:4px}
+#pufw-designs .relay .rule-list li{padding:8px 0;border-bottom:1px solid var(--line)}
+#pufw-designs .pufw-phone pre{font:400 .69em/1.8 'DM Mono',monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface);color:var(--ink);padding:16px;border-radius:7px;margin:14px 0}
+#pufw-designs .pufw-phone .settings-group{margin-bottom:24px}
+#pufw-designs .pufw-phone .settings-group>.eyebrow{color:var(--quiet);margin-bottom:5px}
+#pufw-designs .pufw-phone .setting-row{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:17px 0;min-height:72px}
+#pufw-designs .pufw-phone .setting-row p{font-size:.75em;margin-top:4px}
+#pufw-designs .pufw-phone .switch{width:56px;height:48px;min-height:48px!important;background:none;padding:4px;flex-shrink:0;position:relative}
+#pufw-designs .pufw-phone .switch:after{content:'';position:absolute;inset:8px 2px;background:var(--line);border-radius:25px}
+#pufw-designs .pufw-phone .switch:before{content:'';height:24px;width:24px;display:block;border-radius:50%;background:var(--paper);position:absolute;top:12px;left:6px;z-index:1}
+#pufw-designs .pufw-phone .switch[aria-checked=true]:after{background:var(--accent)}
+#pufw-designs .pufw-phone .switch[aria-checked=true]:before{left:auto;right:6px;background:var(--accent-on)}
+#pufw-designs .pufw-phone .port-row{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:13px 0;font-size:.875em}
+#pufw-designs .pufw-phone .port-label{display:block;font-size:.75em;color:var(--quiet);margin-top:3px}
+#pufw-designs .pufw-phone .field{display:block;margin-top:14px;font-size:.8125em}
+#pufw-designs .pufw-phone .field input{display:block;width:100%;padding:12px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);margin-top:7px;min-height:48px}
+#pufw-designs .pufw-phone .radio{display:flex;align-items:flex-start;gap:10px;border-bottom:1px solid var(--line);padding:15px 0;font-size:.875em}
+#pufw-designs .pufw-phone .radio input{margin-top:5px;accent-color:var(--accent);width:20px;height:20px;flex-shrink:0}
+#pufw-designs .pufw-phone .radio small{display:block;color:var(--quiet);font-size:.85em;line-height:1.5;margin-top:6px}
+#pufw-designs .pufw-phone .overlay{position:absolute;inset:34px 0 20px;background:#00000055;z-index:5;display:flex;align-items:flex-end;padding:0}
+#pufw-designs .pufw-phone .sheet{background:var(--paper);color:var(--ink);width:100%;padding:28px 24px;border-radius:24px 24px 0 0;max-height:100%;overflow:auto}
+#pufw-designs .pufw-phone .sheet h2{margin-bottom:14px;font-size:1.4em}
+#pufw-designs .pufw-phone .sheet .actions{margin-top:24px}
+#pufw-designs .pufw-phone .toast{position:absolute;bottom:99px;left:16px;right:16px;background:var(--ink);color:var(--paper);border-radius:9px;padding:12px 16px;font-size:.75em;z-index:4}
+#pufw-designs .pufw-phone .compact-title{margin-bottom:12px}
+#pufw-designs .pufw-phone .compact-title h1{font-size:2em}
+#pufw-designs .relay .instrument-total{display:flex;align-items:center;justify-content:space-between;gap:18px;border-block:1px solid var(--line);padding:16px 0;margin-bottom:24px}
+#pufw-designs .relay .instrument-total strong{font-size:2.1em;font-weight:500;letter-spacing:-2px;color:var(--accent)}
+#pufw-designs .relay .instrument-total span{display:block;font-size:.75em;color:var(--quiet)}
+#pufw-designs .relay .family-ledger{display:grid;grid-template-columns:52px 1fr;gap:20px;border-bottom:1px solid var(--line);padding:0 0 20px;margin-bottom:20px}
+#pufw-designs .relay .family-ledger h2{font:500 .875em 'DM Mono',monospace;color:var(--accent);padding-top:4px}
+#pufw-designs .relay .ledger-line{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:.8125em;padding:5px 0}
+#pufw-designs .relay .ledger-line:first-child{padding-top:0}
+#pufw-designs .relay .ledger-line span{color:var(--quiet)}
+#pufw-designs .relay .ledger-line strong{font-weight:400;font-family:'DM Mono',monospace}
+#pufw-designs .relay .ledger-line:first-child strong{font-size:1.8em;line-height:1.2;letter-spacing:-1.2px;color:var(--ink)}
+#pufw-designs .pufw-phone[data-large=true] .headline h1{font-size:2.8em;letter-spacing:-1.4px}
+#pufw-designs .pufw-phone[data-large=true] .headline .mascot{display:none}
+#pufw-designs .pufw-phone[data-large=true] .replies,#pufw-designs .pufw-phone[data-large=true] .counter-total .row,#pufw-designs .pufw-phone[data-large=true] .switchplate>.row,#pufw-designs .pufw-phone[data-large=true] .policy-row{flex-wrap:wrap}
+#pufw-designs .pufw-phone[data-large=true] .mini-counters{grid-template-columns:1fr;gap:12px}
+#pufw-designs .pufw-phone[data-large=true] .mini-counters button{border-right:0;padding-left:0}
+#pufw-designs .pufw-phone[data-large=true] .family-ledger{grid-template-columns:1fr;gap:10px}
+#pufw-designs .pufw-phone[data-large=true] .actions{flex-direction:column}
+#pufw-designs .pufw-phone[data-large=true] .appbar .edition{display:none}
+#pufw-designs .pufw-phone[data-large=true] .family-tabs{flex-wrap:wrap}
+#pufw-designs .pufw-phone[data-large=true] .switchplate h1{font-size:2em;letter-spacing:-1px}
+#pufw-designs .pufw-phone[data-large=true] .page-title h1{font-size:1.8em;letter-spacing:-1px}
+#pufw-designs .pufw-phone .pending-note{background:var(--surface);padding:16px;border-radius:7px;font-size:.8125em}
+#pufw-designs .tide[data-state=CHECKING] .boundary,#pufw-designs .tide[data-state=INACTIVE] .boundary,#pufw-designs .tide[data-state=CHECKING] .boundary:after,#pufw-designs .tide[data-state=INACTIVE] .boundary:after{background:var(--quiet)}
+#pufw-designs .tide[data-state=DEGRADED] .boundary,#pufw-designs .tide[data-state=ROOT_REQUIRED] .boundary,#pufw-designs .tide[data-state=DEGRADED] .boundary:after,#pufw-designs .tide[data-state=ROOT_REQUIRED] .boundary:after{background:var(--warn)}
+@media(prefers-color-scheme:dark){#pufw-designs .tide .mascot{mix-blend-mode:normal;border-radius:50%;padding:4px;background:#f7f6ef}}
+@media(max-width:370px){#pufw-designs .pufw-stage{padding-inline:0}#pufw-designs .pufw-phone .page{padding-inline:18px}#pufw-designs .tide .headline h1{font-size:3.5em}#pufw-designs .tide .mascot{width:70px;height:70px}#pufw-designs .relay .switchplate{padding:18px}#pufw-designs .pufw-phone .subnav{gap:18px}}
+</style>
+<script>
+(() => {
+const root = document.getElementById('pufw-designs');
+const mascot = 'data:image/webp;base64,UklGRkoNAABXRUJQVlA4ID4NAADQSACdASoAAQABPnk4mUikoyKhKPDp0JAPCWlu/EZO/C8PJ2mNe2PlT/Bdq3+X/rXNszFfYnIp+Lfen93/ceJ3gBfkn8v3U8AHVHai/gf2AO+X8FqgB/OP8L6E/1f6Cfpz2FP1963v7hey6YVa9iv5IkwKFl/zmZZC66sf9S91Rr9YJ3ODgWh7eZPjnjs3fhk6HM0vi22dJWgVAz2S6BdFjpzXU6INHlyRfnIX6ja46VvoTBYX+OAkhFl0Ch40jbAaS0vHC8OhzikrGQwe8RSF4jlfue9QDU1dLAjCIUSSa0I/hsKp71DApsf8j256X1k6tJkh6sgAQHOwDoiEU8lrQLW2b/jubkzhvLcfuITWoYRHuzbJjvN4rdahG3HfZAk1MomMMWcPRE8NtStPKmYC3uaDfklhLsYHdnXwsZrC7xBqPBDmaw03uz589yERfbiCywog9s2hPikk4VzQ6ajPOxDA8RIbpi7KA7n/FnG7V8xzz3tRseIFnOhGnSgEaYOMkaWTLg2gLw3L/5E7yPIvSY4F54cH84tSckPobH37/I+BG/Xwxr/DWjYtyYpHN25IH4zO0O1sfgZCSFoS3bt1OSQsZ27abV0ak5PNV+QswTUgSLyELE+QWHH8xCWyMvBDAnz5D8N3VLqGfoLBCyrEBAEwsRu0YBAQ8qDWsiRaux1Xq5OrUdtZWoE607btrDu3TBkGzSuBF/jzzRAsK3R7ZJfNzY9xjMVky6KClKHOdO1P0/uvg1DUEK088MijjqsrtE0OQauUpXZhDxPfLoAA/vuEmAftSQ3d8mXL+xK5gDQMDB0gKk8Y5ApKAGaZfQ7QdynQ7uyMbernJ6+XVWf+qGc0a4PgZ7jZcQsTUTb8x1kFX/thT3rLtlzxBn2AHJFwnJAQSGOao85rpcD+PNpJB5MbCFPSNAUObAx3geXPloUCK9W7T+7YuqNhKO2QgsAYYDp9JH+mArrkg1sOp9tAJnqapp7kKBMCPFfjY+8R9JrQFTSEZzVbPMUZxkIFMWEL8Zu26o3CvnD89YrRAQBgACA63pV55N7l6JC/Q0yawwoLqhTI5g6UkBh/CoGAWs+7jKzwr7KC342/lPTfe9fylIqLfM5KtogTNDhr6K/qLfE32AT5iXSjdcxJaokbksXp2XKC/8y0EsuoooIaWi6dQYyZEykvrb0wOhWB5JfCXDzD1YDfOfEfe1xEeld4rPedMngvfV2npo3eiQAj+FJ6uWER5euaQyJKi7ZMiioas1Ai52+0i+Bt6R5slEWr9tUyDRqB5PpCdANJmbzOjt+fHygJTRnPYWkRsqA2PfgV27ujFVljhqHYoVN5cVeF+IKiVV+vkuHvk80QSZmlJJkKMLIItS9W93tORA87eWHr9Esn8x3UumcyjZy4FJhxieQgRm4kMk3F0sUGBVp9B6l9TLW/WJ1QEbDTYyqHXvcekI578zNUTJtE/ue51wcuccHQMAUS0Fno9xNNi9f4ZQVodChu/6gy7+75/SdTPQre0nvtp7p2dt9609vMSO2Zs29rHug+MSXPpQR3WbjzKIdVu3JNnunX4/2Bc2fKz9hokBUgcuMOuowS3NxDmazOOgBfLz2yT9A8wAl9B+y5OLX4XYqM4huEniH+0aE2CqdUztyDmSvJ+87KqOLfRcujcYnvGkALV/Z1rsMG629YuZbO14YpjjCjnK1A49htwvpPTwHt9OHzlsjh9zwmv2+azmnfN1l4Th4Wj6r28ZmuO+ja7QbhZ2NCfxgCrRVsMemeOuLMUFNrG4rjfr+04tzQ9KDvnFijBmQkEwjcNItvnjcptBPte3zE6CTpHqNX5MpmSxLVIYu3ieTxKXhTarKtug7P9+B2DEfkqtwxmHW/3A+67h4f7MEQLdmVKmbZmPdxzuWah8KQrvxheWPAfRZUBMvmf2XbU64RVPU5SPvIU55LwvTUV1wkKv0npoOmjczpWaLwj9zOsBjzlQZfDJO2r1ow6puOjQdnraCAeMs+IsR29MExsv1BnnrPkqIHGRrsNNgTU2Qsk474gT/UOCvUPZX4Z2cGyAD6kz144UCBnXeFcWQWIiHPu3Zq79aVafuOhTyN2s83voG8xbJ7ve2gJgousShHRP5NY9z7wkiqPYvfLp0+Ttpfmsu1Wdx/lj3LLDYfIGeRFok2gYnW0w6gHLv6bOEYaFu9BgsxFNmK1aXSYpzfboZ8a8qlEHjSs1Unjq2yeRvr66/pTNsvl+Xlcd5CAvO6aKK5bN74G4C0SKLLg51RF5DsnsOgj7+O6f6bZFB9ASizWpGSsgsgVHHrq/zRdz39nxKP+8Y0Vfm3g9F2KDiKsgezhjW6FuKgHuvHcxqmR4QkDYqGgOTDzpQMCDXhimFup68+/jG9o0ZZr40hSh6MTnxC5sObr3GbLIj/6T3nAb+tMEZm8RDQyuhAfYxwjk3GhWzHnQaP9X4P7mgjmUqAsePBjJImgyoXxZrtbreD4xyclwl51G426euBS8YMBWRIw72O1o23BbnnTMiuKEpoPidB5zrDJjTg6ZpkxVftO+zaLuyUV5I+tC5h7dQ3cYLFCbQ9MQQm/2FN3+GiD5UbWBHgHrBlGH6txpKx3KBeb/ldbRYcsnxqHJ4wvKOxoc4MepQRvFKSzwGHm/GQu5J4lEwK6DCiSYvUR+qyEDzXpwPQLOBpW89CB2o+miABTAxiFq8QoRA7uWPxA6Sky2wvr7KqljhaIK1fmE3TGYl5pqHKlfVWk7tz0OUHPygwzUWkKpB6ocaH3bM5j2ZOyrMtnSlchIgxPTO60R5HOhXmnqCXraAlPicjcEVelNVc3oEwdvU8h54FZbXf0v3lStOZ0aXfaoP468yS9pn+61qwE/BQBsR+Ybn9nxO9W7nElsCkQqZw5XtfwfFWDz3O24GBmQrMnHgTYkGvsRd9BeBpfQdRNHdFf2+Q6RUrf5jTwZwBFKquOz6PQakVQss8XZZnSxeWFUAE+qWZbdmRljQWjnkuevfMuAv4DBhHmhzG9JfWujeUYSKe6rPIuYjdvc1QveuS571KBn3WXhS6OJ8f+nNpNibA+DXwF/zlA09S/I84q3obFR36CjUOTOMkHxWUaWtZw/oWWVN4qA5LrN4nkjvaW72q2VKj4C0RZQXExf8731gR3AaR7/LAw1Pu+PySekjqGTXcGavu0jWtCb0KtMoG3QhYK/qx4Ow7VkDjHLnmxlc67CqRiaS7tK0tP8n+FUOul/r7YLvJRj90c4r7lW10cvz4zd2Su+gWfEtNB5dq8+rOtBQ45pvYcTb8CSmU13sfVGwkxj73ewkZiIqg4MTaEFz3JX+Z6GO/BNRFUgyrta3yd5IrM6El3xZNhsqZVqF11EsJdasUGkiW1Oz+p4CjwWVJWABXiQV4TWvmuaMokUA+TpdR4dV/HSQGQg5+XHGlfYRNsoWUeqIJFAcxI2r6nK58oDMyhQzZvWmosLvCWYRIVZWZoNJ2AiAz9eQyZ9kuJOOTXDPM2Uek6M8a0H3nPJuI/0GKAchsaWNYXm02E0VCFlxBoCHAOYeq+ICxrrR57dpj4kwGxc4ScZUEKYq6ZEpcqODfM2mlmp+yXf+v/o4PCWslYirzuqoj0K/sax0XPNYhi2dkvh1C4oOZSusRakFSdnCce41z00jGHYjJTK/AhwAdKOugsfrANyUZJENKp8Pgp70KxKww6bpSjq06pTOFYwpSNwT0vsNpUI0rYl0hJzxY8zZzL/ss+fsJG1ivCKyb8bclJ+RyjCWAgoahtPVwlJI8U+3WRcx8/OhAcGHNN9QpB8pkoerFhFzcRhmUEBQohwZB427quKbUkYhGRX0YRJYC1r2n/ivafJ/fCvsBi7cqWntz+qGcmUYVWRWqeKFSIE6PZwFCkOQHUIkgXMO+ffhUEueUaJMgKFSFjCy/weYCx8tomLnyhF1bB+PbkOooQxhvca2w2813yjDQci/4cERxqJ4Lej+V1/2fGUebsl7N85zBHzX19GwOJx3Y9PNOJ+8gsssYJLiPRqlQhPjffClZNOogTbLaCKCVIF9EhCpoDyfGNkoHf8cCjIu53yosWIIY+hYjb6Pb740KK1/9r1/6dL4baFtGs+Gc+3x/PyzJFbtDQ21TzGr/vXUi96ET0RGgB+/vruZgh93iWtz6EKLg5kk1IGbgOSm6mUsz38jw1TeZ4Qcc2fzyM99YyzVxP0CH83zSz1Lk5bowUD0i/UjQnsZfx1caVNAJV0HOMHalv1CyHkXm105e5dq7AJZkeVJazghx5+7yuWSDOymiOigmZ1IKOLhLNbJMUmtdbnWnJSBojSIIXFCSX2vxNOp2SvmlclNyLGj7fn98yVLpK0JsWcXfpgXXrj4e0hW36CcfTYRlIeSpsC0miL+mgztHO75ozp+zInGXwGouvwrvwApKF6QAlCy38DW7P6V7f1/5+5vvbgGgXzyTnpK4ohVsD1MUaWajo5RNTympOIipc4rqeSeszpVbzOlPqbhjkpQkgAnHvNI9UjKt6nznFhY0l3YnAAA=';
+const icons = name => `<span class="icon" aria-hidden="true"><i data-lucide="${name}"></i></span>`;
+const states = {
+  ACTIVE:{label:'ACTIVE', verification:'Kernel rules verified', title:'Active.', relay:'Firewall<br>on.', copy:'Unsolicited incoming traffic is blocked on supported interfaces.', icon:'circle-check', action:'Turn firewall off'},
+  INACTIVE:{label:'INACTIVE', verification:'PocketUFW is inactive', title:'Off.', relay:'Firewall<br>off.', copy:'PocketUFW rules are not installed. Android’s own firewall remains unchanged.', icon:'circle-minus', action:'Turn firewall on'},
+  CHECKING:{label:'CHECKING', verification:'Reading kernel state', title:'Checking…', relay:'Checking<br>rules.', copy:'Reading firewall rules and root status. Protection has not yet been verified.', icon:'loader-circle', action:'Checking kernel…'},
+  DEGRADED:{label:'DEGRADED', verification:'Protection not verified', title:'Needs<br>attention.', relay:'Needs<br>attention.', copy:'PocketUFW rules are incomplete or could not be verified. Inspect the kernel rules before relying on protection.', icon:'triangle-alert', action:'Recheck status'},
+  ROOT_REQUIRED:{label:'ROOT REQUIRED', verification:'Root permission needed', title:'Root<br>required.', relay:'Root<br>required.', copy:'Grant PocketUFW root access in your root manager, then check again.', icon:'key-round', action:'Check root access'}
+};
+const models = {};
+const initial = window.openai?.widgetState?.privateContent || {};
+function nav(d){
+  const m=models[d], tide=d==='tide', route=m.route;
+  const items=tide?[['home','circle-power','Firewall'],['counters','list-filter','Activity'],['settings','sliders-horizontal','Settings']]:[['home','circle-power','Firewall'],['counters','scan-line','Inspect']];
+  return `<nav class="bottomnav" aria-label="Main navigation">${items.map(([r,i,l])=>`<button type="button" class="cursor-interaction" data-route="${r}" ${r==='home'&&route==='home'||r==='counters'&&['counters','rules'].includes(route)||r==='settings'&&['settings','exceptions','editor'].includes(route)?'aria-current="page"':''}>${icons(i)}<span>${l}</span></button>`).join('')}</nav><div class="gesture" aria-hidden="true"></div>`;
+}
+function subnav(m){return `<div class="subnav" aria-label="Inspection views"><button type="button" data-route="counters" aria-pressed="${m.route==='counters'}">Counters</button><button type="button" data-route="rules" aria-pressed="${m.route==='rules'}">Kernel rules</button></div>`}
+function policies(active){return `<div class="policy-list"><div class="policy-row">${icons('arrow-down-to-line')}<strong>Unsolicited incoming</strong><span>${active?'Blocked':'Not verified'}</span></div><div class="policy-row">${icons('arrow-up-right')}<strong>Outgoing</strong><span>Unchanged</span></div></div>`}
+function home(d){
+ const m=models[d], s=states[m.state], active=m.state==='ACTIVE';
+ const isBusy=m.state==='CHECKING';
+ const count=m.reset?'0':'1,284';
+ if(d==='tide')return `<div class="page hero"><div class="verification" role="status">${icons(s.icon)}${s.verification}</div><div class="headline"><h1>${s.title}</h1><img class="mascot" src="${mascot}" alt=""></div><div class="boundary" aria-hidden="true"></div><p class="hero-copy">${s.copy}</p><button type="button" class="primary" data-action="power" ${isBusy?'disabled':''}>${icons(active?'power':s.icon)}${s.action}</button>${m.state==='DEGRADED'?`<button type="button" class="text-action" data-route="rules">Inspect partial rules ${icons('arrow-right')}</button><button type="button" class="secondary" data-action="remove">Remove partial PocketUFW rules</button>`:''}${policies(active)}${active?`<button type="button" class="counter-link" data-route="counters"><div><span class="count">${count}</span><span class="counter-caption">Dropped packets · kernel counters</span></div>${icons('arrow-up-right')}</button><button type="button" class="inline-action" data-route="settings"><div>Restore after reboot<span class="sub">${m.boot?'On':'Off'} · Magisk</span></div>${icons('chevron-right')}</button>`:`<p class="${m.state==='CHECKING'?'pending-note':'warning'}">${m.state==='INACTIVE'?'Turn on the firewall to read PocketUFW counters.':m.state==='ROOT_REQUIRED'?'Root access is required to read or change firewall rules.':'Counters are unavailable until protection is verified.'}</p>`}<div class="footer-note">${icons('terminal')}<span>${m.state==='ROOT_REQUIRED'?'Root access not granted':m.state==='CHECKING'?'Reading root access':'Root access granted'} · Beta 4</span></div></div>`;
+ return `<div class="page"><div class="hero-label"><span class="eyebrow">Firewall control</span><span class="mono tiny muted">${s.label}</span></div><div class="switchplate"><div class="verification" role="status">${icons(s.icon)}${s.verification}</div><div class="row"><h1>${s.relay}</h1><button type="button" class="power-button" data-action="power" aria-label="${s.action}" ${isBusy?'disabled':''}>${icons(active?'power':s.icon)}<span class="tiny">${active?'OFF':m.state==='INACTIVE'?'ON':'CHECK'}</span></button></div><p>${s.copy}</p><button type="button" class="state-action" data-action="power" ${isBusy?'disabled':''}>${s.action}</button></div>${policies(active)}${active?`<div class="mini-counters"><button type="button" data-route="counters"><b class="mono">${count}</b><span>Packets dropped ↗</span></button><button type="button" data-route="counters"><b class="mono">${m.reset?'0':'22,690'}</b><span>Replies accepted ↗</span></button></div><button type="button" class="inline-action" data-route="exceptions"><div>VPN UDP exceptions<span class="sub">Automatic · Tailscale listeners</span></div>${icons('chevron-right')}</button><button type="button" class="inline-action" data-route="settings"><div>Restore after reboot<span class="sub">${m.boot?'On':'Off'} · Magisk</span></div>${icons('chevron-right')}</button>`:`<button type="button" class="inline-action" data-route="rules"><div>Kernel inspection<span class="sub">Check rules and reported state</span></div>${icons('arrow-right')}</button>${m.state==='DEGRADED'?`<button type="button" class="secondary spaced" data-action="remove">Remove partial PocketUFW rules</button>`:''}`}<div class="footer-note">${icons('terminal')}<span>${m.state==='ROOT_REQUIRED'?'Root required':m.state==='CHECKING'?'Reading root access':'Root granted'} · ${m.state==='ACTIVE'?'Rules read 09:41':'State not verified'}</span></div></div>`;
+}
+function counters(d){
+ const m=models[d], z=m.reset, active=m.state==='ACTIVE';
+ if(d==='relay'&&active)return `<div class="page"><div class="page-title"><h1>Inspect</h1></div>${subnav(m)}<div class="instrument-total"><div><strong class="mono">${z?'0':'1,284'}</strong><span>Total packets dropped</span></div><div><strong class="mono" style="font-size:1.25em;letter-spacing:-1px">${z?'0 B':'92.1 KiB'}</strong><span>Total bytes dropped</span></div></div>${[['IPv4','1,196','84.3 KiB','21,348'],['IPv6','88','7.8 KiB','1,342']].map(([family,packets,bytes,replies])=>`<section class="family-ledger" aria-label="${family} counters"><h2>${family}</h2><div><div class="ledger-line"><span>Dropped</span><strong>${z?'0':packets}</strong></div><div class="ledger-line"><span>Bytes dropped</span><strong>${z?'0 B':bytes}</strong></div><div class="ledger-line"><span>Replies accepted</span><strong>${z?'0':replies}</strong></div></div></section>`).join('')}<div class="timestamp">LAST READ · 09:41:06${z?'<br>LAST MANUAL RESET · 09:41':''}</div><div class="actions"><button type="button" class="primary" data-action="refresh">${icons('refresh-cw')}Refresh</button><button type="button" class="secondary" data-action="reset">Reset counters</button></div><p class="tiny spaced">Replies: established / related packets. These are rule matches, not detected attacks.</p><p class="tiny spaced">Updated when opened or refreshed. Counts reset on request or when rules are reinstalled.</p></div>`;
+ return `<div class="page"><div class="page-title"><h1>${d==='tide'?'Activity.':'Inspect'}</h1></div>${subnav(m)}${!active?`<div class="warning">Counters unavailable · ${states[m.state].label.toLowerCase()}. A verified measurement is required.</div><button type="button" class="secondary" data-action="recheck">Recheck status</button>`:`<div class="counter-total"><span class="eyebrow muted">Incoming packets dropped</span><div class="row"><span class="value">${z?'0':'1,284'}</span><span class="bytes mono">${z?'0 B':'92.1 KiB'}</span></div></div><table class="counter-table"><thead><tr><th>Family</th><th>Dropped</th><th>Bytes</th></tr></thead><tbody><tr><td>IPv4</td><td class="mono">${z?'0':'1,196'}</td><td class="mono">${z?'0 B':'84.3 KiB'}</td></tr><tr><td>IPv6</td><td class="mono">${z?'0':'88'}</td><td class="mono">${z?'0 B':'7.8 KiB'}</td></tr></tbody></table><div class="replies"><div><h3>Replies accepted</h3><p>Established / related packets</p></div><strong>${z?'0':'22,690'}</strong></div><details><summary>Reply counts by address family</summary><div class="port-row"><span>IPv4</span><span class="mono">${z?'0':'21,348'}</span></div><div class="port-row"><span>IPv6</span><span class="mono">${z?'0':'1,342'}</span></div></details><div class="timestamp">LAST READ · 09:41:06${z?'<br>LAST MANUAL RESET · 09:41':''}</div><div class="actions"><button type="button" class="primary" data-action="refresh">${icons('refresh-cw')}Refresh</button><button type="button" class="secondary" data-action="reset">Reset counters</button></div><p class="tiny spaced">Rule matches, not attack detections. Counts reset on request or when rules are reinstalled.</p><p class="tiny spaced">Updated when opened or refreshed. No continuous monitoring.</p>`}</div>`;
+}
+const ruleNames4=[['Established / related replies','ALLOW'],['Invalid packets','DROP'],['ICMP control traffic','ALLOW'],['DHCP replies','ALLOW'],['Multicast DNS','ALLOW'],['ESP / IPsec','ALLOW'],['VPN listener exceptions','CHECK'],['Other incoming packets','DROP']];
+const ruleNames6=[['Established / related replies','ALLOW'],['Invalid packets','DROP'],['ICMPv6 control traffic','ALLOW'],['DHCPv6 replies','ALLOW'],['Multicast DNS','ALLOW'],['ESP / IPsec','ALLOW'],['VPN listener exceptions','CHECK'],['Other incoming packets','DROP']];
+function rawRules(m){return `-P INPUT ACCEPT\n-A INPUT -i wlan+ -j POCKETUFW_IN\n-A INPUT -i rmnet+ -j POCKETUFW_IN\n-A INPUT -i v4-rmnet+ -j POCKETUFW_IN\n\n-A POCKETUFW_IN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n-A POCKETUFW_IN -m conntrack --ctstate INVALID -j DROP\n-A POCKETUFW_IN -p ${m.family==='IPv4'?'icmp':'ipv6-icmp'} -j ACCEPT\n-A POCKETUFW_IN -p udp --sport ${m.family==='IPv4'?'67 --dport 68':'547 --dport 546'} -j ACCEPT\n-A POCKETUFW_IN -p udp --dport 5353 -j ACCEPT\n-A POCKETUFW_IN -p esp -j ACCEPT\n-A POCKETUFW_IN -j POCKETUFW_TS\n-A POCKETUFW_IN -j DROP\n\n-A POCKETUFW_TS -p udp --dport 41641 -j ACCEPT`}
+function rules(d){
+ const m=models[d], list=m.family==='IPv4'?ruleNames4:ruleNames6;
+ return `<div class="page"><div class="page-title compact-title"><h1>Kernel rules${d==='tide'?'.':''}</h1></div>${subnav(m)}<div class="family-tabs"><button type="button" data-family="IPv4" aria-pressed="${m.family==='IPv4'}">IPv4</button><button type="button" data-family="IPv6" aria-pressed="${m.family==='IPv6'}">IPv6</button><button type="button" class="text-action" data-action="raw">${icons(m.raw?'list':'code-xml')}${m.raw?'Readable':'Raw'}</button></div>${m.state!=='ACTIVE'?`<div class="warning">${m.state==='INACTIVE'?'No PocketUFW rules are installed.':'Complete rule report unavailable. Recheck before relying on the detailed policy.'}</div>`:`<div class="rule-context"><div class="row"><h3>INPUT <span class="muted">/ filter</span></h3><span class="tiny accent">Read 09:41</span></div><p>Android default: <strong>ACCEPT</strong> · unchanged</p><p class="mono">Hooks: wlan+ · rmnet+ · v4-rmnet+</p></div>${m.raw?`<pre aria-label="Raw kernel rules">${rawRules(m)}</pre>`:`<div class="row spaced"><span class="eyebrow muted">PocketUFW · kernel order</span></div><ol class="rule-list">${list.map(([n,a],i)=>`<li class="${a==='DROP'?'drop':''}"><span class="rule-no">${String(i+1).padStart(2,'0')}</span><span class="rule-name">${n}</span><span class="rule-action">${a}</span></li>`).join('')}</ol>`}`}<button type="button" class="inline-action" data-route="exceptions"><span>VPN UDP exceptions</span>${icons('arrow-up-right')}</button><p class="tiny spaced">Read-only snapshot. Earlier Android/OEM rules may accept traffic before these hooks. Other interfaces may bypass PocketUFW.</p></div>`;
+}
+function settings(d){
+ const m=models[d];
+ return `<div class="page"><div class="page-title"><h1>${d==='tide'?'Settings.':'Setup'}</h1><p>Small controls. Clear boundaries.</p></div><div class="settings-group"><div class="eyebrow">Startup</div><div class="setting-row"><div class="grow"><h3>Restore after reboot</h3><p>Uses Magisk at startup.<br>No background app.</p></div><button type="button" class="switch" data-action="boot" role="switch" aria-label="Restore after reboot" aria-checked="${m.boot}" ${m.state!=='ACTIVE'?'disabled':''}></button></div>${m.state!=='ACTIVE'?'<p class="tiny spaced">Available when the firewall is active and Magisk restoration is supported.</p>':''}</div><div class="settings-group"><div class="eyebrow">Connections</div><button type="button" class="inline-action" data-route="exceptions"><div>VPN UDP exceptions<span class="sub">${m.mode==='Committed'?'Committed · saved ports':'Automatic · verified Tailscale listeners'}</span></div>${icons('chevron-right')}</button><div class="setting-row"><div class="grow"><h3>VPN connection</h3><p>Detected by Android</p></div><span class="tiny accent">Connected</span></div><button type="button" class="text-action" data-action="vpn" ${m.state!=='ACTIVE'?'disabled':''}>${icons('refresh-cw')}Refresh VPN exceptions</button></div><div class="settings-group"><div class="eyebrow">Quick access</div><button type="button" class="inline-action" data-action="tile"><div>Quick Settings tile<span class="sub">Enable or disable from Android’s shade</span></div>${icons('grid-2x2')}</button></div><div class="warning"><strong>Experimental build · Beta 4</strong><br>For test devices. Automatic repair and VPN monitoring are not implemented.</div><p class="tiny spaced">Local only · No accounts or telemetry<br>Kernel protection continues when this app closes.</p></div>`;
+}
+function exceptions(d){
+ const m=models[d];
+ return `<div class="page"><div class="page-title"><h1>UDP<br>exceptions${d==='tide'?'.':''}</h1><p>Allow a listener through incoming rules.</p></div><div class="verification" role="status">${icons('route')}${m.mode==='Committed'?'Committed · saved ports':'Automatic · Tailscale'}</div><p class="spaced">Narrow exceptions can help Tailscale peers connect directly. Ordinary outbound VPN connections usually do not need them.</p><div class="port-row spaced"><div>IPv4<span class="port-label">Live incoming UDP port</span></div><span class="mono">41641</span></div><div class="port-row"><div>IPv6<span class="port-label">Live incoming UDP port</span></div><span class="mono">41641</span></div><p class="tiny spaced">An allowed UDP port accepts packets from any source on supported interfaces, not only Tailscale.</p><button type="button" class="primary spaced" data-action="edit-warning" ${m.state!=='ACTIVE'?'disabled':''}>Edit exceptions</button><button type="button" class="text-action" data-action="vpn" ${m.state!=='ACTIVE'?'disabled':''}>${icons('refresh-cw')}Refresh VPN</button><button type="button" class="secondary" data-action="automatic" ${m.state!=='ACTIVE'?'disabled':''}>Reset to automatic</button><p class="tiny spaced">Refresh VPN does not overwrite Committed ports. Manual ports can become stale when a listener changes.</p></div>`;
+}
+function editor(d){
+ const m=models[d];
+ return `<div class="page"><div class="page-title"><h1>Edit ports${d==='tide'?'.':''}</h1><p>One incoming UDP port per family.<br>Leave blank for none.</p></div><label class="field">IPv4 UDP port<input inputmode="numeric" maxlength="5" name="ipv4" value="41641" placeholder="None"></label><label class="field">IPv6 UDP port<input inputmode="numeric" maxlength="5" name="ipv6" value="41641" placeholder="None"></label><label class="radio"><input type="radio" name="mode-${d}" value="Experimental" ${m.mode!=='Committed'?'checked':''}><span>Experimental<small>Temporary. Resets on firewall off/on or reboot. Refresh VPN may replace it. Closing the app does not reset it.</small></span></label><label class="radio"><input type="radio" name="mode-${d}" value="Committed" ${m.mode==='Committed'?'checked':''}><span>Committed<small>Saved until edited or reset to automatic. Reapplied at startup, including reboot when Magisk restoration is enabled.</small></span></label><div class="actions spaced"><button type="button" class="secondary" data-route="exceptions">Cancel</button><button type="button" class="primary" data-action="save">${m.mode==='Committed'?'Review save':'Apply now'}</button></div></div>`;
+}
+function dialog(d){
+ const m=models[d];
+ if(!m.dialog)return '';
+ const dialogs={warning:['Advanced firewall configuration','Editing incoming UDP exceptions can expose services or break VPN connectivity. Only change ports you understand.','I understand','accept-warning'],commit:['Commit these UDP exceptions?','These ports will replace automatic Tailscale exceptions for future firewall sessions, until you edit them or reset to automatic.','Yes, commit','commit'],automatic:['Reset to automatic?','Replace current UDP exceptions with ports verified from running Tailscale listeners. This also clears saved manual ports.','Reset exceptions','do-automatic'],tile:['Quick Settings','Open Android’s Quick Settings editor and add PocketUFW. The existing shield tile shows firewall state and lets you enable or disable it.','Done','close']};
+ const [title,copy,confirm,action]=dialogs[m.dialog];
+ return `<div class="overlay"><div class="sheet" role="dialog" aria-modal="true" aria-label="${title}"><h2>${title}</h2><p>${copy}</p><div class="actions"><button type="button" class="secondary" data-action="close">Cancel</button><button type="button" class="primary" data-action="${action}">${confirm}</button></div></div></div>`;
+}
+function persist(){if(window.openai?.setWidgetState){const saved={};for(const [d,m] of Object.entries(models))saved[d]={state:m.state,route:m.route,family:m.family,raw:m.raw,fontScale:m.fontScale};window.openai.setWidgetState({modelContent:{directions:['Tide','Relay']},privateContent:saved}).catch(()=>{});}}
+function render(d,keepScroll=false){
+ const m=models[d], el=m.el, previous=el.querySelector('.body')?.scrollTop||0;
+ el.style.setProperty('--scale',m.fontScale);el.dataset.state=m.state;el.dataset.large=m.fontScale>1.2;
+ const sub=['exceptions','editor'].includes(m.route)||d==='relay'&&m.route==='settings';
+ const content=({home,counters,rules,settings,exceptions,editor})[m.route](d);
+ el.innerHTML=`<div class="statusbar" aria-hidden="true"><span>9:41</span><span class="system-icons">${icons('signal')}${icons('wifi')}${icons('battery-full')}</span></div><header class="appbar">${sub?`<button type="button" data-action="back" aria-label="Go back">${icons('arrow-left')}</button>`:d==='relay'?`<div class="brand-mascot"><img src="${mascot}" alt=""></div>`:''}<span class="wordmark">Pocket<span>UFW</span></span>${d==='relay'?(['counters','rules'].includes(m.route)?`<button type="button" data-action="${m.route==='rules'?'recheck':'refresh'}" aria-label="${m.route==='rules'?'Recheck kernel rules':'Refresh counters'}">${icons('refresh-cw')}</button>`:`<button type="button" data-route="settings" aria-label="Settings">${icons('sliders-horizontal')}</button>`):`<button type="button" data-action="recheck" aria-label="Recheck firewall status">${icons("refresh-cw")}</button>`}</header><main class="body" aria-label="${m.route}">${content}</main>${nav(d)}${m.toast?`<div class="toast" role="status">${m.toast}</div>`:''}${dialog(d)}`;
+ if(globalThis.lucide)lucide.createIcons({attrs:{width:20,height:20}});
+ if(keepScroll)el.querySelector('.body').scrollTop=previous;
+ if(m.dialog){for(const child of el.children)if(!child.classList.contains('overlay'))child.inert=true;el.querySelector('.sheet button')?.focus();}
+}
+for(const el of root.querySelectorAll('.pufw-phone')){
+ const d=el.dataset.design, saved=initial[d]||{};
+ models[d]={el,state:'ACTIVE',route:'home',family:'IPv4',raw:false,fontScale:1,boot:true,reset:false,mode:'Automatic',dialog:null,toast:null,...saved};
+ if(!states[models[d].state])models[d].state='ACTIVE';
+ if(!['home','counters','rules','settings','exceptions','editor'].includes(models[d].route))models[d].route='home';
+ const m=models[d];
+ render(d);
+ el.addEventListener('click',event=>{
+  const button=event.target.closest('button');if(!button||button.disabled)return;
+  m.toast=null;
+  if(button.dataset.route){m.route=button.dataset.route;render(d);persist();return;}
+  if(button.dataset.family){m.family=button.dataset.family;render(d);persist();return;}
+  const a=button.dataset.action;
+  if(a==='power'){if(m.state==='ACTIVE')m.state='INACTIVE';else if(m.state==='INACTIVE')m.state='ACTIVE';else m.toast='Preview only · select a state with the design controls.';}
+  if(a==='raw')m.raw=!m.raw;
+  if(a==='remove')m.state='INACTIVE';
+  if(a==='reset'){m.reset=true;m.toast='Preview · counters reset. Firewall remains active.';}
+  if(a==='refresh')m.toast='Preview · sample snapshot refreshed. No live device connected.';
+  if(a==='recheck')m.toast='Preview · kernel recheck. No live device connected.';
+  if(a==='vpn')m.toast=m.mode==='Committed'?'Committed ports are preserved.':'Preview · verified Tailscale listener ports refreshed.';
+  if(a==='boot')m.boot=!m.boot;
+  if(a==='back')m.route=m.route==='editor'?'exceptions':d==='relay'?'home':'settings';
+  if(a==='edit-warning')m.dialog='warning';
+  if(a==='automatic')m.dialog='automatic';
+  if(a==='tile')m.dialog='tile';
+  if(a==='close')m.dialog=null;
+  if(a==='accept-warning'){m.dialog=null;m.route='editor';m.mode='Experimental';}
+  if(a==='save'){
+    const values=Array.from(el.querySelectorAll('input[inputmode=numeric]')).map(e=>e.value.trim());
+    if(values.some(v=>v&&!/^\d{1,5}$/.test(v)||v&&(Number(v)<1||Number(v)>65535))){m.toast='Enter a UDP port from 1 to 65535, or leave blank for none.';}
+    else if(m.mode==='Committed')m.dialog='commit';else{m.route='exceptions';m.toast='Preview · Experimental ports applied to this session.';}
+  }
+  if(a==='commit'){m.dialog=null;m.route='exceptions';m.toast='Preview · Committed ports saved.';}
+  if(a==='do-automatic'){m.dialog=null;m.mode='Automatic';m.toast='Preview · automatic VPN exceptions restored.';}
+  render(d,['raw','reset','refresh','recheck','vpn','boot'].includes(a));persist();
+ });
+ el.addEventListener('change',event=>{if(event.target.type==='radio'){m.mode=event.target.value;const b=el.querySelector('[data-action=save]');b.textContent=m.mode==='Committed'?'Review save':'Apply now';}});
+ el.addEventListener('keydown',event=>{if(event.key==='Escape'&&m.dialog){m.dialog=null;render(d);}});
+ if(globalThis.Tweak){const tweak=new Tweak({container:el,onChange:()=>{m.toast=null;render(d);persist();}});tweak.addSelect(m,'state',{label:'Firewall state',options:Object.keys(states)});tweak.addSlider(m,'fontScale',{label:'Text scale',min:1,max:1.6,step:.1});}
+}
+root.addEventListener('pufw-preview',event=>{const {design,...changes}=event.detail;if(models[design]){Object.assign(models[design],changes);render(design);}});
+})();
+</script>

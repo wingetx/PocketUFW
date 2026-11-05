@@ -1,0 +1,12 @@
+PocketUFW Tide typography
+
+Fonts bundled locally; the Android app makes no font network requests.
+Source: https://github.com/google/fonts/tree/main/ofl
+Retrieved 2026-11-05. Each font family's OFL license is in this directory.
+
+Fraunces: ofl/fraunces/Fraunces[SOFT,WONK,opsz,wght].ttf
+Static instance: weight 500, optical size 72, SOFT 0, WONK 1.
+DM Sans: ofl/dmsans/DMSans[opsz,wght].ttf
+Static instances: weights 400, 500, 600, 700; optical size 14.
+DM Mono: ofl/dmmono/DMMono-Regular.ttf (unmodified).
+Static instances produced with fontTools.varLib.instancer.

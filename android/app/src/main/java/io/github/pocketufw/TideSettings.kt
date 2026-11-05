@@ -1,0 +1,63 @@
+package io.github.pocketufw
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+
+@Composable
+internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: String, onExceptions: () -> Unit) {
+    val state = ui.snapshot
+    var tileHelp by rememberSaveable { mutableStateOf(false) }
+    val active = state.protection == FirewallClient.Protection.ACTIVE && state.rootReady
+    TideHeading("Settings.")
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("STARTUP", color = Muted, style = MaterialTheme.typography.labelSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Restore after reboot", style = MaterialTheme.typography.titleMedium)
+                Text("Uses Magisk at startup. No background app.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            }
+            Switch(checked = state.bootRestore == FirewallClient.BootRestore.ENABLED,
+                onCheckedChange = { next -> if (!ui.busy) actions.changeBootRestoration(next) },
+                enabled = active && state.bootRestore in listOf(FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED),
+                modifier = Modifier.semantics { contentDescription = "Restore after reboot" })
+        }
+        if (!active) Text("Enable the firewall to change boot restoration.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        else if (state.bootRestore !in listOf(FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED)) {
+            TideNotice("Magisk boot restoration: ${bootLabel(state.bootRestore)}. Unavailable or needs inspection.", true)
+        }
+        TideDivider()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("CONNECTIONS", color = Muted, style = MaterialTheme.typography.labelSmall)
+        TideSettingLink("VPN UDP exceptions", when (state.udpConfigMode) {
+            FirewallClient.UdpConfigMode.AUTOMATIC -> "Automatic · verified Tailscale listeners"
+            FirewallClient.UdpConfigMode.COMMITTED -> "Committed · saved ports"
+            FirewallClient.UdpConfigMode.DEGRADED -> "Saved configuration needs inspection"
+            FirewallClient.UdpConfigMode.UNKNOWN -> "Saved configuration not verified"
+        }, onExceptions)
+        TidePolicyRow(R.drawable.tide_up, "VPN connection", if (state.vpnActive) "Connected" else "Not detected")
+        OutlinedButton(onClick = actions.refreshVpn, enabled = active && !ui.busy,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(9.dp)) {
+            Text("Refresh VPN")
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)
+        TideSettingLink("Quick Settings tile", "Enable or disable from Android’s shade") { tileHelp = true }
+    }
+    TideNotice("Experimental build · $appVersion\nFor test devices. Automatic repair and VPN monitoring are not yet implemented.", true)
+    Text("Kernel protection continues when the app closes.\nLocal-only · No accounts or telemetry",
+        style = MaterialTheme.typography.bodySmall, color = Muted)
+    if (tileHelp) AlertDialog(onDismissRequest = { tileHelp = false }, title = { Text("Quick Settings") },
+        text = { Text("Open Android’s Quick Settings editor and add PocketUFW. The shield tile lets you toggle the firewall. " +
+            "Its displayed state comes from the last check; tapping it verifies the current kernel state before switching.") },
+        confirmButton = { TextButton(onClick = { tileHelp = false }) { Text("Done") } })
+}

@@ -11,6 +11,8 @@ class TideVisualIdentityTests(unittest.TestCase):
     def test_all_rectangular_actions_use_one_soft_corner_shape(self):
         shared = (KOTLIN / 'TideComponents.kt').read_text()
         self.assertIn('TideActionShape = RoundedCornerShape(12.dp)', shared)
+        self.assertIn('TideActionMinHeight = 48.dp', shared)
+        self.assertIn('vertical = 10.dp', shared)
         for name in ('TideComponents.kt', 'TideScreen.kt', 'TideCounters.kt',
                      'UdpExceptionsPanel.kt', 'KernelStatusTab.kt'):
             with self.subTest(file=name):

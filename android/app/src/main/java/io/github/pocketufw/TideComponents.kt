@@ -25,6 +25,7 @@ import java.util.Locale
  * Grow for large accessibility text instead of clipping labels.
  */
 internal val TideActionMinHeight = 52.dp
+internal val TideActionShape = RoundedCornerShape(12.dp)
 
 internal fun count(value: Long?): String = value?.let { NumberFormat.getIntegerInstance().format(it) } ?: "—"
 internal fun byteCount(value: Long?): String = when {
@@ -104,7 +105,7 @@ internal fun TideNotice(message: String, error: Boolean = false) {
 internal fun TidePrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
                               icon: Int? = null, enabled: Boolean = true) {
     Button(onClick, modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), enabled = enabled,
-        shape = RoundedCornerShape(9.dp), contentPadding = PaddingValues(14.dp)) {
+        shape = TideActionShape, contentPadding = PaddingValues(14.dp)) {
         if (icon != null) {
             TideIcon(icon, tint = LocalContentColor.current)
             Spacer(Modifier.width(10.dp))

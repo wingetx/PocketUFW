@@ -36,7 +36,7 @@ class AdvancedUdpContractTests(unittest.TestCase):
         self.assertIn("Tailscale packets. Choose only ports with trusted listeners.", ui)
         # The reset is not exclusive to Committed: Experimental leaves the
         # persisted mode unchanged, so we must be able to undo live edits.
-        self.assertIn('if (!editorOpen) {\n                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { autoConfirmation = true }', ui)
+        self.assertIn('if (!editorOpen) {\n                    OutlinedButton(shape = TideActionShape, onClick = { autoConfirmation = true }', ui)
         self.assertNotIn('if ((saved || state.udpConfigMode == FirewallClient.UdpConfigMode.DEGRADED) && !editorOpen)', ui)
         self.assertIn('client.updateUdpExceptions(ipv4, ipv6, committed)', main)
 

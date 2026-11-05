@@ -16,11 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -163,7 +159,7 @@ internal fun TideScreen(
                     val vpnAllowed = !ui.busy && !ui.verificationInDoubt &&
                         ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
                         ui.snapshot.rootReady && vpnReason == null
-                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = actions.refreshVpn,
+                    OutlinedButton(shape = TideActionShape, onClick = actions.refreshVpn,
                         enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                         Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
                     }
@@ -254,12 +250,10 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
                     MaterialTheme.typography.displayLarge else MaterialTheme.typography.headlineLarge,
                     modifier = Modifier.weight(1f))
                 if (showMascot) {
-                    val paper = Background
-                    val dark = MaterialTheme.colorScheme.background.red < .3f
-                    Image(painterResource(R.drawable.pocket_penguin), contentDescription = null,
-                        modifier = Modifier.size(88.dp).then(if (dark) Modifier.clip(CircleShape)
-                        else Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                            .drawWithContent { drawContent(); drawRect(paper, blendMode = BlendMode.Darken) }))
+                    // Match the colorful shield penguin used by the app launcher.
+                    // This badge is cropped from the existing source art, not a new mascot.
+                    Image(painterResource(R.drawable.pocket_penguin_neon_badge),
+                        contentDescription = null, modifier = Modifier.size(88.dp))
                 }
             }
         }

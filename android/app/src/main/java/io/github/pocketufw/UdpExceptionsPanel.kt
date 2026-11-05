@@ -86,7 +86,7 @@ internal fun UdpExceptionsPanel(
     Surface(color = Background, shape = RoundedCornerShape(0.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!initiallyExpanded) {
-                OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { expanded = !expanded },
+                OutlinedButton(shape = TideActionShape, onClick = { expanded = !expanded },
                     modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                     Text(if (expanded) "Hide VPN UDP exceptions ▲" else "About / edit VPN UDP exceptions ▼",
                         fontSize = 13.sp)
@@ -137,7 +137,7 @@ internal fun UdpExceptionsPanel(
                     color = Foreground, fontSize = 12.sp)
 
                 if (!editorOpen) {
-                    OutlinedButton(shape = RoundedCornerShape(9.dp),
+                    OutlinedButton(shape = TideActionShape,
                         onClick = { warningOpen = true }, enabled = editable,
                         modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
                     ) { Text("Advanced: Edit UDP exceptions", fontSize = 13.sp) }
@@ -186,10 +186,10 @@ internal fun UdpExceptionsPanel(
                     }
                     if (inputError.isNotBlank()) Text(inputError, color = Amber, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { editorOpen = false },
+                        OutlinedButton(shape = TideActionShape, onClick = { editorOpen = false },
                             modifier = Modifier.weight(1f).heightIn(min = TideActionMinHeight),
                             enabled = !busy) { Text("Cancel") }
-                        Button(shape = RoundedCornerShape(9.dp), onClick = { submit() },
+                        Button(shape = TideActionShape, onClick = { submit() },
                             modifier = Modifier.weight(1f).heightIn(min = TideActionMinHeight),
                             enabled = editable) { Text(if (committed) "Review save" else "Apply now") }
                     }
@@ -198,7 +198,7 @@ internal fun UdpExceptionsPanel(
                 // That edit changes live kernel rules without changing the
                 // saved AUTOMATIC/COMMITTED preference.
                 if (!editorOpen) {
-                    OutlinedButton(shape = RoundedCornerShape(9.dp), onClick = { autoConfirmation = true }, enabled = active,
+                    OutlinedButton(shape = TideActionShape, onClick = { autoConfirmation = true }, enabled = active,
                         modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
                         Text("Reset to automatic VPN exceptions", fontSize = 12.sp)
                     }

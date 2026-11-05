@@ -1,7 +1,6 @@
 package io.github.pocketufw
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,7 +48,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         val vpnReason = vpnRefreshBlockedReason(state.udpConfigMode)
         OutlinedButton(onClick = actions.refreshVpn,
             enabled = active && !ui.busy && vpnReason == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = RoundedCornerShape(9.dp)) {
+            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = TideActionShape) {
             Text(if (ui.vpnRefreshing) "Refreshing VPN…" else "Refresh VPN")
         }
         if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall, color = Muted)

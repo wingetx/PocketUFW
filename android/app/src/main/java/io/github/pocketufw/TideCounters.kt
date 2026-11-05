@@ -1,7 +1,6 @@
 package io.github.pocketufw
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -89,7 +88,7 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
         }
         val reset: @Composable (Modifier) -> Unit = { modifier ->
             OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
-                shape = RoundedCornerShape(9.dp), modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
+                shape = TideActionShape, modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
                     .testTag("reset-counters")) { Text("Reset counters") }
         }
         if (large) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

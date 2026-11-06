@@ -191,6 +191,14 @@ class FirewallClientParsingTest {
 
     // ---- disclosure ----
 
+    @Test fun vpnInterfaceComesOnlyFromARootedBridgeAnswer() {
+        val owned = "root=GRANTED\nstate=ACTIVE\nvpn_owner=ch.protonvpn.android\nvpn_iface=tun0"
+        assertEquals("tun0", parse(owned).snapshot.vpnInterface)
+        assertNull(parse("root=GRANTED\nstate=ACTIVE\nvpn_iface=").snapshot.vpnInterface)
+        assertNull(parse("root=GRANTED\nstate=ACTIVE").snapshot.vpnInterface)
+        assertNull(parse("state=ACTIVE\nvpn_iface=tun0").snapshot.vpnInterface)
+    }
+
     @Test fun uncoveredInterfacesAreReadFromTheBridge() {
         assertEquals(listOf("eth0", "usb0"), parse(bridgeOutput(uncovered = "eth0,usb0")).snapshot.uncoveredInterfaces)
         assertEquals(listOf("eth0", "usb0"), parse(bridgeOutput(uncovered = " eth0 , usb0, ")).snapshot.uncoveredInterfaces)

@@ -15,7 +15,9 @@
 
 Settings now has **Remove PocketUFW**: the rules and boot files go, a read-back confirms it, then Android's App info page opens. An ordinary uninstall still leaves the rules until the next restart, which the owner accepted and the Settings row states. No daemon, no new permission. Results are in `docs/hardware-validation.md`, including the owner-approved Frankenpixel run.
 
-**Still open before release:** independent audit of this root boundary, a signed build containing this code (Frankenpixel is back on the older signed candidate), and the untested cases listed in that report.
+The home screen now also lists a `tun` VPN as not filtered, named from Android's own VPN record, so kernel WireGuard, `ipsec` and `tun` are reported the same way. Tonight's findings on drop spikes, Tailscale's SSDP answers and Proton are in the same report.
+
+**Still open before release:** independent audit of this root boundary, a signed build containing this code (Amber handles signing once repo edits are finished), and the untested cases listed in that report. Whether to handle the dropped SSDP answers is an open decision for the owner.
 
 ## Release blocker: uninstall leaves an active firewall
 

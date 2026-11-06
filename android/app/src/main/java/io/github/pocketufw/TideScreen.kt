@@ -244,6 +244,22 @@ internal fun TideScreen(
     )
 }
 
+/**
+ * The kernel's names mean little on their own, so say what each one is when that's known.
+ * Only Android's VPN record names an owner. Other names are described by kind, because a
+ * tunnel's name doesn't say whose it is: `ipsec` has turned out to be carrier Wi-Fi calling.
+ * The kernel's name stays, so it can be matched against the rules.
+ */
+internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): String {
+    val owner = state.vpnProvider?.removePrefix("Connected via ")?.takeIf { it != "Unrecognized VPN" }
+    return when {
+        name == state.vpnInterface && owner != null -> "traffic inside $owner ($name)"
+        name.startsWith("tun") -> "VPN tunnel $name"
+        name.startsWith("ipsec") -> "carrier or VPN tunnel $name"
+        else -> name
+    }
+}
+
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
                          requestRemoval: () -> Unit, requestDisable: () -> Unit,
@@ -324,7 +340,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
     if (active && state.uncoveredInterfaces.isNotEmpty()) {
-        TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") + ".", true)
+        TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") { uncoveredLabel(it, state) } + ".", true)
     }
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
     restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }

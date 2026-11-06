@@ -82,7 +82,9 @@ internal class FirewallClient(
         /** Identity of Android's active VPN when the OS provides its owner. */
         val vpnProvider: String? = null,
         /** Live interfaces PocketUFW has no hook on. Empty does not prove full coverage. */
-        val uncoveredInterfaces: List<String> = emptyList()
+        val uncoveredInterfaces: List<String> = emptyList(),
+        /** The interface Android's own record gives the active VPN, when it says. */
+        val vpnInterface: String? = null
     )
     /**
      * Kernel rule counters are read-only measurements, not a universal proof
@@ -372,7 +374,8 @@ internal class FirewallClient(
             committedUdp4 = values["committed_udp4"] ?: "none",
             committedUdp6 = values["committed_udp6"] ?: "none",
             uncoveredInterfaces = if (!rootGranted) emptyList() else
-                values["uncovered_ifaces"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                values["uncovered_ifaces"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() },
+            vpnInterface = if (rootGranted) values["vpn_iface"]?.takeIf { it.isNotEmpty() } else null
         ), activity, policyReport)
     }
 

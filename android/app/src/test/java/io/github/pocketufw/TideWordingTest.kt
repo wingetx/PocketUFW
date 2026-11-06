@@ -194,6 +194,38 @@ class TideWordingTest {
             ipv6 = base.ipv6.copy(bypass = listOfNotNull(rule6)))
     }
 
+    @Test fun aVpnTunnelAloneIsNamedAndTheHeadlineStopsImplyingFullCoverage() {
+        show(ui(active.copy(vpnActive = true, vpnProvider = "Proton VPN", vpnInterface = "tun0",
+            uncoveredInterfaces = listOf("tun0"))))
+        node("Not filtered: traffic inside Proton VPN (tun0).").assertExists()
+        node("RULES VERIFIED · NOT ALL TRAFFIC FILTERED").assertExists()
+        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+    }
+
+    @Test fun everyKindOfTunnelIsDescribedWithoutGuessingItsOwner() {
+        val proton = active.copy(vpnActive = true, vpnProvider = "Proton VPN", vpnInterface = "tun0")
+        assertEquals("traffic inside Proton VPN (tun0)", uncoveredLabel("tun0", proton))
+        val tailscale = active.copy(vpnActive = true, vpnProvider = "Connected via Tailscale", vpnInterface = "tun1")
+        assertEquals("traffic inside Tailscale (tun1)", uncoveredLabel("tun1", tailscale))
+        // Another tunnel isn't the VPN's just because a VPN is connected.
+        assertEquals("VPN tunnel tun0", uncoveredLabel("tun0", tailscale))
+        assertEquals("VPN tunnel tun0", uncoveredLabel("tun0", active.copy(vpnActive = true, vpnProvider = "Proton VPN")))
+        val unknown = active.copy(vpnActive = true, vpnProvider = "Unrecognized VPN", vpnInterface = "tun0")
+        assertEquals("VPN tunnel tun0", uncoveredLabel("tun0", unknown))
+        assertEquals("carrier or VPN tunnel ipsec7", uncoveredLabel("ipsec7", proton))
+        assertEquals("wg-home", uncoveredLabel("wg-home", proton))
+        assertEquals("eth0", uncoveredLabel("eth0", active))
+        // A provider that owns a kernel interface gets the same plain words.
+        val kernel = active.copy(vpnActive = true, vpnProvider = "WireGuard", vpnInterface = "wg0")
+        assertEquals("traffic inside WireGuard (wg0)", uncoveredLabel("wg0", kernel))
+    }
+
+    @Test fun severalTunnelsAreListedTogether() {
+        show(ui(active.copy(vpnActive = true, vpnProvider = "Connected via Tailscale", vpnInterface = "tun1",
+            uncoveredInterfaces = listOf("US-DEN-315", "tun1", "ipsec7"))))
+        node("Not filtered: US-DEN-315, traffic inside Tailscale (tun1), carrier or VPN tunnel ipsec7.").assertExists()
+    }
+
     @Test fun uncoveredInterfacesAreNamedAndTheHeadlineStopsImplyingFullCoverage() {
         show(ui(active.copy(uncoveredInterfaces = listOf("eth0", "usb0"))))
         node("Not filtered: eth0, usb0.").assertExists()

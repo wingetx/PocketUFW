@@ -463,8 +463,10 @@ fi
 # for ordinary apps. Never infer ownership from merely installed packages.
 # Dumpsys output varies by Android release, so absence/ambiguity is expected.
 VPN_OWNER=''
+VPN_IFACE=''
 if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-  vpn_matches=$(timeout 2 dumpsys connectivity 2>/dev/null |
+  vpn_lines=$(timeout 2 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p') || vpn_lines=''
+  vpn_matches=$(printf '%s\n' "$vpn_lines" |
     sed -n 's/.*ni{VPN CONNECTED extra: VPN:\([A-Za-z0-9_.-]*\)}.*/\1/p' |
     sort -u) || vpn_matches=''
   case "$vpn_matches" in
@@ -473,11 +475,23 @@ if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; the
     *[!A-Za-z0-9_.-]*) : ;;
     *) VPN_OWNER=$vpn_matches ;;
   esac
+  # Android's own record ties the owner to its interface, so this isn't a guess.
+  if [ -n "$VPN_OWNER" ]; then
+    vpn_ifaces=$(printf '%s\n' "$vpn_lines" |
+      sed -n 's/.*InterfaceName: \([A-Za-z0-9_.-]*\)[ }].*/\1/p' |
+      sort -u) || vpn_ifaces=''
+    case "$vpn_ifaces" in
+      ''|*'
+'*) : ;;
+      *) VPN_IFACE=$vpn_ifaces ;;
+    esac
+  fi
 fi
 
 # Read-only and best effort: interfaces that can receive traffic but that the
 # wlan+, rmnet+ and v4-rmnet+ hooks do not filter. Loopback and dummy carry no
-# inbound traffic, and tun is the VPN's inner side, excluded from filtering by design.
+# inbound traffic. A VPN's tun is listed like its kernel and IPsec equivalents:
+# traffic inside any of them really isn't filtered, and the user should be told.
 UNCOVERED_IFACES=''
 if command -v ip >/dev/null 2>&1; then
   UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk '
@@ -490,7 +504,7 @@ if command -v ip >/dev/null 2>&1; then
     $3 == "inet" || ($3 == "inet6" && / scope global /) {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
       if (!(name in up) || (name in listed)) next
-      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy|tun)/) next
+      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy)/) next
       listed[name] = 1
       list = list (list == "" ? "" : ",") name
     }
@@ -500,6 +514,7 @@ fi
 
 echo 'root=GRANTED'
 echo "vpn_owner=$VPN_OWNER"
+echo "vpn_iface=$VPN_IFACE"
 echo "uncovered_ifaces=$UNCOVERED_IFACES"
 echo "config_mode=$MODE"
 echo "committed_udp4=$SAVED4"

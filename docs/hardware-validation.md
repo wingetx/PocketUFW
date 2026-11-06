@@ -210,4 +210,19 @@ The tester manually disconnected and reconnected Proton once with PocketUFW cont
 
 **Interpretation:** every reading was true when taken, but the same limit is reported differently: named for kernel WireGuard and `ipsec`, and only in a footnote for `tun`.
 
+The app now lists a `tun` VPN as not filtered too, named from Android's own VPN record, for example "traffic inside Proton VPN (tun0)", and describes `ipsec` as a carrier or VPN tunnel. The new bridge code ran on this phone under Proton and reported the right owner and interface. The wording itself ran only in JVM tests, because the phone stays on the older signed build until a new one is signed.
+
 **An IPv6 drop spike after switching VPNs, identified:** the owner noticed IPv6 drops jump after switching to Proton, then go quiet. A repeat run with a read-only header capture on Wi-Fi and counters logged every 2 seconds found one sender for the captured Tailscale-port traffic: the owner's own PC, whose Tailscale kept trying the phone after Tailscale on the phone was turned off. Drops rose in steps of 3 about every 5 seconds and stopped about 9 minutes later. Part of each step was on a cellular hook, which was not captured. This was ordinary retry traffic correctly dropped, not an attack, and not an effect of Proton. It's also a reminder that a quiet counter says nothing about a VPN's quality: traffic inside a tunnel never reaches these counters. Most of those packets were aimed at ports other than the exceptions PocketUFW had open, which fits the documented gap that exceptions don't follow Tailscale's port changes, though the capture didn't confirm which ports Tailscale was using.
+
+**Why IPv4 drops stop under Proton:** a follow-up capture of IPv4 and IPv6 headers on Wi-Fi, split by which tunnels were up.
+
+| State | Phone's SSDP queries on Wi-Fi | SSDP replies to the phone | IPv4 drops |
+| --- | --- | --- | --- |
+| Kernel WireGuard and Tailscale, 97 s | 8 | 40, from one LAN device | +40 |
+| Kernel WireGuard and Tailscale, 16 s | 2 | 18, from one LAN device | +16 |
+| Proton, 260 s | 0 | 0 | +0 |
+| No VPN at all, 297 s | 0 | 0 | +0 |
+
+Proton did not cause the quiet: IPv4 was just as quiet with no VPN at all. The queries appeared only while Tailscale was up, including a moment without kernel WireGuard. That fits Tailscale's port-mapping probe, which looks for a router through SSDP, but the sending process wasn't identified. A LAN device answers by unicast, conntrack can't tie that answer to a multicast query, and the answer reaches the final DROP. Turning Tailscale off, as switching to Proton did here, stops the queries and so the answers.
+
+**Side effect, not yet assessed:** answers to the phone's own SSDP queries are dropped while PocketUFW is active. If these are Tailscale's probes, it may not be able to map a port on the router, which could mean fewer direct connections. Any other app that finds devices through SSDP would be affected the same way. Neither effect was tested.

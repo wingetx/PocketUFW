@@ -1043,12 +1043,40 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         # usb0 has NO-CARRIER but is administratively UP; eth0 is down; p2p0 has
         # only a link-local address; the rest are hooked or excluded by name.
-        self.assertEqual(values['uncovered_ifaces'].split(','), ['rndis0', 'ccmni0', 'usb0'])
+        self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'rndis0', 'tun0', 'usb0'])
+
+    def test_vpn_record_names_the_owners_interface(self):
+        record = ('NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:ch.protonvpn.android} '
+                  'lp{{InterfaceName: tun0 LinkAddresses: [ ]}} created=x}\n'
+                  'NetworkAgentInfo{network{100} ni{WIFI CONNECTED extra: } lp{{InterfaceName: wlan0 }} created=x}\n')
+        _, values = self.run_bridge('inspect', {'TEST_DUMPSYS_TEXT': record})
+        self.assertEqual(values['vpn_owner'], 'ch.protonvpn.android')
+        self.assertEqual(values['vpn_iface'], 'tun0')
+
+    def test_vpn_interface_is_not_guessed(self):
+        one = 'NetworkAgentInfo{network{%d} ni{VPN CONNECTED extra: VPN:%s} lp{{InterfaceName: %s }} created=x}\n'
+        cases = {
+            'no VPN record': 'NetworkAgentInfo{network{100} ni{WIFI CONNECTED extra: } lp{{InterfaceName: wlan0 }}}\n',
+            'no interface in the record': 'NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:ch.protonvpn.android} created=x}\n',
+            'two owners': one % (104, 'a.b', 'tun0') + one % (105, 'c.d', 'tun1'),
+            'one owner, two interfaces': one % (104, 'a.b', 'tun0') + one % (105, 'a.b', 'tun1'),
+            'unsafe name': one % (104, 'a.b', 'tun0;reboot'),
+        }
+        for name, record in cases.items():
+            with self.subTest(case=name):
+                _, values = self.run_bridge('inspect', {'TEST_DUMPSYS_TEXT': record})
+                self.assertNotIn(values.get('vpn_iface', ''), ('tun0', 'tun1', 'wlan0', 'tun0;reboot'))
+
+    def test_a_vpn_tunnel_counts_as_not_filtered(self):
+        link = '7: tun0: <POINTOPOINT,UP,LOWER_UP> mtu 1280\\    link/none\n'
+        addr = '7: tun0    inet 10.2.0.2/32 scope global tun0\\       valid_lft forever preferred_lft forever\n'
+        _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': addr})
+        self.assertEqual(values['uncovered_ifaces'], 'tun0')
 
     def test_covered_interfaces_are_not_listed(self):
         link = ''.join(line for line in self.IP_LINK.splitlines(True)
                        if line.split()[1].split('@')[0].rstrip(':') in
-                       ('lo', 'dummy0', 'rmnet_data0', 'tun0', 'wlan0', 'v4-rmnet_data0'))
+                       ('lo', 'dummy0', 'rmnet_data0', 'wlan0', 'v4-rmnet_data0'))
         _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': self.IP_ADDR})
         self.assertEqual(values['uncovered_ifaces'], '')
 
@@ -1064,7 +1092,7 @@ class AndroidBridgeTests(unittest.TestCase):
         for action in ('inspect', 'enable', 'disable', 'boot-enable', 'vpn-refresh'):
             with self.subTest(action=action):
                 _, values = self.run_bridge(action, {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR})
-                self.assertEqual(values['uncovered_ifaces'].split(','), ['rndis0', 'ccmni0', 'usb0'])
+                self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'rndis0', 'tun0', 'usb0'])
 
     def test_counter_refresh_does_not_query_interfaces(self):
         result, values = self.run_bridge('counters', {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR})

@@ -462,8 +462,9 @@ class RealKernelTests(unittest.TestCase):
         say vpn_inner "$(deliver 4 14 47931 5)"
         ''')
         self.assertEqual(values['state'], 'ACTIVE')
-        # usb0 is down, p2p0 has only a link-local address, tun0 is excluded by design.
-        self.assertEqual(sorted(values['listed'].split(',')), ['eth0', 'rndis0'])
+        # usb0 is down and p2p0 has only a link-local address. tun0 is listed, and this
+        # delivery shows why: traffic inside a VPN tunnel really isn't filtered.
+        self.assertEqual(sorted(values['listed'].split(',')), ['eth0', 'rndis0', 'tun0'])
         self.assertEqual(values['hooked'], '0')
         self.assertEqual(values['uncovered'], '5')
         self.assertEqual(values['vpn_inner'], '5')

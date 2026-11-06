@@ -610,6 +610,93 @@ class RealKernelTests(unittest.TestCase):
         self.assertEqual(values['off_state'], 'INACTIVE')
         self.assertEqual(values['delivered_off'], '5')
 
+    def test_removal_lets_packets_through_and_restores_the_rule_baseline(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        for ipt in iptables ip6tables; do
+          "$ipt" -w -N oem_in
+          "$ipt" -w -A oem_in -p tcp --dport 9 -j DROP
+          "$ipt" -w -A INPUT -j oem_in
+        done
+        before=$(iptables -S; ip6tables -S)
+        sh "$BRIDGE" enable >/dev/null
+        say arm "$(bridge_value boot-enable operation)"
+        say firewall_on4 "$(deliver 4 9 47931 5)"
+        say firewall_on6 "$(deliver 6 9 47932 5)"
+        out=$(sh "$BRIDGE" prepare-uninstall 2>/dev/null)
+        say removal "$(printf '%s\n' "$out" | sed -n 's/^removal=//p')"
+        say state "$(printf '%s\n' "$out" | sed -n 's/^state=//p')"
+        say after4 "$(deliver 4 9 47931 5)"
+        say after6 "$(deliver 6 9 47932 5)"
+        [ "$before" = "$(iptables -S; ip6tables -S)" ] && say identical yes || say identical no
+        [ -e "$DEVICE/service.d/pocketufw.sh" ] && say hook yes || say hook no
+        [ -e "$DEVICE/adb-pocketufw" ] && say store yes || say store no
+        ''')
+        self.assertEqual(values['arm'], 'SUCCESS')
+        self.assertEqual((values['firewall_on4'], values['firewall_on6']), ('0', '0'))
+        self.assertEqual(values['removal'], 'CLEAN')
+        self.assertEqual(values['state'], 'INACTIVE')
+        self.assertEqual((values['after4'], values['after6']), ('5', '5'))
+        self.assertEqual(values['identical'], 'yes')
+        self.assertEqual((values['hook'], values['store']), ('no', 'no'))
+
+    def test_removal_wont_call_itself_clean_while_a_foreign_rule_holds_the_chain(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        sh "$BRIDGE" enable >/dev/null
+        iptables -w -A INPUT -i eth9 -j POCKETUFW_IN
+        out=$(sh "$BRIDGE" prepare-uninstall 2>/dev/null)
+        say removal "$(printf '%s\n' "$out" | sed -n 's/^removal=//p')"
+        say left "$(printf '%s\n' "$out" | sed -n 's/^removal_left=//p')"
+        say kept_foreign "$(iptables -S INPUT | grep -c -- '-i eth9')"
+        iptables -w -D INPUT -i eth9 -j POCKETUFW_IN
+        say retry "$(bridge_value prepare-uninstall removal)"
+        say residue "$( (iptables -S; ip6tables -S) | grep -ci pocketufw)"
+        ''')
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertEqual(values['left'], 'ipv4_rules')
+        self.assertEqual(values['kept_foreign'], '1')
+        self.assertEqual(values['retry'], 'CLEAN')
+        self.assertEqual(values['residue'], '0')
+
+    def test_a_held_lock_never_produces_a_clean_removal(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        sh "$BRIDGE" enable >/dev/null
+        exec 8>>"$POCKETUFW_LOCK"; flock -x 8
+        out=$(sh "$BRIDGE" prepare-uninstall 2>/dev/null)
+        flock -u 8; exec 8>&-
+        say removal "$(printf '%s\n' "$out" | sed -n 's/^removal=//p')"
+        say state "$(printf '%s\n' "$out" | sed -n 's/^state=//p')"
+        say still_filtering "$(deliver 4 9 47931 5)"
+        say retry "$(bridge_value prepare-uninstall removal)"
+        say delivered "$(deliver 4 9 47931 5)"
+        ''', timeout=150)
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertEqual(values['state'], 'ACTIVE')
+        self.assertEqual(values['still_filtering'], '0')
+        self.assertEqual(values['retry'], 'CLEAN')
+        self.assertEqual(values['delivered'], '5')
+
+    def test_off_refused_by_a_held_lock_keeps_boot_restoration(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        sh "$BRIDGE" enable >/dev/null
+        sh "$BRIDGE" boot-enable >/dev/null
+        exec 8>>"$POCKETUFW_LOCK"; flock -x 8
+        ( sleep 17; flock -u 8 ) &
+        out=$(sh "$BRIDGE" disable 2>/dev/null)
+        exec 8>&-
+        say operation "$(printf '%s\n' "$out" | sed -n 's/^operation=//p')"
+        say message "$(printf '%s\n' "$out" | sed -n 's/^message=//p')"
+        say state "$(sh "$ENG" verify)"
+        say boot "$(bridge_value inspect boot)"
+        ''', timeout=150)
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertEqual(values['state'], 'ACTIVE')
+        self.assertEqual(values['boot'], 'ENABLED')
+        self.assertIn('boot restoration was kept', values['message'])
+
     def test_disable_leaves_other_owners_rules_exactly_as_they_were(self):
         values = self.namespace(r'''
         link wlan0 9

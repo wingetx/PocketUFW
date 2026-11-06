@@ -173,3 +173,41 @@ The tester manually disconnected and reconnected Proton once with PocketUFW cont
 - **Post-handoff packet proof:** Three controlled LAN UDP datagrams per family after Wi-Fi reconnection raised the verified IPv4 and IPv6 DROP counts by exactly 3 each. PocketUFW remained `ACTIVE`, boot restoration stayed enabled, and the saved VPN listener exceptions matched the running listeners.
 
 **Limitations:** The cellular tests prove connectivity and survival of the transition, **not end-to-end unsolicited cellular inbound blocking**; carrier filtering and upstream Android/OEM rules may bypass or precede PocketUFW hooks. Voice, SMS, IMS, emergency calls, Alfred Camera, battery/standby impact, unusual kernel resets, and long-term repeated handoff cycles still require testing. The app does not filter inner VPN tunnel traffic and does not claim universal Android firewall coverage.
+
+
+## Pixel 9a, Android 17 uninstall lifecycle and Proton reporting (November 5, 2026)
+
+**Scope:** Owner-approved, supervised testing on the owner's rooted Pixel 9a (Magisk 31.1). The owner did the screen steps and unlocked the phone after each restart. A baseline was taken first, and the phone was returned to the signed Beta 5 it started on, with byte-identical boot files. Test packets were unsolicited UDP from a LAN host. A packet that reached the phone's stack was detected by its ICMP refusal, and a dropped one by the kernel counter.
+
+**Ordinary uninstall, unmodified signed Beta 5, firewall on, boot restoration armed:**
+
+- Android reported the app gone (`pm path` exit 1, no output) and its data deleted. All PocketUFW rule lines and boot files stayed, `verify` still said ACTIVE, and 5 of 5 packets were dropped.
+- After a restart, Magisk ran the hook, the hook and data folder were gone, no rule lines remained, and 5 of 5 packets arrived. This is the first recorded hardware run of boot self-cleanup.
+
+**Remove PocketUFW, debug build with the fix:**
+
+| Case | Result |
+| --- | --- |
+| Armed and active | No rule lines or boot files, 5 of 5 packets arrived, and `INPUT` identical to baseline, all before Android's App info page was used |
+| Back out, then Turn firewall back on | Rules returned, and boot restoration returned with them |
+| Stage hook plus a file PocketUFW didn't install | Stage hook removed, the other file left untouched, App info not opened, "Still present: boot data folder" shown |
+| PocketUFW's root turned off in Magisk | "Root access is needed for this action", App info not opened |
+| Root restored, Try again, Uninstall, OK | Nothing left but an empty lock file in `/dev` |
+| Restart afterwards | Nothing came back, and the lock file was gone |
+
+**Changed boot hook:** a real restart with the app installed and closed restored the firewall, and 5 of 5 packets were dropped. With its marker deleted and the app uninstalled, a hand-run of the hook removed itself and its files and left the kernel alone. The README's manual cleanup commands then removed every rule. The rules of a kernel WireGuard tunnel appear and disappear with that tunnel, so comparing `INPUT` needs the same tunnels up.
+
+**Uninstall keeping data:** after `pm uninstall -k`, `pm path` exits 1 and the data stays. Two hand-run boots both reinstalled the firewall, as documented in the README.
+
+**Not tested on hardware:** `pm archive` failed with "No installer found" on this USB-installed build. A power cut during removal, a secondary user and an ordinary uninstall with boot restoration off were not run. Partial rules, another owner's hook, an interrupted removal and a transient package-manager answer were tested off-device only. Android removes the Quick Settings tile with the app, as it does for any app, so it has to be added again after a reinstall.
+
+**Proton VPN, with kernel WireGuard and Tailscale off:**
+
+- PocketUFW named the owner `ch.protonvpn.android`, and Proton used a `tun` interface. No earlier ACCEPT rule from Proton appeared. On Wi-Fi, 5 of 5 packets were still dropped.
+- The first reading said "Not filtered" for a short-lived `ipsec` interface. Logs point to the carrier's Wi-Fi calling tunnel, not Proton, and it was gone seconds later. The screen kept showing it until the next recheck, because there is deliberately no polling.
+- With only Proton's `tun` left, the app showed `KERNEL RULES VERIFIED` with no warning about the tunnel, apart from the footnote limiting coverage to physical interfaces.
+- With Tailscale, 5 of 5 packets sent through its `tun` from a tailnet peer reached the phone and the drop counters did not change. So traffic inside a `tun` is not filtered. I had no way to send packets into Proton's tunnel, so this wasn't measured for Proton itself. With kernel WireGuard the app correctly says "Not filtered" and flags WireGuard's earlier ACCEPT rule.
+
+**Interpretation:** every reading was true when taken, but the same limit is reported differently: named for kernel WireGuard and `ipsec`, and only in a footnote for `tun`.
+
+**An IPv6 drop spike after switching VPNs, identified:** the owner noticed IPv6 drops jump after switching to Proton, then go quiet. A repeat run with a read-only header capture on Wi-Fi and counters logged every 2 seconds found one sender for the captured Tailscale-port traffic: the owner's own PC, whose Tailscale kept trying the phone after Tailscale on the phone was turned off. Drops rose in steps of 3 about every 5 seconds and stopped about 9 minutes later. Part of each step was on a cellular hook, which was not captured. This was ordinary retry traffic correctly dropped, not an attack, and not an effect of Proton. It's also a reminder that a quiet counter says nothing about a VPN's quality: traffic inside a tunnel never reaches these counters. Most of those packets were aimed at ports other than the exceptions PocketUFW had open, which fits the documented gap that exceptions don't follow Tailscale's port changes, though the capture didn't confirm which ports Tailscale was using.

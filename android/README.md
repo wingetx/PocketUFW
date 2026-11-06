@@ -9,8 +9,9 @@ For F-Droid, the simplest route is source-tagged builds signed by F-Droid.
 The published GitHub beta2 and newer APKs use PocketUFW's release signing
 certificate. A future F-Droid-signed build may use a different certificate,
 which Android cannot update in place without an intentional migration.
-Uninstalling the firewall app clears its private saved settings, so disable
-protection first to disarm Magisk boot restoration and remove owned rules.
+Uninstalling the firewall app clears its private saved settings. Use
+**Settings → Remove PocketUFW** first: it removes owned rules and the Magisk
+boot files, confirms they're gone, and then opens Android's app page.
 Tailscale and WireGuard configurations belong to their own applications.
 
 ## Beta5: audited engine and updated interface
@@ -223,7 +224,8 @@ Do not delete the app's private files while its firewall rules are active.
 - Boot restoration is not continuous VPN monitoring. If Android/OEM resets
   the rules later or Tailscale ports change, automatic repair is not provided.
 - Disabling the firewall from the app first removes the Magisk startup hook.
-  To uninstall the app safely, switch protection off first.
+  To uninstall the app safely, use Settings → Remove PocketUFW. An uninstall
+  without it leaves the rules running until the next restart.
 
 ## Alpha5 single-root-session validation (Moto, Android 15)
 

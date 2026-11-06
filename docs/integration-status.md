@@ -11,6 +11,12 @@
 - The signed Beta 5 candidate was created with the original PocketUFW release keystore. Its certificate matches published Beta 4 (`SHA-256: 29cac70ee30ed8ab26676aeb60809bdf668f3ad3428eab556316970ce1f99ad2`). Candidate is in `android/app/build/outputs/apk/release/PocketUFW-0.1.0-beta5.apk`, a generated/untracked build artifact.
 - Beta 5 was freshly installed on Jay's rooted **Pixel 9a / Android 17**, after an earlier uninstall; app launched and reported existing active rules. The Moto audit covered the preceding audited code, not the new uninstall problem. No Beta 5 release has been uploaded or tagged.
 
+## Update: uninstall work on `fix/uninstall-lifecycle`
+
+Settings now has **Remove PocketUFW**: the rules and boot files go, a read-back confirms it, then Android's App info page opens. An ordinary uninstall still leaves the rules until the next restart, which the owner accepted and the Settings row states. No daemon, no new permission. Results are in `docs/hardware-validation.md`, including the owner-approved Frankenpixel run.
+
+**Still open before release:** independent audit of this root boundary, a signed build containing this code (Frankenpixel is back on the older signed candidate), and the untested cases listed in that report.
+
 ## Release blocker: uninstall leaves an active firewall
 
 **Observed on Pixel 9a:** After the PocketUFW app had been uninstalled, root-owned `/data/adb/service.d/pocketufw.sh`, `/data/adb/pocketufw/boot.enabled`, and `/data/adb/pocketufw/pocketufw` still existed, and both IPv4 and IPv6 `POCKETUFW_IN` chains with physical-interface INPUT hooks remained installed in the running kernel. Reinstalling signed Beta 5 found the firewall active and retained its counters. This is a real usability/security ownership problem: without the app, there is no normal UI to turn it off.

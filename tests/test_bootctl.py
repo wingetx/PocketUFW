@@ -266,13 +266,16 @@ class BootTests(unittest.TestCase):
         self.state.write_text('INACTIVE\n')
         (self.store / 'boot.enabled').unlink()
         self.assertEqual(self.boot().returncode, 0)
-        self.assertEqual(self.order_lines(), [])
+        # It still asks whether the app exists, and nothing more while it does.
+        self.assertEqual(self.order_lines(), ['getprop', 'pm'])
+        self.assertTrue(self.hook.exists())
         self.state.write_text('ACTIVE\n')
         self.assertEqual(self.call('enable').returncode, 0)
         self.state.write_text('INACTIVE\n')
         (self.store / 'pocketufw').unlink()
         self.assertEqual(self.boot().returncode, 0)
-        self.assertEqual(self.order_lines(), [])
+        self.assertEqual(self.order_lines(), ['getprop', 'pm'])
+        self.assertTrue(self.hook.exists())
 
     def test_automatic_mode_passes_auto_tailscale(self):
         self.assertEqual(self.call('enable').returncode, 0)
@@ -503,6 +506,159 @@ class BootTests(unittest.TestCase):
         self.assertFalse(self.hook.exists())
         self.assertFalse(self.store.exists())
         self.assertFalse(self.calls.exists())
+
+    # --- Cleanup once the app is gone, from states an interruption can leave. ---
+
+    def run_file(self, path, env=None):
+        self.order.unlink(missing_ok=True)
+        return subprocess.run(['/bin/sh', str(path)], capture_output=True, text=True,
+                              env={**self.env, **(env or {})}, timeout=8)
+
+    def test_a_hook_missing_its_marker_or_engine_still_removes_itself(self):
+        for missing in ('boot.enabled', 'pocketufw'):
+            with self.subTest(missing=missing):
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                (self.store / missing).unlink()
+                self.state.write_text('INACTIVE\n')
+                self.assertEqual(self.boot({'TEST_PM_MODE': 'gone'}).returncode, 0)
+                self.assertFalse(self.hook.exists())
+                self.assertFalse(self.store.exists())
+                self.assertFalse(self.calls.exists())
+
+    def test_a_hook_missing_its_marker_never_removes_itself_on_an_ambiguous_answer(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        (self.store / 'boot.enabled').unlink()
+        for mode in ('ok', 'transient', 'one-with-package', 'ok-no-package'):
+            with self.subTest(pm=mode):
+                self.assertEqual(self.boot({'TEST_PM_MODE': mode}).returncode, 0)
+                self.assertTrue(self.hook.exists())
+                self.assertTrue(self.store.exists())
+
+    def test_app_gone_also_removes_stage_files(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        stage = Path(str(self.hook) + '.stage')
+        stage.write_bytes(self.hook.read_bytes())
+        for name in ('.pocketufw.stage', '.vpn-probe.stage', '.udp-config.stage', '.boot.enabled.stage'):
+            (self.store / name).write_text('partial')
+        self.assertEqual(self.boot({'TEST_PM_MODE': 'gone'}).returncode, 0)
+        self.assertFalse(stage.exists())
+        self.assertFalse(self.hook.exists())
+        self.assertFalse(self.store.exists())
+
+    def test_cleanup_never_touches_a_stage_path_or_hook_that_isnt_ours(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        stage = Path(str(self.hook) + '.stage')
+        stage.write_text('#!/bin/sh\n# belongs to someone else\n')
+        self.assertEqual(self.boot({'TEST_PM_MODE': 'gone'}).returncode, 0)
+        self.assertIn('someone else', stage.read_text())
+        self.assertFalse(self.hook.exists())
+
+    def test_a_leftover_stage_copy_running_alone_spares_another_owners_hook(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        stage = Path(str(self.hook) + '.stage')
+        stage.write_bytes(self.hook.read_bytes())
+        self.hook.write_text('#!/bin/sh\n# belongs to another module\n')
+        self.assertEqual(self.run_file(stage, {'TEST_PM_MODE': 'gone'}).returncode, 0)
+        self.assertIn('another module', self.hook.read_text())
+        self.assertFalse(stage.exists())
+        self.assertFalse(self.store.exists())
+
+    def test_cleanup_doesnt_write_through_a_symlinked_data_directory(self):
+        target = self.root / 'other'
+        target.mkdir()
+        (target / 'boot.enabled').write_text('someone else')
+        self.service_dir.joinpath('placeholder').unlink(missing_ok=True)
+        self.hook.write_bytes((self.app / 'boot-service').read_bytes())
+        self.store.symlink_to(target)
+        self.assertEqual(self.boot({'TEST_PM_MODE': 'gone'}).returncode, 0)
+        self.assertEqual((target / 'boot.enabled').read_text(), 'someone else')
+        self.assertTrue(self.store.is_symlink())
+
+    def test_off_removes_a_leftover_stage_hook(self):
+        for content in (None, ''):
+            with self.subTest(empty=content == ''):
+                self.state.write_text('ACTIVE\n')
+                self.assertEqual(self.call('enable').returncode, 0)
+                stage = Path(str(self.hook) + '.stage')
+                if content is None:
+                    stage.write_bytes(self.hook.read_bytes())
+                else:
+                    stage.write_text(content)
+                self.assertEqual(self.call('disable').returncode, 0)
+                self.assertFalse(stage.exists())
+
+    def residue(self):
+        result = self.call('residue')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return dict(line.split('=', 1) for line in result.stdout.splitlines())
+
+    def test_purge_removes_everything_of_ours_and_nothing_else(self):
+        other = self.service_dir / 'someone_else.sh'
+        other.write_text('leave me alone')
+        self.assertEqual(self.call('enable').returncode, 0)
+        Path(str(self.hook) + '.stage').write_bytes(self.hook.read_bytes())
+        (self.store / '.vpn-probe.stage').write_text('partial')
+        self.assertEqual(self.residue(), {'boot_left': 'boot_hook,boot_hook_stage,boot_data', 'boot_kept': ''})
+        self.assertEqual(self.call('purge').returncode, 0)
+        self.assertEqual(self.residue(), {'boot_left': '', 'boot_kept': ''})
+        self.assertEqual(sorted(p.name for p in self.service_dir.iterdir()), ['someone_else.sh'])
+        self.assertEqual(other.read_text(), 'leave me alone')
+        self.assertEqual(self.call('purge').returncode, 0)
+
+    def test_purge_clears_our_files_when_another_owner_holds_the_hook_path(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        self.hook.write_text('#!/bin/sh\n# belongs to another module\n')
+        self.assertEqual(self.call('purge').returncode, 0)
+        self.assertIn('another module', self.hook.read_text())
+        self.assertFalse(self.store.exists())
+        self.assertEqual(self.residue(), {'boot_left': '', 'boot_kept': 'boot_hook'})
+
+    def test_purge_never_deletes_a_file_it_didnt_install(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        stranger = self.store / 'not-ours'
+        stranger.write_text('keep')
+        self.assertEqual(self.call('purge').returncode, 0)
+        self.assertEqual(stranger.read_text(), 'keep')
+        self.assertFalse((self.store / 'pocketufw').exists())
+        self.assertEqual(self.residue(), {'boot_left': 'boot_data', 'boot_kept': ''})
+
+    def test_purge_follows_no_symlink(self):
+        target = self.root / 'other'
+        target.mkdir()
+        (target / 'pocketufw').write_text('keep')
+        self.store.symlink_to(target)
+        hook_target = self.root / 'other-hook'
+        hook_target.write_text('# PocketUFW boot hook v1\n')
+        self.hook.symlink_to(hook_target)
+        self.assertEqual(self.call('purge').returncode, 0)
+        self.assertEqual((target / 'pocketufw').read_text(), 'keep')
+        self.assertTrue(hook_target.exists())
+        self.assertTrue(self.hook.is_symlink())
+        self.assertEqual(self.residue(), {'boot_left': '', 'boot_kept': 'boot_hook,boot_data'})
+
+    def test_a_symlink_inside_the_data_directory_is_removed_without_following_it(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        target = self.root / 'other-file'
+        target.write_text('keep')
+        (self.store / 'pocketufw').unlink()
+        (self.store / 'pocketufw').symlink_to(target)
+        self.assertEqual(self.call('purge').returncode, 0)
+        self.assertEqual(target.read_text(), 'keep')
+        self.assertFalse(self.store.exists())
+
+    def test_purge_reports_a_file_it_could_not_remove(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        (self.store / 'pocketufw').unlink()
+        (self.store / 'pocketufw').mkdir()
+        self.assertNotEqual(self.call('purge').returncode, 0)
+        self.assertEqual(self.residue()['boot_left'], 'boot_data')
+
+    def test_residue_changes_nothing(self):
+        self.assertEqual(self.call('enable').returncode, 0)
+        before = sorted(str(p) for p in self.root.rglob('*'))
+        self.residue()
+        self.assertEqual(sorted(str(p) for p in self.root.rglob('*')), before)
 
     def test_symlink_data_directory_is_refused(self):
         self.store.symlink_to(self.root / "other")

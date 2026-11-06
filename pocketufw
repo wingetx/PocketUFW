@@ -38,6 +38,7 @@ Usage:
   pocketufw get-ports  # read current verified UDP listeners
   pocketufw set-ports --udp4 PORT|none --udp6 PORT|none  # session-only advanced UDP exceptions
   pocketufw disable
+  pocketufw residue    # read-only: does anything in either filter table still mention PocketUFW?
 
 Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+.
 No boot persistence. --auto-tailscale verifies ports on enable; refresh
@@ -52,7 +53,7 @@ check_port() {
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    doctor|status|verify|activity|reset-counters|verbose|plan|enable|refresh|get-ports|set-ports|disable)
+    doctor|status|verify|activity|reset-counters|verbose|plan|enable|refresh|get-ports|set-ports|disable|residue)
       [ -z "$CMD" ] || fail 'Specify one command'; CMD="$1"; shift ;;
     --udp4|--udp6)
       opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port or none"
@@ -413,7 +414,7 @@ lock_engine() {
 }
 case "$CMD" in
   enable|disable|refresh|set-ports|reset-counters) lock_engine -x ;;
-  verify|activity|verbose|status|get-ports) lock_engine -s ;;
+  verify|activity|verbose|status|get-ports|residue) lock_engine -s ;;
 esac
 
 case "$CMD" in
@@ -612,5 +613,18 @@ case "$CMD" in
       fail 'Unable to remove all PocketUFW chains; inspect status'
     fi
     say 'PocketUFW: disabled. Android rules untouched.'
+    ;;
+  residue)
+    root_needed
+    prereqs
+    # Deliberately not built on verify, which only knows what a correct firewall
+    # looks like. This reads each whole table for anything still naming PocketUFW,
+    # whatever its shape, and can't report zero for a table it couldn't read.
+    listing4=$("$IPT4" -w -S) || fail 'Cannot read the IPv4 filter table'
+    listing6=$("$IPT6" -w -S) || fail 'Cannot read the IPv6 filter table'
+    left4=$(printf '%s\n' "$listing4" | grep -ci pocketufw) || :
+    left6=$(printf '%s\n' "$listing6" | grep -ci pocketufw) || :
+    say "residue_ipv4=$left4"
+    say "residue_ipv6=$left6"
     ;;
 esac

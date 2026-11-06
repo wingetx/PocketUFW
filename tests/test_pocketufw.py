@@ -50,6 +50,18 @@ case "$action" in
     [ "$shape" != extra_drop ] || printf '      1        1 DROP       all  --  * * 0/0 0/0\n'
     exit 0 ;;
   -S)
+    if [ -z "$name" ]; then
+      [ "${PUFW_TEST_TABLE_FAIL:-0}" = 0 ] || exit 7
+      [ "${PUFW_TEST_TABLE_FAIL_FAMILY:-}" != "$fam" ] || exit 7
+      for chain_file in "$state/$fam".*; do
+        [ -f "$chain_file" ] || continue
+        chain=${chain_file##*/}; chain=${chain#"$fam".}
+        case "$chain" in counters|*.tmp|tmp) continue ;; esac
+        [ "$chain" = INPUT ] || echo "-N $chain"
+        while IFS= read -r line; do echo "-A $chain $line"; done < "$chain_file"
+      done
+      exit 0
+    fi
     if [ "$name" = OUTPUT ]; then
       if [ "${PUFW_TEST_AFWALL:-0}" = 1 ]; then echo '-A OUTPUT -j afwall'; fi
       exit 0

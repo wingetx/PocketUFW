@@ -10,10 +10,14 @@ ENGINE="$STORE/pocketufw"
 PROBE="$STORE/vpn-probe"
 CONFIG="$STORE/udp-config"
 APP_DATA="${POCKETUFW_APP_DATA_DIR:-/data/user_de/0/io.github.pocketufw}"
+SIGNATURE='# PocketUFW boot hook v1'
 
 # The firewall must never depend on Tailscale: a missing probe or saved-config
 # copy can only withhold the UDP exception, so only the engine is required here.
-[ -f "$MARKER" ] && [ -r "$ENGINE" ] || exit 0
+# Unarmed only skips the restore. The uninstall check below still has to run, or
+# a hook left with a missing file would stay in service.d forever.
+armed=0
+[ -f "$MARKER" ] && [ -r "$ENGINE" ] && armed=1
 count=0
 boot_settled=1
 # Wait until Android has finished booting. This never blocks Android boot.
@@ -25,7 +29,8 @@ while [ "$(getprop sys.boot_completed)" != '1' ]; do
   fi
   sleep 2
   count=$((count + 1))
-  [ -f "$MARKER" ] || exit 0
+  # Turning the firewall off during this wait cancels the restore.
+  [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
 done
 # An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot,
 # only on proof it is gone: pm says "not installed" by exiting exactly 1 with no
@@ -35,13 +40,26 @@ if [ "$boot_settled" -eq 1 ]; then
   pm_status=$?
   if [ "$pm_status" -eq 1 ] && [ ! -e "$APP_DATA" ] &&
      ! printf '%s\n' "$pm_output" | grep -q '^package:'; then
-    # Remove only our own boot files if the app was uninstalled.
-    rm -f "$MARKER" "$HOOK" "$ENGINE" "$PROBE" "$CONFIG"
-    rmdir "$STORE" 2>/dev/null || :
+    # Remove only our own boot files if the app was uninstalled, by exact name.
+    # The running hook goes last, so an interrupted cleanup finishes next boot.
+    if [ ! -L "$STORE" ]; then
+      rm -f "$MARKER" "$ENGINE" "$PROBE" "$CONFIG" "$STORE/.pocketufw.stage" \
+        "$STORE/.vpn-probe.stage" "$STORE/.udp-config.stage" "$STORE/.boot.enabled.stage"
+      rmdir "$STORE" 2>/dev/null || :
+    fi
+    # Magisk runs any executable in service.d, so a leftover staging copy can be
+    # what is running here. Either way, the hook path may belong to someone else.
+    if [ -f "$HOOK.stage" ] && [ ! -L "$HOOK.stage" ] &&
+       { [ ! -s "$HOOK.stage" ] || grep -qxF "$SIGNATURE" "$HOOK.stage"; }; then
+      rm -f "$HOOK.stage"
+    fi
+    if [ -f "$HOOK" ] && [ ! -L "$HOOK" ] && grep -qxF "$SIGNATURE" "$HOOK"; then
+      rm -f "$HOOK"
+    fi
     exit 0
   fi
 fi
-[ -f "$MARKER" ] || exit 0
+[ "$armed" -eq 1 ] && [ -f "$MARKER" ] || exit 0
 state=$(sh "$ENGINE" verify 2>/dev/null)
 case "$state" in
   ACTIVE) exit 0 ;;

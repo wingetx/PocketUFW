@@ -809,6 +809,58 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['state'], 'DEGRADED')
         self.assertNotIn('engine:disable', self.log_lines())
 
+    def test_failed_off_without_boot_restoration_arms_nothing(self):
+        self.boot_state.write_text('DISABLED\n')
+        _, values = self.run_bridge('disable', {'TEST_ENGINE_FAIL_DISABLE': '1'})
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('Could not remove all firewall rules', values['message'])
+        self.assertNotIn('boot:enable', self.log.read_text().splitlines())
+
+    def test_failed_off_that_left_a_partial_firewall_doesnt_claim_to_keep_anything(self):
+        self.state.write_text('DEGRADED\n')
+        _, values = self.run_bridge('disable', {'TEST_ENGINE_FAIL_DISABLE': '1'})
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('Could not remove all firewall rules', values['message'])
+
+    def test_failed_rearm_after_failed_off_doesnt_claim_to_keep_anything(self):
+        _, values = self.run_bridge('disable', {'TEST_ENGINE_FAIL_DISABLE': '1', 'TEST_BOOT_CANNOT_ENABLE': '1'})
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('Could not remove all firewall rules', values['message'])
+
+    def test_prepare_uninstall_is_never_clean_when_nothing_can_be_read_back(self):
+        # These fakes know neither purge nor residue, like scripts that can't run.
+        _, values = self.run_bridge('prepare-uninstall')
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertEqual(values['removal_left'], 'ipv4_unverified,ipv6_unverified,boot_unverified')
+        self.assertIn('could not be read', values['message'])
+
+    def test_prepare_uninstall_runs_disarm_before_rules(self):
+        self.run_bridge('prepare-uninstall')
+        calls = self.log.read_text().splitlines()
+        self.assertLess(calls.index('boot:purge'), calls.index('engine:disable'))
+
+    def test_prepare_uninstall_still_removes_rules_when_disarm_fails(self):
+        self.run_bridge('prepare-uninstall')
+        self.assertIn('engine:disable', self.log.read_text().splitlines())
+        self.assertEqual(self.state.read_text().strip(), 'INACTIVE')
+
+    def test_prepare_uninstall_never_rearms_stale_copies_when_rules_stayed(self):
+        self.boot_state.write_text('STALE\n')
+        _, values = self.run_bridge('prepare-uninstall', {'TEST_ENGINE_FAIL_DISABLE': '1'})
+        self.assertEqual(values['state'], 'ACTIVE')
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertNotIn('boot:enable', self.log.read_text().splitlines())
+
+    def test_prepare_uninstall_takes_no_arguments(self):
+        result, _ = self.run_bridge('prepare-uninstall', args=('now',))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists() and 'boot:purge' in self.log.read_text())
+
+    def test_other_actions_report_no_removal_fields(self):
+        _, values = self.run_bridge('inspect')
+        self.assertNotIn('removal', values)
+
     def test_remove_partial_takes_no_arguments(self):
         result, values = self.run_bridge('remove-partial', args=('DEGRADED',))
         self.assertEqual(result.returncode, 2)
@@ -1093,7 +1145,10 @@ class AndroidBridgeTests(unittest.TestCase):
     def test_failed_engine_disable_is_reported(self):
         _, values = self.run_bridge('disable', {'TEST_ENGINE_FAIL_DISABLE': '1'})
         self.assertEqual(values['operation'], 'FAILED')
-        self.assertIn('Could not remove all firewall rules', values['message'])
+        # Nothing was removed, so the boot choice made before the attempt is kept.
+        self.assertIn('stays on and boot restoration was kept', values['message'])
+        self.assertIn('boot:enable', self.log.read_text().splitlines())
+        self.assertEqual(values['boot'], 'ENABLED')
 
     def test_boot_action_failures_are_reported(self):
         _, values = self.run_bridge('boot-enable', {'TEST_BOOT_CANNOT_ENABLE': '1'})

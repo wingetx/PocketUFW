@@ -57,6 +57,43 @@ class FirewallClientActionTest {
         assertEquals(listOf("remove-partial"), shell.actions.toList())
     }
 
+    @Test fun removalHasItsOwnAction() {
+        client.prepareUninstall()
+        assertEquals(listOf("prepare-uninstall"), shell.actions.toList())
+    }
+
+    @Test fun removalIsCleanOnlyWhenTheBridgeSucceededAndReadEverythingBack() {
+        val granted = "root" to "GRANTED"
+        val inactive = "state" to "INACTIVE"
+        answer(granted, "operation" to "SUCCESS", inactive, "boot" to "DISABLED", "removal" to "CLEAN")
+        assertTrue(client.prepareUninstall().removalClean)
+        answer(granted, "operation" to "SUCCESS", inactive, "boot" to "DISABLED")
+        assertFalse("no read-back at all", client.prepareUninstall().removalClean)
+        answer(granted, "operation" to "FAILED", inactive, "removal" to "CLEAN")
+        assertFalse("operation failed", client.prepareUninstall().removalClean)
+        answer(granted, "operation" to "SUCCESS", inactive, "removal" to "INCOMPLETE")
+        assertFalse("read-back found something", client.prepareUninstall().removalClean)
+        answer("operation" to "SUCCESS", "removal" to "CLEAN")
+        assertFalse("root not confirmed", client.prepareUninstall().removalClean)
+        answer("root" to "DENIED", exit = 3)
+        assertFalse("root denied", client.prepareUninstall().removalClean)
+        answer(granted, "operation" to "SUCCESS", "removal" to "CLEAN", exit = 124)
+        assertFalse("timed out", client.prepareUninstall().removalClean)
+    }
+
+    @Test fun otherOperationsNeverCountAsAFinishedRemoval() {
+        answer("root" to "GRANTED", "operation" to "SUCCESS", "state" to "INACTIVE", "removal" to "CLEAN")
+        assertFalse(client.changeProtection(false).removalClean)
+    }
+
+    @Test fun removalRemembersTheBootChoiceInCaseTheUserStays() {
+        answer("root" to "GRANTED", "operation" to "SUCCESS", "state" to "INACTIVE", "boot" to "DISABLED",
+            "previous_boot" to "ENABLED", "removal" to "CLEAN")
+        client.prepareUninstall()
+        client.changeProtection(true)
+        assertEquals(listOf("prepare-uninstall", "enable-restore"), shell.actions.toList())
+    }
+
     @Test fun otherActionsReachTheirOwnBridgeCommand() {
         client.refreshVerifiedPorts()
         client.resetCounters()

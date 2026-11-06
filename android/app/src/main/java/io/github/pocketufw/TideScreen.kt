@@ -39,8 +39,13 @@ internal data class TideUiState(
     val counterRefreshError: Boolean = false,
     val verificationInDoubt: Boolean = false,
     val checkedAt: Long = 0L,
-    val vpnRefreshing: Boolean = false
+    val vpnRefreshing: Boolean = false,
+    val removal: TideRemoval = TideRemoval.NONE,
+    val removalDetail: String = ""
 )
+
+/** How the last Remove PocketUFW attempt ended. CLEAN means the read-back found nothing left. */
+internal enum class TideRemoval { NONE, CLEAN, INCOMPLETE }
 
 internal data class TideActions(
     val recheck: () -> Unit = {},
@@ -50,6 +55,8 @@ internal data class TideActions(
     val resetCounters: () -> Unit = {},
     val refreshVpn: () -> Unit = {},
     val removePartialRules: () -> Unit = {},
+    val prepareUninstall: () -> Unit = {},
+    val openAppInfo: () -> Unit = {},
     val setUdpPorts: (String, String, Boolean) -> Unit = { _, _, _ -> },
     val restoreAutomatic: () -> Unit = {},
     val dismissMessage: () -> Unit = {}

@@ -16,11 +16,17 @@ SELF_DIR=$(dirname "$0")
 say() { printf '%s\n' "$*"; }
 fail() { say "pocketufw boot: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || fail 'root required'
-case "$CMD" in status|enable|disable) : ;; *) fail 'use status, enable, or disable' ;; esac
+case "$CMD" in status|enable|disable|purge|residue) : ;; *) fail 'use status, enable, disable, purge, or residue' ;; esac
 
 owned_hook() {
   [ -f "$HOOK" ] && [ ! -L "$HOOK" ] &&
     grep -qxF "$SIGNATURE" "$HOOK"
+}
+
+# A copy interrupted before its signature was written is empty, so that counts as ours.
+owned_stage() {
+  [ -f "$HOOK.stage" ] && [ ! -L "$HOOK.stage" ] &&
+    { [ ! -s "$HOOK.stage" ] || grep -qxF "$SIGNATURE" "$HOOK.stage"; }
 }
 
 # Never overwrite unrelated scripts or follow preexisting symlinks.
@@ -114,6 +120,8 @@ case "$CMD" in
     safe_paths
     # Disarm at the service entrypoint first, then remove its own files.
     if owned_hook; then rm -f "$HOOK" || fail 'Unable to remove boot hook'; fi
+    # Magisk runs any executable in service.d, and this one is executable.
+    if owned_stage; then rm -f "$HOOK.stage" || fail 'Unable to remove boot hook'; fi
     if [ -d "$STORE" ]; then
       rm -f "$MARKER" "$STORE/pocketufw" "$STORE/vpn-probe" "$STORE/udp-config" ||
         fail 'Unable to remove PocketUFW boot data'
@@ -121,5 +129,35 @@ case "$CMD" in
       rmdir "$STORE" 2>/dev/null || :
     fi
     say 'boot=DISABLED'
+    ;;
+  purge)
+    # Everything PocketUFW ever installed, by exact name, including when another
+    # owner holds the hook path. What isn't provably ours stays, and residue says so.
+    purge_status=0
+    if owned_hook; then rm -f "$HOOK" 2>/dev/null || purge_status=1; fi
+    if owned_stage; then rm -f "$HOOK.stage" 2>/dev/null || purge_status=1; fi
+    if [ -d "$STORE" ] && [ ! -L "$STORE" ]; then
+      # rm -f unlinks a symlink rather than following it, and refuses a directory.
+      for name in boot.enabled pocketufw vpn-probe udp-config .pocketufw.stage .vpn-probe.stage .udp-config.stage .boot.enabled.stage; do
+        rm -f "$STORE/$name" 2>/dev/null || purge_status=1
+      done
+      rmdir "$STORE" 2>/dev/null || :
+    fi
+    exit "$purge_status"
+    ;;
+  residue)
+    # Read-only. Reports what is on disk now, however it got there.
+    boot_left=''
+    boot_kept=''
+    if [ -L "$HOOK" ]; then boot_kept='boot_hook'
+    elif owned_hook; then boot_left='boot_hook'
+    elif [ -e "$HOOK" ]; then boot_kept='boot_hook'; fi
+    if [ -L "$HOOK.stage" ]; then boot_kept="${boot_kept:+$boot_kept,}boot_hook_stage"
+    elif owned_stage; then boot_left="${boot_left:+$boot_left,}boot_hook_stage"
+    elif [ -e "$HOOK.stage" ]; then boot_kept="${boot_kept:+$boot_kept,}boot_hook_stage"; fi
+    if [ -L "$STORE" ]; then boot_kept="${boot_kept:+$boot_kept,}boot_data"
+    elif [ -e "$STORE" ]; then boot_left="${boot_left:+$boot_left,}boot_data"; fi
+    say "boot_left=$boot_left"
+    say "boot_kept=$boot_kept"
     ;;
 esac

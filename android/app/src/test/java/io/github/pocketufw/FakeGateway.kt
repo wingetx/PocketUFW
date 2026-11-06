@@ -124,6 +124,16 @@ internal class FakeGateway(
         calls += "remove-partial"
         return operation()
     }
+    /** What the next removal reports. */
+    @Volatile var removalClean = true
+    @Volatile var removalDashboard: Dashboard? = null
+    @Volatile var removalThrows = false
+    override fun prepareUninstall(): Operation {
+        calls += "prepare-uninstall"
+        waitAtGate()
+        check(!removalThrows) { "root shell failed" }
+        return Operation(removalClean, operationMessage, removalDashboard ?: dashboard, removalClean)
+    }
     override fun changeBootRestoration(enabled: Boolean): Operation {
         calls += if (enabled) "boot-enable" else "boot-disable"
         return operation()

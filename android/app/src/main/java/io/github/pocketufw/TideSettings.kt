@@ -52,6 +52,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)
         TideSettingLink("Quick Settings tile", "Enable or disable from Android’s shade") { tileHelp = true }
     }
+    TideRemoveSection(ui, actions)
     TideNotice("Experimental build · $appVersion\nFor test devices. Automatic repair and VPN monitoring are not yet implemented.", true)
     Text("Kernel protection continues when the app closes.\nLocal-only · No accounts or telemetry",
         style = MaterialTheme.typography.bodySmall, color = Muted)

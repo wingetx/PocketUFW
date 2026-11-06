@@ -104,6 +104,26 @@ Build and installation instructions are in [the Android README](android/README.m
 - **Next design target:** an opt-in, low-overhead root-side health/recovery mechanism with explicit ownership checks, bounded retries, and honest failure reporting. It must refuse to overwrite unknown or conflicting chains, preserve boot and VPN functionality, and be removable through the off switch. Avoid repeatedly invoking `su` or keeping a foreground Android service alive.
 - **Optional visibility:** packet totals can be shown on demand or in an opt-in notification. Counts are DROP-rule matches, never automatic claims of attacks or blocked trackers. No notification permission, constant polling, or packet-history collection should be required for ordinary protection.
 
+### Uninstalling
+
+Use **Settings → Remove PocketUFW**. It turns the firewall off, removes PocketUFW's rules and Magisk boot files, reads both back to confirm they're gone, then opens Android's app page, where you tap Uninstall. If anything can't be confirmed, it says what's left and doesn't open that page.
+
+Android doesn't tell an app it's being uninstalled, so no other route can clean up first. **After an ordinary uninstall, the rules keep dropping unsolicited incoming traffic until the next restart.** A restart clears them. If boot restoration was armed, the hook then sees that the app and its data are gone, and removes itself and its files without restoring anything. Nothing stays running to watch for an uninstall.
+
+To clear the rules without restarting, run this with root:
+
+```sh
+for t in iptables ip6tables; do
+  for i in wlan+ rmnet+ v4-rmnet+; do
+    $t -w -D INPUT -i "$i" -m comment --comment PocketUFW -j POCKETUFW_IN
+  done
+  $t -w -F POCKETUFW_IN; $t -w -X POCKETUFW_IN
+  $t -w -F POCKETUFW_TS; $t -w -X POCKETUFW_TS
+done
+```
+
+`pm uninstall -k` keeps the app's data, and the hook treats that as an app that may come back: it keeps restoring the firewall at each boot until you reinstall and remove it, or delete `/data/adb/service.d/pocketufw.sh` and `/data/adb/pocketufw`. Android's normal uninstall screen doesn't offer this.
+
 ## Preview without changing anything
 
 ```sh
@@ -187,7 +207,7 @@ The optional Quick Settings tile's **long press** resolves to PocketUFW's main d
 
 The Status tab's **About / edit VPN UDP exceptions** expands a plain-language explanation and an advanced, explicitly warned editor. Only one incoming UDP port per IPv4/IPv6 family is supported, with blank meaning no exception. **Experimental** applies only to the current live firewall rules; **Committed** persists across app launches and firewall restarts, and is restored by the opt-in one-shot Magisk boot hook on reboot. A second confirmation is required before committing. **Reset to automatic VPN exceptions** restores verified Tailscale listeners and clears a committed choice, or undoes an experimental edit, after a successful refresh. Normal Refresh VPN refuses to silently replace committed ports. Manual ports can become stale if Tailscale rotates its listeners, potentially falling back to DERP.
 
-Committed settings are a root-validated, strictly formatted file in Android's app-owned **device-protected private storage**, not a permanent global Android setting. Uninstalling the app removes its data; the Magisk service self-disarms at next boot if the app is absent. No new Android foreground service, extra network permission, or background polling is required. Test builds are still experimental; compatibility and hardware reboot behavior of alpha12's new committed mode need validation on the Moto.
+Committed settings are a root-validated, strictly formatted file in Android's app-owned **device-protected private storage**, not a permanent global Android setting. Uninstalling the app removes its data; the Magisk service self-disarms at next boot if the app is absent, and live rules last until that restart (see [Uninstalling](#uninstalling)). No new Android foreground service, extra network permission, or background polling is required. Test builds are still experimental; compatibility and hardware reboot behavior of alpha12's new committed mode need validation on the Moto.
 
 ### Alpha13: precise lifetimes and reset control
 

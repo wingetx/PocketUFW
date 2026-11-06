@@ -15,7 +15,7 @@ case "$ACTION" in
     fi ;;
 esac
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial)
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial|prepare-uninstall)
     [ "$#" -eq 1 ] || exit 2 ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
@@ -210,7 +210,23 @@ case "$ACTION" in
     else
       outcome='FAILED'
       message='Could not remove all firewall rules; inspect status.'
+      # A refused removal, such as another operation holding the lock, changed no
+      # rules, so the boot choice must not change either. bootctl arms only a
+      # firewall it has verified, so a partial one stays disarmed.
+      if [ "$previous_boot" = ENABLED ] && sh "$BOOT" enable >/dev/null 2>&1; then
+        message='The firewall could not be turned off, so it stays on and boot restoration was kept. Try again.'
+      fi
     fi
+    ;;
+  prepare-uninstall)
+    previous_boot=$(read_boot_status)
+    previous_boot=${previous_boot#boot=}
+    # The order Off uses: boot restoration first, so an interruption can't bring
+    # anything back later. Unlike Off, one failure doesn't stop the other. The user
+    # asked for both to go, and the read-back below reports exactly what is left.
+    sh "$BOOT" purge >/dev/null 2>&1 || :
+    sh "$ENGINE" disable >/dev/null 2>&1 || :
+    outcome='SUCCESS'
     ;;
   boot-enable)
     if sh "$BOOT" enable >/dev/null 2>&1; then
@@ -338,7 +354,7 @@ case "$state" in
 esac
 boot=$(sh "$BOOT" status 2>/dev/null) || :
 if [ "$boot" = boot=STALE ]; then
-  if [ "$state" != ACTIVE ]; then
+  if [ "$state" != ACTIVE ] || [ "$ACTION" = prepare-uninstall ]; then
     # Installing requires a verified firewall; the opt-in itself still stands.
     boot='boot=ENABLED'
   elif ! sh "$BOOT" enable >/dev/null 2>&1; then
@@ -353,6 +369,58 @@ case "$boot" in
   boot=ENABLED|boot=DISABLED|boot=UNSUPPORTED|boot=DEGRADED|boot=CONFLICT) : ;;
   *) boot='boot=UNKNOWN' ;;
 esac
+
+# Removal is judged only by reading everything back, never by its commands'
+# exit codes. Android's uninstall page opens only on removal=CLEAN.
+removal=''
+removal_left=''
+removal_kept=''
+if [ "$ACTION" = prepare-uninstall ]; then
+  note_left() { removal_left="${removal_left:+$removal_left,}$1"; }
+  kernel_report=$(sh "$ENGINE" residue 2>/dev/null) || kernel_report=''
+  left4=$(printf '%s\n' "$kernel_report" | sed -n 's/^residue_ipv4=//p')
+  left6=$(printf '%s\n' "$kernel_report" | sed -n 's/^residue_ipv6=//p')
+  case "$left4" in 0) : ;; ''|*[!0-9]*) note_left ipv4_unverified ;; *) note_left ipv4_rules ;; esac
+  case "$left6" in 0) : ;; ''|*[!0-9]*) note_left ipv6_unverified ;; *) note_left ipv6_rules ;; esac
+  # Two independent readings have to agree before anything is called gone.
+  if [ -z "$removal_left" ] && [ "$state" != INACTIVE ]; then note_left kernel_unverified; fi
+  boot_report=$(sh "$BOOT" residue 2>/dev/null) || boot_report=''
+  case "$boot_report" in
+    boot_left=*)
+      boot_left=$(printf '%s\n' "$boot_report" | sed -n 's/^boot_left=//p')
+      removal_kept=$(printf '%s\n' "$boot_report" | sed -n 's/^boot_kept=//p')
+      [ -z "$boot_left" ] || note_left "$boot_left" ;;
+    *) note_left boot_unverified ;;
+  esac
+  if [ -z "$removal_left" ]; then
+    removal=CLEAN
+    outcome='SUCCESS'
+    if [ -z "$removal_kept" ]; then
+      message="PocketUFW's rules and boot files are gone. Tap Uninstall to finish."
+    else
+      message="PocketUFW's rules and boot files are gone. Another module owns a boot path, so it was left alone. Tap Uninstall to finish."
+    fi
+  else
+    removal=INCOMPLETE
+    outcome='FAILED'
+    still=''
+    for item in $(printf '%s' "$removal_left" | tr ',' ' '); do
+      case "$item" in
+        ipv4_rules) text='IPv4 rules' ;;
+        ipv6_rules) text='IPv6 rules' ;;
+        ipv4_unverified) text='IPv4 rules, which could not be read' ;;
+        ipv6_unverified) text='IPv6 rules, which could not be read' ;;
+        kernel_unverified) text='firewall state, which could not be verified' ;;
+        boot_hook) text='Magisk boot hook' ;;
+        boot_hook_stage) text='a partly installed boot hook' ;;
+        boot_data) text='boot data folder' ;;
+        *) text='boot files, which could not be read' ;;
+      esac
+      still="${still:+$still, }$text"
+    done
+    message="Couldn't confirm everything is gone. Still present: $still."
+  fi
+fi
 
 # Never report a successful action without verifying its postcondition.
 if [ "$outcome" = 'SUCCESS' ]; then
@@ -441,6 +509,11 @@ echo "operation=$outcome"
 echo "message=$message"
 echo "state=$state"
 echo "$boot"
+if [ "$ACTION" = prepare-uninstall ]; then
+  echo "removal=$removal"
+  echo "removal_left=$removal_left"
+  echo "removal_kept=$removal_kept"
+fi
 
 if [ "$state" = ACTIVE ]; then
   # These counters were measured by the same verified 'activity' command.

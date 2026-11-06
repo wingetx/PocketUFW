@@ -13,7 +13,7 @@ class TideVisualIdentityTests(unittest.TestCase):
         self.assertIn('TideActionShape = RoundedCornerShape(12.dp)', shared)
         self.assertIn('TideActionMinHeight = 48.dp', shared)
         self.assertIn('vertical = 10.dp', shared)
-        for name in ('TideComponents.kt', 'TideScreen.kt', 'TideCounters.kt',
+        for name in ('TideComponents.kt', 'TideScreen.kt', 'TideCounters.kt', 'TideRemoval.kt',
                      'UdpExceptionsPanel.kt', 'KernelStatusTab.kt'):
             with self.subTest(file=name):
                 source = (KOTLIN / name).read_text()

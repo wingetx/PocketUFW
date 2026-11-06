@@ -130,7 +130,13 @@ internal class FirewallClient(
         /** The tile cache already held a newer result than this read, so it wasn't saved. */
         val superseded: Boolean = false
     )
-    data class Operation(val success: Boolean, val explanation: String, val dashboard: Dashboard)
+    data class Operation(
+        val success: Boolean,
+        val explanation: String,
+        val dashboard: Dashboard,
+        /** The bridge read everything back and found nothing of PocketUFW's left. */
+        val removalClean: Boolean = false
+    )
 
     private val engineDir: File get() = File(context.filesDir, "engine")
     private val script: File get() = File(engineDir, "pocketufw")
@@ -205,7 +211,7 @@ internal class FirewallClient(
         check(action in setOf("inspect", "enable", "disable",
             "enable-restore", "toggle", "toggle-restore",
             "boot-enable", "boot-disable", "vpn-refresh", "reset-counters",
-            "counters", "set-ports", "use-auto", "remove-partial"))
+            "counters", "set-ports", "use-auto", "remove-partial", "prepare-uninstall"))
         check(when (action) {
             "set-ports" -> args.size == 3
             "toggle", "toggle-restore" -> args.isEmpty() ||
@@ -435,7 +441,8 @@ internal class FirewallClient(
                 if (success && action == "boot-disable") setBootOptIn(false)
                 if (success && action == "boot-enable") setBootOptIn(true)
             }
-            Operation(success, message, dashboard)
+            Operation(success, message, dashboard,
+                removalClean = action == "prepare-uninstall" && success && values["removal"] == "CLEAN")
         } catch (e: Exception) {
             val dashboard = Dashboard(Snapshot(
                 protection = Protection.DEGRADED,
@@ -464,6 +471,9 @@ internal class FirewallClient(
 
     /** Refused by the bridge unless the live state is still DEGRADED. */
     override fun removePartialRules(): Operation = performAction("remove-partial")
+
+    /** Off, plus every boot file and a read-back. Keeps the boot opt-in in case they stay. */
+    override fun prepareUninstall(): Operation = performAction("prepare-uninstall")
 
     override fun changeBootRestoration(enabled: Boolean): Operation =
         performAction(if (enabled) "boot-enable" else "boot-disable")

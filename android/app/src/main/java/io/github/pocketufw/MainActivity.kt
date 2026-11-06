@@ -1,6 +1,11 @@
 package io.github.pocketufw
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
+import android.provider.Settings
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -48,7 +53,7 @@ class MainActivity : ComponentActivity() {
  * Exposed to JVM tests through FirewallGateway rather than running root commands.
  */
 @Composable
-internal fun PocketScreen(client: FirewallGateway) {
+internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Boolean) = ::openAndroidAppInfo) {
     var state by remember { mutableStateOf(FirewallClient.Snapshot()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -65,6 +70,8 @@ internal fun PocketScreen(client: FirewallGateway) {
     var firstRead by remember { mutableStateOf(true) }
     var outsideWritePending by remember { mutableStateOf(false) }
     var supersededRechecks by remember { mutableStateOf(0) }
+    var removal by remember { mutableStateOf(TideRemoval.NONE) }
+    var removalDetail by remember { mutableStateOf("") }
 
     // Preserve Claude's tested guarantee that observable UI state is written
     // on the main dispatcher, even under Robolectric's unusual test scheduler.
@@ -84,6 +91,9 @@ internal fun PocketScreen(client: FirewallGateway) {
         verificationInDoubt = false
         counterRefreshNote = ""
         counterRefreshError = false
+        // "It's all gone" stops being true as soon as the firewall is back, by any route.
+        if (removal == TideRemoval.CLEAN &&
+            dashboard.snapshot.protection != FirewallClient.Protection.INACTIVE) removal = TideRemoval.NONE
     }
 
     /**
@@ -142,12 +152,24 @@ internal fun PocketScreen(client: FirewallGateway) {
         }
     }
 
-    fun perform(vpn: Boolean = false, work: () -> FirewallClient.Operation) {
+    /** App info needs no permission, and can't exist on every build of Android. */
+    fun showAppInfo() {
+        if (!openAppInfo(context)) {
+            failed = true
+            message = "Android's app page didn't open. Go to Settings, then Apps, then PocketUFW, and tap Uninstall."
+        }
+    }
+
+    fun perform(vpn: Boolean = false, onResult: (FirewallClient.Operation?) -> Unit = {},
+                work: () -> FirewallClient.Operation) {
         if (busy) return
         busy = true
         message = ""
         counterRefreshNote = ""
         vpnRefreshing = vpn
+        // Any new operation makes an earlier removal result out of date.
+        removal = TideRemoval.NONE
+        removalDetail = ""
         scope.launch {
             var finished: FirewallClient.Dashboard? = null
             try {
@@ -156,10 +178,12 @@ internal fun PocketScreen(client: FirewallGateway) {
                 adopt(outcome.dashboard)
                 failed = !outcome.success
                 message = outcome.explanation
+                onResult(outcome)
             } catch (_: Exception) {
                 verificationInDoubt = true
                 failed = true
                 message = "Firewall operation could not be verified. Recheck kernel state."
+                onResult(null)
             } finally {
                 busy = false
                 vpnRefreshing = false
@@ -268,7 +292,8 @@ internal fun PocketScreen(client: FirewallGateway) {
             busy = busy, message = message, failed = failed,
             counterRefreshing = counterRefreshing, counterRefreshNote = counterRefreshNote,
             counterRefreshError = counterRefreshError, verificationInDoubt = verificationInDoubt,
-            checkedAt = checkedAt, vpnRefreshing = vpnRefreshing
+            checkedAt = checkedAt, vpnRefreshing = vpnRefreshing,
+            removal = removal, removalDetail = removalDetail
         ),
         appVersion = BuildConfig.VERSION_NAME,
         actions = TideActions(
@@ -302,6 +327,22 @@ internal fun PocketScreen(client: FirewallGateway) {
                     perform { client.removePartialRules() }
                 }
             },
+            prepareUninstall = {
+                if (!busy) perform(onResult = { outcome ->
+                    if (outcome?.removalClean == true) {
+                        removal = TideRemoval.CLEAN
+                        removalDetail = outcome.explanation
+                        message = ""
+                        // Android's page opens only after the read-back found nothing left.
+                        showAppInfo()
+                    } else {
+                        removal = TideRemoval.INCOMPLETE
+                        removalDetail = outcome?.explanation ?: message
+                        message = "Removal isn't finished."
+                    }
+                }) { client.prepareUninstall() }
+            },
+            openAppInfo = { showAppInfo() },
             setUdpPorts = { ipv4, ipv6, committed ->
                 if (verifiedActive && !busy) perform {
                     client.updateUdpExceptions(ipv4, ipv6, committed)
@@ -320,4 +361,15 @@ internal fun PocketScreen(client: FirewallGateway) {
             }
         )
     )
+}
+
+/** Android's own page for this app, where the user taps Uninstall. Asks for no permission. */
+internal fun openAndroidAppInfo(context: Context): Boolean = try {
+    context.startActivity(
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+    true
+} catch (_: ActivityNotFoundException) {
+    false
 }

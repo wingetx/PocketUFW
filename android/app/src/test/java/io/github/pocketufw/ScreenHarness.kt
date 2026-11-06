@@ -18,12 +18,13 @@ internal fun ComposeTestRule.launchScreen(
     gateway: FirewallGateway,
     qualifiers: String = "w412dp-h915dp-xxhdpi",
     fontScale: Float = 1f,
+    openAppInfo: (android.content.Context) -> Boolean = { true },
 ): ActivityController<ComponentActivity> {
     RuntimeEnvironment.setQualifiers(qualifiers)
     RuntimeEnvironment.setFontScale(fontScale)
     val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
     controller.get().setContent {
-        TideTheme { PocketScreen(gateway) }
+        TideTheme { PocketScreen(gateway, openAppInfo) }
     }
     return controller
 }

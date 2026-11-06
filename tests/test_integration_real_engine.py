@@ -371,6 +371,165 @@ class RealEngineTests(unittest.TestCase):
                     self.device.app_data.mkdir()
                 self.assert_succeeded(self.bridge('disable'), 'INACTIVE', 'DISABLED')
 
+    # --- Remove PocketUFW: real scripts together. ---
+
+    def rules_gone(self):
+        for family in FAMILIES:
+            self.assertFalse(self.chain_exists(family, 'POCKETUFW_IN'))
+            self.assertFalse(self.chain_exists(family, 'POCKETUFW_TS'))
+            self.assertEqual((self.kernel / f'{family}.INPUT').read_text(), BASELINE)
+
+    def assert_clean(self, values, boot='DISABLED'):
+        self.assertEqual(values['operation'], 'SUCCESS', values)
+        self.assertEqual(values['removal'], 'CLEAN', values)
+        self.assertEqual(values['removal_left'], '')
+        self.assertEqual(values['state'], 'INACTIVE')
+        self.assertEqual(values['boot'], boot)
+
+    def assert_incomplete(self, values, left):
+        self.assertEqual(values['operation'], 'FAILED', values)
+        self.assertEqual(values['removal'], 'INCOMPLETE', values)
+        self.assertEqual(values['removal_left'], left)
+        self.assertIn('Still present:', values['message'])
+
+    def test_removal_from_an_armed_active_firewall(self):
+        self.arm_boot()
+        values = self.bridge('prepare-uninstall')
+        self.assert_clean(values)
+        self.assertEqual(values['previous_boot'], 'ENABLED')
+        self.assertEqual(values['removal_kept'], '')
+        self.assertIn('Tap Uninstall', values['message'])
+        self.rules_gone()
+        self.assertFalse(self.device.hook.exists())
+        self.assertFalse(self.device.store.exists())
+
+    def test_removal_with_the_firewall_already_off_is_clean_and_can_repeat(self):
+        for _ in range(2):
+            self.assert_clean(self.bridge('prepare-uninstall'))
+        self.rules_gone()
+
+    def test_removal_finishes_a_partial_firewall(self):
+        self.arm_boot()
+        path = self.kernel / 'iptables.POCKETUFW_IN'
+        path.write_text(path.read_text().replace('-j DROP\n', '', 1))
+        self.assertEqual(self.verify(), 'DEGRADED')
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.rules_gone()
+
+    def test_removal_finishes_after_being_interrupted_at_each_point(self):
+        self.arm_boot()
+        self.script('bootctl', 'purge')
+        self.assertEqual(self.verify(), 'ACTIVE')
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.arm_boot()
+        self.script('pocketufw', 'disable')
+        self.assertTrue(self.device.hook.exists())
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.assertFalse(self.device.hook.exists())
+
+    def test_removal_leaves_another_owners_hook_and_says_so(self):
+        self.arm_boot()
+        self.device.hook.write_text('#!/bin/sh\n# belongs to another module\n')
+        values = self.bridge('prepare-uninstall')
+        self.assert_clean(values, boot='CONFLICT')
+        self.assertEqual(values['removal_kept'], 'boot_hook')
+        self.assertIn('Another module', values['message'])
+        self.assertIn('another module', self.device.hook.read_text())
+        self.assertFalse(self.device.store.exists())
+
+    def test_removal_with_a_stranger_file_in_the_data_folder_isnt_clean(self):
+        self.arm_boot()
+        stranger = self.device.store / 'not-ours'
+        stranger.write_text('keep')
+        values = self.bridge('prepare-uninstall')
+        self.assert_incomplete(values, 'boot_data')
+        self.assertIn('boot data folder', values['message'])
+        self.assertEqual(stranger.read_text(), 'keep')
+        self.rules_gone()
+
+    def test_removal_is_incomplete_when_one_family_wont_go(self):
+        self.arm_boot()
+        env = {'PUFW_TEST_FAIL': '-X POCKETUFW_IN', 'PUFW_TEST_FAIL_FAMILY': 'iptables'}
+        values = self.bridge('prepare-uninstall', env=env)
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertEqual(values['removal_left'], 'ipv4_rules')
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('IPv4 rules', values['message'])
+        self.assertNotIn('IPv6 rules', values['message'])
+        self.assertFalse(self.chain_exists('ip6tables', 'POCKETUFW_IN'))
+        # The retry finishes the job once the cause is gone.
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.rules_gone()
+
+    def test_removal_finds_rules_verify_cant_see(self):
+        for rule in ('-i eth9 -j POCKETUFW_IN', '-i eth9 -m comment --comment PocketUFW -j ACCEPT'):
+            with self.subTest(rule=rule):
+                self.power_cycle_kernel()
+                with (self.kernel / 'iptables.INPUT').open('a') as fh:
+                    fh.write(rule + '\n')
+                self.assertEqual(self.verify(), 'INACTIVE')
+                values = self.bridge('prepare-uninstall')
+                self.assertEqual(values['state'], 'INACTIVE')
+                self.assertEqual(values['removal'], 'INCOMPLETE')
+                self.assertEqual(values['removal_left'], 'ipv4_rules')
+                self.assertIn(rule, (self.kernel / 'iptables.INPUT').read_text())
+
+    def test_removal_is_never_clean_if_a_table_cant_be_read(self):
+        self.arm_boot()
+        values = self.bridge('prepare-uninstall', env={'PUFW_TEST_TABLE_FAIL': '1'})
+        self.assertEqual(values['removal'], 'INCOMPLETE')
+        self.assertEqual(values['removal_left'], 'ipv4_unverified,ipv6_unverified')
+        self.assertIn('could not be read', values['message'])
+
+    def test_removal_is_incomplete_when_only_ipv6_wont_go(self):
+        self.arm_boot()
+        env = {'PUFW_TEST_FAIL': '-X POCKETUFW_IN', 'PUFW_TEST_FAIL_FAMILY': 'ip6tables'}
+        values = self.bridge('prepare-uninstall', env=env)
+        self.assert_incomplete(values, 'ipv6_rules')
+        self.assertIn('IPv6 rules', values['message'])
+        self.assertNotIn('IPv4 rules', values['message'])
+
+    def test_residue_counts_each_family_on_its_own(self):
+        self.power_cycle_kernel()
+        with (self.kernel / 'ip6tables.INPUT').open('a') as fh:
+            fh.write('-i eth9 -j POCKETUFW_IN\n-i eth8 -j POCKETUFW_IN\n')
+        self.assertEqual(self.script('pocketufw', 'residue').stdout.splitlines(),
+                         ['residue_ipv4=0', 'residue_ipv6=2'])
+
+    def test_one_unreadable_table_is_never_counted_as_empty(self):
+        for family in FAMILIES:
+            with self.subTest(unreadable=family):
+                self.power_cycle_kernel()
+                env = {'PUFW_TEST_TABLE_FAIL_FAMILY': family}
+                result = self.script('pocketufw', 'residue', env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('residue_ipv', result.stdout)
+                values = self.bridge('prepare-uninstall', env=env)
+                self.assertEqual(values['removal'], 'INCOMPLETE')
+                self.assertEqual(values['removal_left'], 'ipv4_unverified,ipv6_unverified')
+
+    def test_removal_never_rearms_stale_boot_copies(self):
+        self.arm_boot()
+        (self.device.engine / 'boot-service').write_text('#!/bin/sh\n# PocketUFW boot hook v1\n# a newer build\n')
+        stranger = self.device.store / 'not-ours'
+        stranger.write_text('keep')
+        values = self.bridge('prepare-uninstall')
+        self.assertEqual(values['removal_left'], 'boot_data')
+        self.assertFalse(self.device.hook.exists())
+
+    def test_turning_back_on_after_removal_restores_the_boot_choice(self):
+        self.arm_boot()
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.assert_succeeded(self.bridge('enable-restore'), 'ACTIVE', 'ENABLED')
+        self.assertTrue(self.device.hook.exists())
+
+    def test_nothing_comes_back_after_removal_and_a_reboot(self):
+        self.arm_boot()
+        self.assert_clean(self.bridge('prepare-uninstall'))
+        self.power_cycle_kernel()
+        self.assertFalse(self.device.hook.exists())
+        self.assertEqual(self.verify(), 'INACTIVE')
+
     def test_status_read_replaces_three_day_old_boot_copies(self):
         self.arm_boot()
         old = self.device.store / 'pocketufw'

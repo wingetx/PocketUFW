@@ -63,6 +63,11 @@ class TideStateSyncTest {
 
     private fun recheckButton() = compose.onNodeWithContentDescription("Recheck firewall status")
     private fun activityTab() { node("Activity").performClick(); compose.waitForIdle() }
+    private fun confirmFirewallOff() {
+        node("Turn firewall off").performClick()
+        node("Turn firewall off?").assertExists()
+        compose.onNodeWithTag("confirm-turn-firewall-off").performClick()
+    }
 
     // ---- writes from the tile ----
 
@@ -112,7 +117,7 @@ class TideStateSyncTest {
         open(fake)
         val gate = CountDownLatch(1)
         fake.gate = gate
-        compose.onNodeWithTag("firewall-action").performClick()
+        confirmFirewallOff()
         compose.settle { fake.count("disable") == 1 }
         tileWrites()
         assertStaysAt(fake, "inspect", 1) // Nothing overlaps the running operation.
@@ -129,7 +134,7 @@ class TideStateSyncTest {
         fake.operationMessage = "Firewall disabled; boot restoration removed."
         val gate = CountDownLatch(1)
         fake.gate = gate
-        compose.onNodeWithTag("firewall-action").performClick()
+        confirmFirewallOff()
         compose.settle { fake.count("disable") == 1 }
         tileWrites()
         compose.waitForIdle()
@@ -196,7 +201,7 @@ class TideStateSyncTest {
         fake.operationMessage = "Firewall disabled; boot restoration removed."
         fake.dashboard = off.copy(superseded = true)
         fake.nextInspections += off
-        compose.onNodeWithTag("firewall-action").performClick()
+        confirmFirewallOff()
         compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
         node("Firewall disabled", substring = true).assertExists()
         node("RECHECK REQUIRED", substring = true).assertDoesNotExist()
@@ -287,7 +292,7 @@ class TideStateSyncTest {
         open(fake)
         fake.operationSuccess = false
         fake.operationMessage = "Could not remove all firewall rules; inspect status."
-        node("Turn firewall off").performClick()
+        confirmFirewallOff()
         compose.settle { compose.hasText(fake.operationMessage) }
         compose.onNodeWithTag("banner-failed").assertExists()
         activityTab()
@@ -318,10 +323,36 @@ class TideStateSyncTest {
 
     // ---- actions reach the gateway with the right direction ----
 
-    @Test fun turnFirewallOffDisables() {
+    @Test fun firewallOffNeedsConfirmationAndCancelDoesNotDisable() {
         val fake = FakeGateway()
         open(fake)
         node("Turn firewall off").performClick()
+        node("Turn firewall off?").assertExists()
+        assertEquals(0, fake.count("disable"))
+        node("Cancel").performClick()
+        node("Turn firewall off?").assertDoesNotExist()
+        assertEquals(0, fake.count("disable"))
+        confirmFirewallOff()
+        compose.settle { fake.count("disable") == 1 }
+        assertEquals(0, fake.count("enable"))
+    }
+
+    @Test fun pendingFirewallOffConfirmationDisappearsIfProtectionChanges() {
+        val fake = FakeGateway()
+        open(fake)
+        node("Turn firewall off").performClick()
+        node("Turn firewall off?").assertExists()
+        fake.dashboard = off
+        TileStatusStore.publish(app, offSnapshot, source = TileStatusStore.SOURCE_TILE)
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        node("Turn firewall off?").assertDoesNotExist()
+        assertEquals(0, fake.count("disable"))
+    }
+
+    @Test fun turnFirewallOffDisables() {
+        val fake = FakeGateway()
+        open(fake)
+        confirmFirewallOff()
         compose.settle { fake.count("disable") == 1 }
         assertEquals(0, fake.count("enable"))
     }
@@ -359,7 +390,7 @@ class TideStateSyncTest {
         open(fake)
         fake.operationSuccess = false
         fake.operationMessage = "Could not remove all firewall rules; inspect status."
-        node("Turn firewall off").performClick()
+        confirmFirewallOff()
         compose.settle { compose.hasText("Could not remove all firewall rules; inspect status.") }
         compose.onNodeWithTag("banner-failed").assertExists()
     }
@@ -368,7 +399,7 @@ class TideStateSyncTest {
         val fake = FakeGateway()
         open(fake)
         fake.operationMessage = "Firewall disabled; boot restoration removed."
-        node("Turn firewall off").performClick()
+        confirmFirewallOff()
         compose.settle { compose.hasText("Firewall disabled; boot restoration removed.") }
         compose.onNodeWithTag("banner").assertExists()
         compose.onNodeWithTag("banner-failed").assertDoesNotExist()

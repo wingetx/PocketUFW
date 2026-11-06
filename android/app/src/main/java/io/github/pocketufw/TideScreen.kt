@@ -74,6 +74,12 @@ internal fun TideScreen(
     var inspection by rememberSaveable { mutableStateOf(initialInspection) }
     var exceptions by rememberSaveable { mutableStateOf(false) }
     var removeConfirmOpen by rememberSaveable { mutableStateOf(false) }
+    var offConfirmOpen by rememberSaveable { mutableStateOf(false) }
+    // Never let a pending OFF confirmation outlive the verified ACTIVE state.
+    LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt, ui.busy) {
+        if (ui.snapshot.protection != FirewallClient.Protection.ACTIVE ||
+            !ui.snapshot.rootReady || ui.verificationInDoubt || ui.busy) offConfirmOpen = false
+    }
     LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt) {
         if (ui.snapshot.protection != FirewallClient.Protection.DEGRADED ||
             !ui.snapshot.rootReady || ui.verificationInDoubt) removeConfirmOpen = false
@@ -179,7 +185,9 @@ internal fun TideScreen(
                         color = Muted)
                 }
                 destination == TideDestination.FIREWALL -> TideFirewall(ui, actions, appVersion,
-                    requestRemoval = { removeConfirmOpen = true }, showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
+                    requestRemoval = { removeConfirmOpen = true },
+                    requestDisable = { offConfirmOpen = true },
+                    showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
                     showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
                     showSettings = { destination = TideDestination.SETTINGS })
                 destination == TideDestination.ACTIVITY -> {
@@ -189,13 +197,29 @@ internal fun TideScreen(
                     }
                     if (inspection == TideInspection.COUNTERS) TideCounters(ui, actions)
                     else KernelStatusTab(ui.snapshot, ui.report, ui.busy,
-                        actions.recheck, onExceptions = { exceptions = true },
-                        verificationInDoubt = ui.verificationInDoubt)
+                        actions.recheck, verificationInDoubt = ui.verificationInDoubt)
                 }
                 else -> TideSettings(ui, actions, appVersion, onExceptions = { exceptions = true })
             }
         }
     }
+    if (offConfirmOpen) AlertDialog(
+        containerColor = Background, tonalElevation = 0.dp,
+        onDismissRequest = { offConfirmOpen = false },
+        title = { Text("Turn firewall off?") },
+        text = { Text("This removes PocketUFW's incoming firewall rules and disarms " +
+            "Magisk boot restoration. Android's existing firewall rules remain unchanged.") },
+        confirmButton = {
+            TextButton(onClick = {
+                offConfirmOpen = false
+                if (!ui.busy && !ui.verificationInDoubt && ui.snapshot.rootReady &&
+                    ui.snapshot.protection == FirewallClient.Protection.ACTIVE) actions.changeProtection(false)
+            }, enabled = !ui.busy && !ui.verificationInDoubt && ui.snapshot.rootReady &&
+                ui.snapshot.protection == FirewallClient.Protection.ACTIVE,
+                modifier = Modifier.testTag("confirm-turn-firewall-off")) { Text("Turn off") }
+        },
+        dismissButton = { TextButton(onClick = { offConfirmOpen = false }) { Text("Cancel") } }
+    )
     if (removeConfirmOpen) AlertDialog(
         containerColor = Background, tonalElevation = 0.dp,
         onDismissRequest = { removeConfirmOpen = false },
@@ -215,7 +239,8 @@ internal fun TideScreen(
 
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
-                         requestRemoval: () -> Unit, showCounters: () -> Unit,
+                         requestRemoval: () -> Unit, requestDisable: () -> Unit,
+                         showCounters: () -> Unit,
                          showRules: () -> Unit, showSettings: () -> Unit) {
     val state = ui.snapshot
     val active = state.protection == FirewallClient.Protection.ACTIVE
@@ -310,7 +335,11 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             R.drawable.tide_power else icon,
         enabled = !checking && (attention || state.rootReady),
         modifier = Modifier.testTag("firewall-action"),
-        onClick = { if (!ui.busy) { if (attention) actions.recheck() else actions.changeProtection(!active) } }
+        onClick = { if (!ui.busy) {
+            if (attention) actions.recheck()
+            else if (active) requestDisable()
+            else actions.changeProtection(true)
+        } }
     )
     if (state.protection == FirewallClient.Protection.DEGRADED) {
         TideLink("Inspect kernel rules", onClick = showRules)

@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallClient.KernelReport?,
-                            busy: Boolean, recheck: () -> Unit, onExceptions: () -> Unit,
+                            busy: Boolean, recheck: () -> Unit,
                             verificationInDoubt: Boolean = false) {
     var ipv6 by rememberSaveable { mutableStateOf(false) }
     var raw by rememberSaveable { mutableStateOf(false) }
@@ -106,7 +106,6 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
             TideIcon(R.drawable.tide_refresh, tint = LocalContentColor.current)
             Spacer(Modifier.width(8.dp)); Text("Recheck kernel rules")
         }
-        TideSettingLink("VPN UDP exceptions", "Inspect live ports and edit advanced settings", onExceptions)
         Text("Read-only snapshot, not a continuous monitor. PocketUFW hooks supported physical interfaces after " +
             "Android’s existing INPUT rules. Earlier Android/OEM ACCEPT rules may bypass these hooks. " +
             "Android owns the INPUT chain policies. Outgoing traffic is unchanged. Packet logging: counters only.",

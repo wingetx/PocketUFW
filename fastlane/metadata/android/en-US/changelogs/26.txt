@@ -1,0 +1,1 @@
+Beta5: New Tide UI, clearer counters and kernel-rule views, and VPN identification. Independent security audit improved boot recovery, firewall/tile state reporting, cross-process synchronization, and Tailscale listener verification. Turning the firewall off now requires confirmation; UDP exception editing lives under Settings. Still a test beta with limited interface coverage.

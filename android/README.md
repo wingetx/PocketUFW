@@ -1,6 +1,6 @@
 # PocketUFW Android beta
 
-**0.1.0-beta4 (versionCode 25)** is a testing release of the one-switch
+**0.1.0-beta5 (versionCode 26)** is a testing release of the one-switch
 Android root firewall, not a production security guarantee. Pixel 9a and
 Moto G 5G (2024) have been hardware tested; other Android variants may
 behave differently. Root and legacy iptables/ip6tables support are required.
@@ -12,6 +12,14 @@ which Android cannot update in place without an intentional migration.
 Uninstalling the firewall app clears its private saved settings, so disable
 protection first to disarm Magisk boot restoration and remove owned rules.
 Tailscale and WireGuard configurations belong to their own applications.
+
+## Beta5: audited engine and updated interface
+
+Independent security testing strengthened boot restoration, tile state reporting,
+Tailscale listener verification, and root-operation serialization. The Tide
+interface adds an explicit confirmation before turning protection off and keeps
+UDP exception customization under Settings. A signed Beta 5 release is not
+published by this source/version change alone.
 
 ## Beta4: counter refresh UI reliability
 

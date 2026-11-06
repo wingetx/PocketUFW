@@ -74,6 +74,15 @@ class TideWordingTest {
             "Root\nrequired.", "ROOT PERMISSION NEEDED", "No root.", "Check root access"),
     )
 
+    @Test fun udpEditorOnlyOpensFromSettingsNotKernelRules() {
+        show(ui(active), TideDestination.ACTIVITY, TideInspection.RULES)
+        node("VPN UDP exceptions · child chain").assertExists()
+        node("VPN UDP exceptions").assertDoesNotExist()
+        node("Settings").performClick()
+        node("VPN UDP exceptions").performScrollTo().performClick()
+        node("UDP exceptions.").assertExists()
+    }
+
     @Test fun checkingWordingClaimsNothing() {
         // The spinner never idles, so this one is stepped by hand.
         compose.mainClock.autoAdvance = false

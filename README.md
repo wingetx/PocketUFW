@@ -16,7 +16,7 @@ Think UFW's *deny incoming, allow outgoing* philosophy, adapted for rooted Andro
 
 **What you get:** one protection switch, readable rules, live kernel packet counters, optional one-shot Magisk boot restoration, and manual verified Tailscale listener refresh. No accounts, advertising, analytics, or continuously running background app.
 
-> **Beta, not a security guarantee.** Version `0.1.0-beta4` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Coverage is limited to supported physical interfaces, and earlier Android/OEM `INPUT` rules can bypass PocketUFW. It does not directly filter traffic inside VPN tunnels or forwarded/tethered traffic. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
+> **Beta, not a security guarantee.** Version `0.1.0-beta5` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Coverage is limited to supported physical interfaces, and earlier Android/OEM `INPUT` rules can bypass PocketUFW. It does not directly filter traffic inside VPN tunnels or forwarded/tethered traffic. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
 
 **Permanent Android app identity:** Starting with `0.1.0-beta2`,
 the app ID is `io.github.pocketufw`. The earlier beta1 used the

@@ -371,6 +371,25 @@ class RealEngineTests(unittest.TestCase):
                     self.device.app_data.mkdir()
                 self.assert_succeeded(self.bridge('disable'), 'INACTIVE', 'DISABLED')
 
+    # --- The lock can stop firewall changes, so nobody else may hold it. ---
+
+    def test_the_lock_file_is_private_whoever_created_it_first(self):
+        lock = self.device.lock
+        engine = self.device.engine / 'pocketufw'
+        for name, loose_file in (('created now under a loose umask', False), ('left world-writable', True)):
+            with self.subTest(case=name):
+                lock.unlink(missing_ok=True)
+                if loose_file:
+                    lock.touch()
+                    lock.chmod(0o666)
+                subprocess.run(['sh', '-c', 'umask 000; exec sh "$0" verify', str(engine)],
+                               capture_output=True, env=self.env, timeout=40)
+                self.assertEqual(lock.stat().st_mode & 0o777, 0o600)
+
+    def test_an_unusable_lock_path_still_runs_unlocked(self):
+        result = self.script('pocketufw', 'verify', env={'POCKETUFW_LOCK': str(self.root / 'no-such-dir' / 'lock')})
+        self.assertEqual(result.stdout.strip(), 'INACTIVE')
+
     # --- Remove PocketUFW: real scripts together. ---
 
     def rules_gone(self):

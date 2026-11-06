@@ -49,7 +49,7 @@ There is no signed release APK, upload, main merge, or Frankenpixel install.
 
 ## Re-run commands (Arch)
 
-    cd ~/toolbox/projects/PocketUFW-integration
+    cd ~/toolbox/projects/PocketUFW
     PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests
 
     cd android

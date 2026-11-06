@@ -1,3 +1,30 @@
+# PocketUFW current handoff (2026-11-05, Beta 5 pre-release)
+
+**Canonical project:** `~/toolbox/projects/PocketUFW`
+**Active branch:** `fix/integration-audit` (local head `16dc742` when this handoff was prepared; check Git for later commits).
+**Published release:** Beta 4 on GitHub `main`. **Beta 5 is not published or merged to `main`.**
+
+## Current build and validation
+
+- Beta 5 (`0.1.0-beta5`, versionCode `26`) contains the audited integration, confirmation before turning the firewall off, and one UDP customization entry point under Settings. Commit `16dc742` is local and not pushed yet.
+- 407 Python tests (1 skipped), 174 Android JVM tests, debug/unsigned release builds, and lint passed. 15 isolated **real Linux kernel** packet-filter tests passed. Those do not substitute for Android uninstall/reboot validation.
+- The signed Beta 5 candidate was created with the original PocketUFW release keystore. Its certificate matches published Beta 4 (`SHA-256: 29cac70ee30ed8ab26676aeb60809bdf668f3ad3428eab556316970ce1f99ad2`). Candidate is in `android/app/build/outputs/apk/release/PocketUFW-0.1.0-beta5.apk`, a generated/untracked build artifact.
+- Beta 5 was freshly installed on Jay's rooted **Pixel 9a / Android 17**, after an earlier uninstall; app launched and reported existing active rules. The Moto audit covered the preceding audited code, not the new uninstall problem. No Beta 5 release has been uploaded or tagged.
+
+## Release blocker: uninstall leaves an active firewall
+
+**Observed on Pixel 9a:** After the PocketUFW app had been uninstalled, root-owned `/data/adb/service.d/pocketufw.sh`, `/data/adb/pocketufw/boot.enabled`, and `/data/adb/pocketufw/pocketufw` still existed, and both IPv4 and IPv6 `POCKETUFW_IN` chains with physical-interface INPUT hooks remained installed in the running kernel. Reinstalling signed Beta 5 found the firewall active and retained its counters. This is a real usability/security ownership problem: without the app, there is no normal UI to turn it off.
+
+**Existing behavior:** `boot-service` checks on **next boot** whether the app is gone and its device-protected data absent, and then removes *its own boot hook and root-owned copies*, but this does not remove kernel rules during the same running session. An ordinary Android uninstall does not reliably call app cleanup code. Do not claim that a broadcast receiver inside the uninstalled app will run, or that removing the boot hook alone immediately removes live rules.
+
+**Requested next work:** Ask Claude to independently investigate Android uninstall semantics and propose the least invasive, reliable lifecycle solution, then implement and test after design review. Candidate: explicit in-app **Remove PocketUFW** flow that shows what will happen, removes only verified PocketUFW-owned rules and boot files, confirms the resulting kernel state, and only then opens Android's uninstall UI. Keep standard uninstall and next-boot outcomes honest, including cleanup failures, partial rules, interrupted operations and uninstall without use of the in-app flow. No persistent watcher unless clearly justified. Avoid changing unrelated Android/OEM, Tailscale, WireGuard or VPN rules.
+
+**Testing gate:** Use isolated kernel/bridge/UI tests and a disposable rooted test device for uninstall/reboot scenarios before considering a release. Do **not** uninstall, reboot, reset, or alter Frankenpixel's live firewall/VPN/root state without explicit approval. Have an independent audit of this new root/uninstall boundary. Do not publish Beta 5 until resolved or the remaining limitation is explicitly accepted and clearly documented.
+
+---
+
+## Historical handoff (superseded where it conflicts with the current status above)
+
 # PocketUFW integration handoff (2026-11-05)
 
 **Branch:** integration/pocketufw-next

@@ -58,9 +58,9 @@ Last checked down to the second. Refresh never resets counters or changes rules.
 - Incoming from a physical interface: **deny by default** after essential network allowances.
 - Established inbound replies: **allow**.
 - Outbound: **left unchanged** (other apps/system policy may still restrict it).
-- Tailscale virtual interfaces and WireGuard tunnels: **not filtered directly**, though their *underlying* UDP listeners may require explicit allowances.
+- Tailscale virtual interfaces and WireGuard tunnels: **not filtered directly** by default, though their *underlying* UDP listeners may require explicit allowances. An [optional tunnel filter](docs/tunnel-filtering.md) is in development: command line only, off by default, and not yet tested on a phone.
 - Android's preexisting INPUT/OUTPUT/FORWARD rules and their default policies: **never flushed or modified**.
-- PocketUFW owns two filter chains per address family: `POCKETUFW_IN` for inbound policy and `POCKETUFW_TS` for verified Tailscale UDP exceptions, with tagged hooks into `INPUT`.
+- PocketUFW owns two filter chains per address family: `POCKETUFW_IN` for inbound policy and `POCKETUFW_TS` for verified Tailscale UDP exceptions, with tagged hooks into `INPUT`. The optional tunnel filter adds `POCKETUFW_VPN` and `POCKETUFW_TRUST` while it's on, and leaves those two alone.
 - The standalone CLI does not persist rules after reboot. The Android alpha offers **optional Magisk boot restoration**, tested on the Moto; no continuous background monitoring.
 
 ## Why this exists
@@ -78,7 +78,7 @@ Other Android tools can use genuine kernel firewall rules too. **PocketUFW's dif
 1. **Do not enable alongside AFWall+'s active rules**. PocketUFW checks for its output hook and refuses to enable. Android or other firewall tools may still own unknown chains.
 2. **No continuous Tailscale port tracking.** `--auto-tailscale` verifies current Android app-owned sockets when enabling rules. Use `refresh` after a port change to update only the exception chain. A future monitor will handle this automatically. A blocked direct UDP listener can push Tailscale onto encrypted relays.
 3. Assumes physical interfaces named `wlan*`, `rmnet*`, or `v4-rmnet*`. Network interfaces differ across phones. Devices with `eth*`, `ccmni*`, or other names **will not be covered**.
-4. Does not filter **tethered/FORWARD traffic** or traffic arriving through the *inner* `tun*` VPN interfaces.
+4. Does not filter **tethered/FORWARD traffic**, or, unless the optional tunnel filter is on, traffic arriving through the *inner* `tun*` VPN interfaces.
 5. `INPUT` hooks are appended **after system/OEM rules**. This preserves Android behavior but means an earlier terminal ACCEPT can bypass PocketUFW. It is not a universal host firewall guarantee.
 6. Current profile uses broad allowances for IPv6 ICMP, ESP, DHCP and mDNS to favor compatibility; they will be tightened after multi-device tests.
 7. No automatic watchdog or general rule-repair service. The Android app can install an opt-in one-shot Magisk boot hook; interrupted operations or later rule resets may still require manual intervention. Root access must remain available.
@@ -114,6 +114,12 @@ To clear the rules without restarting, run this with root:
 
 ```sh
 for t in iptables ip6tables; do
+  # Only if the optional tunnel filter was on. Without it, the tunnel lines just report no such chain.
+  for i in $($t -w -S INPUT | sed -n 's/^-A INPUT -i \([^ ]*\) -m comment --comment PocketUFW-VPN .*/\1/p'); do
+    $t -w -D INPUT -i "$i" -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN
+  done
+  $t -w -F POCKETUFW_VPN; $t -w -X POCKETUFW_VPN
+  $t -w -F POCKETUFW_TRUST; $t -w -X POCKETUFW_TRUST
   for i in wlan+ rmnet+ v4-rmnet+; do
     $t -w -D INPUT -i "$i" -m comment --comment PocketUFW -j POCKETUFW_IN
   done
@@ -163,6 +169,7 @@ iptables -w -S POCKETUFW_TS
 ip6tables -w -S POCKETUFW_TS
 iptables -w -S INPUT | grep PocketUFW
 ip6tables -w -S INPUT | grep PocketUFW
+sh pocketufw tunnel-status
 ```
 
 No `iptables -F`, `iptables -P INPUT DROP`, or global `iptables-restore` is used. Clean removal is a design requirement, not an optional feature.

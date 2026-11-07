@@ -19,6 +19,10 @@ The home screen now also lists a `tun` VPN as not filtered, named from Android's
 
 **Still open before release:** independent audit of this root boundary, a signed build containing this code (Amber handles signing once repo edits are finished), and the untested cases listed in that report. Whether to handle the dropped SSDP answers is an open decision for the owner.
 
+## Update: optional tunnel filter on `feature/tunnel-inbound-filter`
+
+Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, and never restored at boot. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard. **Never activated on a phone.**
+
 ## Release blocker: uninstall leaves an active firewall
 
 **Observed on Pixel 9a:** After the PocketUFW app had been uninstalled, root-owned `/data/adb/service.d/pocketufw.sh`, `/data/adb/pocketufw/boot.enabled`, and `/data/adb/pocketufw/pocketufw` still existed, and both IPv4 and IPv6 `POCKETUFW_IN` chains with physical-interface INPUT hooks remained installed in the running kernel. Reinstalling signed Beta 5 found the firewall active and retained its counters. This is a real usability/security ownership problem: without the app, there is no normal UI to turn it off.

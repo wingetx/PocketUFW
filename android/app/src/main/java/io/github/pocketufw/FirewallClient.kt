@@ -154,6 +154,8 @@ internal class FirewallClient(
         val ENGINE_SCRIPTS = listOf("pocketufw", "vpn-probe", "bootctl", "boot-service",
             "android-bridge", "rules-report", "udp-config")
         val ENGINE_LOCK = Any()
+        /** The chains rules-report may list as inbound policy. Anything else voids the report. */
+        val INBOUND_CHAINS = listOf("POCKETUFW_IN", "POCKETUFW_VPN", "POCKETUFW_TRUST")
         var enginePrepared = false
 
         /**
@@ -268,7 +270,7 @@ internal class FirewallClient(
         if (hooks.isEmpty() || inbound.isEmpty()) return null
         if (hooks.any { !it.startsWith("-A INPUT ") } ||
             bypass.any { !it.startsWith("-A INPUT ") } ||
-            inbound.any { !it.startsWith("-A POCKETUFW_IN ") } ||
+            inbound.any { rule -> INBOUND_CHAINS.none { rule.startsWith("-A $it ") } } ||
             vpn.any { !it.startsWith("-A POCKETUFW_TS ") }) return null
         return RuleFamily(policy, hooks, inbound, vpn, bypass)
     }

@@ -42,6 +42,16 @@ case "$action" in
       read dropped replies invalid drop_bytes invalid_bytes < "$state/$fam.counters"
     fi
     shape="${PUFW_TEST_LIST_SHAPE:-}"
+    # The tunnel filter's chains report their own numbers, so that a mix-up shows.
+    if [ "$name" = POCKETUFW_VPN ]; then
+      shape="${PUFW_TEST_TUNNEL_SHAPE:-$shape}"
+      dropped="${PUFW_TEST_TUNNEL_DROP:-0}"; replies="${PUFW_TEST_TUNNEL_REPLIES:-0}"
+      invalid="${PUFW_TEST_TUNNEL_INVALID:-0}"; drop_bytes="${PUFW_TEST_TUNNEL_BYTES:-0}"; invalid_bytes=0
+    elif [ "$name" = POCKETUFW_TRUST ]; then
+      printf 'Chain %s (1 references)\n    pkts      bytes target     prot opt in out source destination\n' "$name"
+      printf '      %s        1 ACCEPT     tcp  --  tun0 * 100.64.0.2 100.64.0.1 tcp dpt:22\n' "${PUFW_TEST_TRUSTED:-0}"
+      exit 0
+    fi
     [ "$shape" = no_header ] || printf 'Chain %s (3 references)\n' "$name"
     printf '    pkts      bytes target     prot opt in out source destination\n'
     [ "$shape" = no_established ] || printf '      %s        500 ACCEPT     all  --  * * 0/0 0/0 ctstate ESTABLISHED,RELATED\n' "$replies"
@@ -88,7 +98,7 @@ if [ -n "${PUFW_TEST_FAIL:-}" ] &&
 case "$action" in
   -Z)
     [ -f "$file" ] || exit 1
-    case "$name" in POCKETUFW_IN|POCKETUFW_TS) : ;; *) exit 7 ;; esac
+    case "$name" in POCKETUFW_IN|POCKETUFW_TS|POCKETUFW_VPN|POCKETUFW_TRUST) : ;; *) exit 7 ;; esac
     echo "$fam $name" >> "$state/zero_events"
     if [ "$name" = POCKETUFW_IN ]; then
       printf '0 0 0 0 0\n' > "$state/$fam.counters"

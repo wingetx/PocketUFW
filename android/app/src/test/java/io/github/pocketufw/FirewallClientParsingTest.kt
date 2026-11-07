@@ -185,6 +185,21 @@ class FirewallClientParsingTest {
         for ((name, output) in broken) assertNull(name, parse(output).kernelReport)
     }
 
+    @Test fun aReportWithTheTunnelFilterKeepsItsRulesVisibleInKernelOrder() {
+        val good = bridgeOutput().replace("rules_report=READY", listOf(
+            "hook4_04=-A INPUT -i tun+ -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN",
+            "main4_09=-A POCKETUFW_VPN -j DROP",
+            "main4_10=-A POCKETUFW_TRUST -s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp -m tcp --dport 22000 -j ACCEPT",
+            "rules_report=READY",
+        ).joinToString("\n"))
+        val family = parse(good).kernelReport!!.ipv4
+        assertEquals("tun+", family.hooks.last().substringAfter(" -i ").substringBefore(' '))
+        assertEquals("-A POCKETUFW_VPN -j DROP", family.inbound[8])
+        assertEquals(10, family.inbound.size)
+        // A rule from any other chain still voids the whole report.
+        assertNull(parse(good.replace("main4_09=-A POCKETUFW_VPN", "main4_09=-A POCKETUFW_OTHER")).kernelReport)
+    }
+
     @Test fun aReportWithoutRootIsIgnored() {
         assertNull(parse(bridgeOutput(), exitCode = 5).kernelReport)
     }

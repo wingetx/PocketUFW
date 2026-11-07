@@ -12,20 +12,26 @@ emit_rules() {
   fam="$2"
   listing="$3"
   max="$4"
-  printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" '
+  printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" -v n="${5:-0}" -v tunnel="${6:-0}" '
+    BEGIN { label = (kind == "tunnel") ? "main" : kind }
     $1 == "-A" {
       if (kind == "input_bypass") {
         if ($2 != "INPUT") next
-        if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) exit
+        # With the tunnel filter on, what could bypass it reaches as far as its first hook.
+        if (tunnel) {
+          if (/--comment PocketUFW-VPN/ && /-j POCKETUFW_VPN/) exit
+          if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) next
+        } else if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) exit
         if ($(NF-1) != "-j" || $NF != "ACCEPT") next
       }
       if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
-                                  /-j POCKETUFW_IN/)) next
+                                  (/-j POCKETUFW_IN/ || /-j POCKETUFW_VPN/))) next
       if (kind == "main" && $2 != "POCKETUFW_IN") next
+      if (kind == "tunnel" && $2 != "POCKETUFW_VPN" && $2 != "POCKETUFW_TRUST") next
       if (kind == "vpn" && $2 != "POCKETUFW_TS") next
       n++
       if (n > max || length($0) > 190) exit 9
-      printf "%s%s_%02d=%s\n", kind, fam, n, $0
+      printf "%s%s_%02d=%s\n", label, fam, n, $0
     }
   '
 }
@@ -42,16 +48,35 @@ emit_family() {
   case "$main" in *'-N POCKETUFW_IN'*) : ;; *) return 1 ;; esac
   case "$vpn" in *'-N POCKETUFW_TS'*) : ;; *) return 1 ;; esac
 
+  # Optional. Once a hook points at it, a chain we can't read makes the report incomplete.
+  tunnel=''
+  has_tunnel=0
+  if tunnel=$("$ipt" -w -S POCKETUFW_VPN 2>/dev/null) && trust=$("$ipt" -w -S POCKETUFW_TRUST 2>/dev/null); then
+    tunnel=$(printf '%s\n%s\n' "$tunnel" "$trust")
+    has_tunnel=1
+  else
+    tunnel=''
+    case "$input" in *'-j POCKETUFW_VPN'*) return 1 ;; esac
+  fi
+
   policy=$(printf '%s\n' "$input" | awk '$1 == "-P" && $2 == "INPUT" {print $3; exit}')
   case "$policy" in ACCEPT|DROP|REJECT) : ;; *) return 1 ;; esac
   printf 'input_policy%s=%s\n' "$fam" "$policy"
   # An ACCEPT ahead of our hooks is a hole the rule audit cannot see. Android's
   # own chains jump to oem_in, pl_INPUT and so on. With no hook, nothing is bypassed.
   case "$input" in
-    *'--comment PocketUFW'*) emit_rules input_bypass "$fam" "$input" 6 || return 1 ;;
+    *'--comment PocketUFW'*) emit_rules input_bypass "$fam" "$input" 6 0 "$has_tunnel" || return 1 ;;
   esac
-  emit_rules hook "$fam" "$input" 6 || return 1
+  # Three physical hooks, plus at most MAX_TUNNEL_HOOKS when the tunnel filter is on.
+  hook_limit=6
+  [ "$has_tunnel" -eq 0 ] || hook_limit=11
+  emit_rules hook "$fam" "$input" "$hook_limit" || return 1
   emit_rules main "$fam" "$main" 12 || return 1
+  if [ "$has_tunnel" -eq 1 ]; then
+    main_lines=$(printf '%s\n' "$main" | grep -c '^-A ') || main_lines=0
+    # Four rules plus at most MAX_TRUST_RULES, in the same numbered list the app reads.
+    emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 10))" "$main_lines" || return 1
+  fi
   emit_rules vpn "$fam" "$vpn" 3 || return 1
 }
 

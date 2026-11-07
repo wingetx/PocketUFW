@@ -492,9 +492,21 @@ fi
 # wlan+, rmnet+ and v4-rmnet+ hooks do not filter. Loopback and dummy carry no
 # inbound traffic. A VPN's tun is listed like its kernel and IPsec equivalents:
 # traffic inside any of them really isn't filtered, and the user should be told.
+# Only the engine's verified report can remove one from this list: with the optional
+# tunnel filter on, a hooked tunnel is filtered. Anything else stays listed.
+TUNNEL_HOOKS=$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_hooks=//p')
 UNCOVERED_IFACES=''
 if command -v ip >/dev/null 2>&1; then
-  UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk '
+  UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk -v hooks="$TUNNEL_HOOKS" '
+    function hooked(name, i, pattern) {
+      for (i = 1; i <= hook_count; i++) {
+        pattern = hook[i]
+        if (sub(/[+]$/, "", pattern)) { if (index(name, pattern) == 1) return 1 }
+        else if (name == pattern) return 1
+      }
+      return 0
+    }
+    BEGIN { hook_count = split(hooks, hook, ",") }
     $0 == "--addresses--" { in_addresses = 1; next }
     !in_addresses {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
@@ -504,7 +516,7 @@ if command -v ip >/dev/null 2>&1; then
     $3 == "inet" || ($3 == "inet6" && / scope global /) {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
       if (!(name in up) || (name in listed)) next
-      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy)/) next
+      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy)/ || hooked(name)) next
       listed[name] = 1
       list = list (list == "" ? "" : ",") name
     }
@@ -534,7 +546,7 @@ if [ "$state" = ACTIVE ]; then
   # These counters were measured by the same verified 'activity' command.
   # A degraded or incomplete response must never become a fabricated zero.
   if [ -n "$snapshot" ]; then
-    printf '%s\n' "$snapshot" | grep -E '^ipv[46]_(blocked|blocked_bytes|established_replies)=[0-9]+$' || :
+    printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_trusted=[0-9]+|tunnel_filter=(ON|OFF))$' || :
   fi
 fi
 

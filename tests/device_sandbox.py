@@ -25,7 +25,8 @@ FAKES = {
     'dumpsys': (
         '#!/bin/sh\n'
         "[ -z \"${TEST_VPN_OWNER:-}\" ] || "
-        "printf 'NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:%s} created=x}\\n' \"$TEST_VPN_OWNER\"\n"
+        "printf 'NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:%s} created=x%s}\\n' "
+        "\"$TEST_VPN_OWNER\" \"${TEST_VPN_IFACE:+ LinkProperties{InterfaceName: $TEST_VPN_IFACE }}\"\n"
     ),
 }
 

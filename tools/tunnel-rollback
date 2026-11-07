@@ -1,0 +1,133 @@
+#!/system/bin/sh
+# Dead-man switch for hardware tests of PocketUFW's optional tunnel filter.
+#
+# Development tooling, deliberately not packaged in the app: the shipped scripts
+# promise that nothing stays running. Copy it to the phone for a test.
+#
+#   tunnel-rollback on SECONDS /path/to/pocketufw [--trust PROTO:PEER:PORT]...
+#   tunnel-rollback confirm     # keep the rules; reach the phone over the path under test
+#   tunnel-rollback status
+#
+# The timer is armed BEFORE any rule exists, in its own session, so losing the shell
+# that started it, including to the rules themselves, can't stop it. When it fires it
+# runs `pocketufw tunnel-off`, which removes only tunnel rules. The physical policy
+# isn't touched, and a restart is a separate way out: the tunnel filter never restores.
+#
+# Time is the wall clock, so a phone in deep sleep fires as soon as it next wakes.
+set -eu
+
+STATE="${POCKETUFW_ROLLBACK_STATE:-/dev/.pocketufw-rollback}"
+RETRIES=5
+RETRY_SECONDS="${POCKETUFW_ROLLBACK_RETRY_SECONDS:-5}"
+
+fail() { echo "tunnel-rollback: $*" >&2; exit 1; }
+usage() { sed -n '7,9p' "$0" >&2; exit 2; }
+[ "$#" -ge 1 ] || usage
+[ "$(id -u)" = 0 ] || fail 'root required'
+case "$0" in */*) : ;; *) fail 'invoke by path' ;; esac
+
+# Line format: STATE TOKEN DEADLINE ENGINE. Replaced whole, so a reader never sees half.
+write_state() {
+  ( umask 077; printf '%s %s %s %s\n' "$1" "$2" "$3" "$4" > "$STATE.new" )
+  mv -f "$STATE.new" "$STATE"
+}
+read_state() {
+  [ -f "$STATE" ] || return 1
+  read -r s_state s_token s_deadline s_engine < "$STATE"
+}
+still_armed() {
+  read_state && [ "$s_state" = ARMED ] && [ "$s_token" = "$1" ]
+}
+timer_alive() {
+  [ -f "$STATE.timer" ] || return 1
+  read -r timer_pid < "$STATE.timer" || return 1
+  [ -n "$timer_pid" ] && kill -0 "$timer_pid" 2>/dev/null
+}
+
+cmd="$1"; shift
+case "$cmd" in
+  --timer)
+    [ "$#" -eq 3 ] || exit 2
+    token="$1"; deadline="$2"; engine="$3"
+    ( umask 077; printf '%s\n' "$$" > "$STATE.timer" )
+    # Only its own marker: a re-arm may already have replaced it.
+    trap 'if read -r marker < "$STATE.timer" && [ "$marker" = "$$" ]; then rm -f "$STATE.timer"; fi' 0
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      still_armed "$token" || exit 0
+      sleep 1
+    done
+    still_armed "$token" || exit 0
+    attempt=0
+    while [ "$attempt" -lt "$RETRIES" ]; do
+      # A later `confirm` wins. Another engine operation can hold the lock for a while.
+      still_armed "$token" || exit 0
+      if sh "$engine" tunnel-off >/dev/null 2>&1; then
+        write_state FIRED "$token" "$deadline" "$engine"
+        exit 0
+      fi
+      attempt=$((attempt + 1))
+      sleep "$RETRY_SECONDS"
+    done
+    write_state FAILED "$token" "$deadline" "$engine"
+    ;;
+  on)
+    [ "$#" -ge 2 ] || usage
+    seconds="$1"; engine="$2"; shift 2
+    case "$seconds" in ''|0|0*|*[!0-9]*) fail 'SECONDS must be 1..3600' ;; esac
+    [ "${#seconds}" -le 4 ] && [ "$seconds" -le 3600 ] || fail 'SECONDS must be 1..3600'
+    [ -r "$engine" ] || fail "cannot read $engine"
+    command -v setsid >/dev/null 2>&1 || fail 'setsid unavailable; refusing to test without a rollback'
+    if read_state && [ "$s_state" = ARMED ] && timer_alive; then
+      fail 'a rollback is already armed; confirm it or wait for it'
+    fi
+    now=$(date +%s)
+    deadline=$((now + seconds))
+    token="$$.$now"
+    rm -f "$STATE.timer"
+    write_state ARMED "$token" "$deadline" "$engine"
+    setsid sh "$0" --timer "$token" "$deadline" "$engine" </dev/null >/dev/null 2>&1 &
+    # No rule goes in until the timer has answered.
+    polls=0
+    until timer_alive; do
+      polls=$((polls + 1))
+      if [ "$polls" -ge 30 ]; then
+        write_state CANCELLED "$token" "$deadline" "$engine"
+        fail 'the rollback timer did not start; no rules installed'
+      fi
+      sleep 0.1
+    done
+    if ! sh "$engine" tunnel-on "$@"; then
+      write_state CANCELLED "$token" "$deadline" "$engine"
+      fail 'tunnel-on failed; rollback cancelled, nothing left to roll back'
+    fi
+    echo "rollback=ARMED seconds=$seconds"
+    ;;
+  confirm)
+    read_state || fail 'nothing is armed'
+    [ "$s_state" = ARMED ] || fail "nothing is armed (state $s_state)"
+    write_state CONFIRMED "$s_token" "$s_deadline" "$s_engine"
+    # A timer already past its last check may still fire, so wait and report what happened.
+    polls=0
+    while timer_alive && [ "$polls" -lt 40 ]; do
+      polls=$((polls + 1))
+      sleep 0.1
+    done
+    read_state
+    [ "$s_state" = CONFIRMED ] || fail "too late: the timer had already fired (state $s_state)"
+    timer_alive && fail 'the timer has not stopped; check status'
+    echo 'rollback=CONFIRMED'
+    ;;
+  status)
+    if ! read_state; then
+      echo 'rollback=NONE'
+    elif [ "$s_state" = ARMED ] && ! timer_alive; then
+      # The worst state to misread: nothing will clean up.
+      echo 'rollback=LOST'
+    elif [ "$s_state" = ARMED ]; then
+      echo "rollback=ARMED remaining=$((s_deadline - $(date +%s)))"
+    else
+      echo "rollback=$s_state"
+    fi
+    ;;
+  *) usage ;;
+esac

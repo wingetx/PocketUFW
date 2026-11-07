@@ -7,10 +7,11 @@ set -eu
 SS_BIN="${POCKETUFW_SS_BIN:-ss}"
 PROC_ROOT="${POCKETUFW_PROC_ROOT:-/proc}"
 PACKAGES_LIST="${POCKETUFW_PACKAGES_LIST:-/data/system/packages.list}"
+SYS_NET="${POCKETUFW_SYS_NET:-/sys/class/net}"
 
 usage() {
     cat <<'HELP'
-Usage: sh vpn-probe [--help]
+Usage: sh vpn-probe [--help | tunnels]
 
 Read-only Android Tailscale UDP listener discovery. Requires root.
 Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
@@ -18,11 +19,16 @@ verified using ss process metadata, /proc/PID/cmdline and the process UID,
 which must belong to Tailscale's package.
 An empty value means no verified listener for that address family.
 No firewall rules are changed. Does not monitor subsequent port changes.
+
+tunnels prints one tunnel=NAME kind=tun|wireguard owner=PACKAGE|kernel|unknown
+proof=verified|android-only|kernel-type|none line per tunnel, then
+inventory=COMPLETE. An app's tun is verified only when Android's VPN record and the
+kernel agree: a process of that package holds /dev/tun for exactly that interface.
 HELP
 }
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
-    '') ;;
+    ''|tunnels) ;;
     *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
 esac
 if [ "$#" -gt 1 ]; then
@@ -31,6 +37,93 @@ if [ "$#" -gt 1 ]; then
 fi
 
 [ "$(id -u)" -eq 0 ] || { echo "vpn-probe: root needed to verify socket ownership" >&2; exit 3; }
+
+# Android's record of which package owns which VPN interface, as "IFACE PACKAGE".
+# Dumpsys output varies by release, so absence only means Android makes no claim.
+android_claims() {
+    command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 || return 0
+    # Streamed: Android's printf is an external command, and this output is too large
+    # to pass to one. awk with index(): a two-part .* regex takes 18 s on these long lines.
+    timeout 5 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p' | awk '{
+        from = index($0, "ni{VPN CONNECTED extra: VPN:")
+        at = index($0, "InterfaceName: ")
+        if (!from || !at) next
+        package = substr($0, from + 28); package = substr(package, 1, index(package, "}") - 1)
+        iface = substr($0, at + 15); sub(/[ }].*/, "", iface)
+        print iface, package
+    }' | sort -u
+}
+
+# The kernel's answer, which an app can't influence: a process running under that
+# package's app ID holds /dev/tun, and fdinfo names exactly this interface. Bounded
+# to that app's processes: walking every descriptor on a phone takes minutes.
+package_holds_tun() {
+    want_appid=$(awk -v p="$1" '$1 == p { print $2; exit }' "$PACKAGES_LIST" 2>/dev/null) || want_appid=''
+    case "$want_appid" in ''|*[!0-9]*) return 1 ;; esac
+    # A process UID is user ID x 100000 + app ID, so this also fits other users.
+    pids=$(grep -H '^Uid:' "$PROC_ROOT"/[0-9]*/status 2>/dev/null | awk -v id="$want_appid" '{
+        split($0, f, /[: \t]+/); path = f[1]; sub(/\/status$/, "", path); sub(/.*\//, "", path)
+        if (f[3] ~ /^[0-9]+$/ && f[3] % 100000 == id) print path
+    }') || pids=''
+    for pid in $pids; do
+        fds=$(ls -l "$PROC_ROOT/$pid/fd" 2>/dev/null |
+            awk '$NF ~ /^\/dev\/(net\/)?tun$/ { print $(NF-2) }') || fds=''
+        for fd in $fds; do
+            case "$fd" in *[!0-9]*) continue ;; esac
+            if awk -v want="$2" '$1 == "iff:" && $2 == want { found = 1 } END { exit !found }' \
+                "$PROC_ROOT/$pid/fdinfo/$fd" 2>/dev/null; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+# Names say nothing: Android numbers tun devices as it pleases, and a kernel WireGuard
+# can be called anything. Kinds below come from the kernel. A device that is neither
+# isn't listed, which keeps carrier ipsec and clat out of any tunnel decision.
+tunnel_inventory() {
+    [ -d "$SYS_NET" ] || { echo "vpn-probe: $SYS_NET unavailable" >&2; exit 4; }
+    claims=$(android_claims) || claims=''
+    for device in "$SYS_NET"/*; do
+        name=${device##*/}
+        case "$name" in ''|*[!A-Za-z0-9_.-]*|lo|wlan*|rmnet*|v4-rmnet*) continue ;; esac
+        if grep -qx 'DEVTYPE=wireguard' "$device/uevent" 2>/dev/null; then
+            kind=wireguard
+        elif [ -e "$device/tun_flags" ]; then
+            flags=$(cat "$device/tun_flags" 2>/dev/null) || flags=''
+            case "$flags" in 0x*) : ;; *) continue ;; esac
+            case "${flags#0x}" in ''|*[!0-9a-fA-F]*) continue ;; esac
+            # IFF_TUN, not a tap device.
+            [ "$((flags & 1))" -eq 1 ] || continue
+            kind=tun
+        else
+            continue
+        fi
+        owners=$(printf '%s\n' "$claims" | awk -v want="$name" '$1 == want { print $2 }')
+        case "$owners" in
+            ''|*[!A-Za-z0-9_.-]*) owner='' ;; # None, or conflicting claims: no owner.
+            *) owner=$owners ;;
+        esac
+        if [ "$kind" = wireguard ]; then
+            proof=kernel-type
+            owner=${owner:-kernel}
+        elif [ -z "$owner" ]; then
+            proof=none
+            owner=unknown
+        elif package_holds_tun "$owner" "$name"; then
+            proof=verified
+        else
+            proof=android-only
+        fi
+        printf 'tunnel=%s kind=%s owner=%s proof=%s\n' "$name" "$kind" "$owner" "$proof"
+    done
+    echo 'inventory=COMPLETE'
+}
+if [ "${1:-}" = tunnels ]; then
+    tunnel_inventory
+    exit 0
+fi
 command -v "$SS_BIN" >/dev/null 2>&1 || { echo "vpn-probe: ss utility unavailable" >&2; exit 4; }
 [ -d "$PROC_ROOT" ] || { echo "vpn-probe: /proc unavailable" >&2; exit 4; }
 

@@ -73,7 +73,7 @@ Traffic between tailnet devices passes without any per-port rule: Syncthing, Tai
 
 A node's tailnet addresses don't depend on any of that, so they're what the rule matches. They change only if the node is re-registered or signs in to another tailnet, and the rule covers the whole range, so that's fine too. It needs no proof at install and no refresh afterwards, and works the same whether Tailscale was up when the filter went on.
 
-**Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain but can't use the rule, because of `-i tun+`. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
+**Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain. It cannot use this exemption when its name does not start with `tun`; a WireGuard named `tun5` can. The wildcard tests names, not interface kinds. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
 
 **A few drops at startup are normal.** Each time Tailscale's tun came up on the test phone, `ipv6_tunnel_blocked` rose by about 6 within a second, then stayed still. In the run that was captured, their byte counts fit the phone's own multicast listener reports exactly, and no peer sent anything like them. A later run showed the same 6 packets and 536 bytes, and Proton showed the matching 4 packets and 364 bytes after a reconnect. Separately, IPv4 packets of about 1.3 KB each were dropped for a while after a reconnect, and similar ones after a network change, with none in 62 s of normal browsing on Proton. That fits servers resending for abandoned connections, but they weren't captured. That phone holds a multicast routing socket (`mc_forwarding=1`), which is the likely reason its own reports loop back through `INPUT`. This wasn't reproduced in the lab, where the test tun sent no reports at all, so the mechanism is unproven. Tailnet traffic was unaffected.
 
@@ -96,11 +96,11 @@ The kernel can't enforce any of this, so the proof audits the rule and doesn't d
 
 ## Coverage gaps
 
-**For the independent audit before release: the tailnet rule trusts addresses, not Tailscale ownership.** Any tun that holds or claims an address in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` gets the rule. The kernel can't enforce ownership, so `tailnet=VERIFIED` describes the moment it was read and doesn't guarantee anything afterwards. The test phone demonstrated this: tailnet-addressed packets written into an unrelated temporary tun reached the kernel, and `tunnel-status` reported `tailnet=UNVERIFIED`. The audit should decide whether this is acceptable for release, and whether `UNVERIFIED` should do more than report.
+**For the independent audit before release: the tailnet rule trusts addresses, not Tailscale ownership.** Any `tun*` ingress can use the rule with a source in the selected range and a local destination in that range. The ingress interface itself does not need to hold that destination. The kernel can't enforce ownership, so `tailnet=VERIFIED` describes the moment it was read and doesn't guarantee anything afterwards. The test phone demonstrated this: tailnet-addressed packets written into an unrelated temporary tun reached the kernel, and `tunnel-status` reported `tailnet=UNVERIFIED`. The independent audit confirmed the gap; a release decision remains pending. `VERIFIED` describes address ownership at inspection, not the trustworthiness of all possible ingress paths.
 
 Trusting the tailnet with no watcher costs these. The first two are pinned by a test that passes packets on purpose.
 
-1. **A second tun alongside Tailscale can claim tailnet addresses.** Its packets pass if they use a tailnet source and a local tailnet destination, because the kernel can't tell the two tuns apart. Android allows one VPN per user, so this needs a second user or work profile, or a root-run tunnel. A kernel WireGuard can't do it.
+1. **A second tun alongside Tailscale can claim tailnet addresses.** Its packets pass if they use a tailnet source and a local tailnet destination, because the kernel can't tell the two tuns apart. Android allows one VPN per user, so this needs a second user or work profile, or a root-run tunnel. A kernel WireGuard named `tun*` can also match the rule if its peer is permitted to send the source address.
 2. **Another VPN whose own address is in `100.64.0.0/10`** gets the rule for traffic from that range. Everything else on that VPN is still filtered, and `tunnel-status` reports it as `UNVERIFIED`. The Proton WireGuard configuration seen on the test phone uses `10.2.0.2`.
 3. **Trust is for the whole tailnet.** A compromised tailnet device can reach anything listening on the phone's tailnet address. Tailscale's ACLs are what limit that.
 
@@ -122,7 +122,7 @@ If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then 
 | Restart | Gone, and never restored. Boot restoration only runs `enable`. |
 | Ordinary uninstall | Stays until the next restart, like the rest. The README's manual commands cover it. |
 
-In the app: the Status screen lists the extra hooks and rules, and a hooked tunnel leaves the "Not filtered" list. There's no switch, no tunnel counter display and no wording change yet.
+In the app: the Status screen lists the extra hooks and rules. A tunnel leaves the "Not filtered" list only after the complete policy and hooks verify in both families. The app names the session-only tunnel state and address-trust limitation; boot settings explicitly restore physical filtering only. There is still no tunnel switch or tunnel counter display.
 
 ## Rollback for hardware tests
 
@@ -135,7 +135,7 @@ sh tunnel-rollback confirm                 # keep the rules; run this over the p
 sh tunnel-rollback status   # ARMED, UNCLEAN, CONFIRMED, FIRED, FAILED, CANCELLED, LOST or NONE
 ```
 
-The timer starts in its own session before any rule exists, and no rule is installed until it answers, so losing the shell can't stop it. Tunnel mode removes only tunnel rules. It uses the wall clock, so a phone in deep sleep fires when it next wakes. A restart is a second way out.
+The timer starts in its own session before any rule exists, and no rule is installed until it answers, so losing the shell can't stop it. Tunnel mode removes only tunnel rules. It uses the wall clock, rounded up by at most one second, so a phone in deep sleep resumes the deadline check when it wakes. The timer must also wait for an in-flight installer to finish before it can report FIRED. A stalled installer can therefore delay cleanup; ARMED with a negative remaining time is not a successful rollback. The installer refuses success after expiry and requests cleanup. A restart is a second way out.
 
 **Whether rules are gone is read from the kernel, never taken from the engine's exit status,** and a table that can't be read isn't clean:
 
@@ -173,3 +173,95 @@ Run on a Pixel 9a from this branch's scripts, pushed over adb and deleted afterw
 - A completed Taildrop and a full SSH login through the bridge.
 
 **If anything goes wrong:** wait for the timer, or over USB run `su -c "sh $ENGINE disable"`, or restart.
+
+
+## Independent audit remediation — local, November 7, 2026
+
+These changes have not been deployed to a phone. The tunnel packet policy, including the
+existing tailnet exemption, is unchanged. Previous hardware results above apply
+to the earlier revision; they are not claims of hardware validation of these fixes.
+
+- `activity` and `verbose` now verify the same complete dual-family policy as
+  `verify`. Missing tunnel hooks cannot produce ACTIVE counters or hide a tunnel
+  from the app's uncovered-interface list.
+- A failed `tunnel-refresh` rolls back its own additions and deletions. Deleted
+  hooks return to their prior positions, preserving foreign INPUT rules. Rollback
+  failures remain visible as degraded protection. SIGKILL cannot run cleanup;
+  subsequent verification detects a partial install rather than promising repair.
+- `tunnel-status` reports `tunnel_uncovered` for newly discovered WireGuard names
+  lacking either family's hook. ON means the installed rules verify, not that
+  every present or future interface is covered. New names still need refresh.
+- Earlier direct ACCEPT rules are compared with each relevant hook, including
+  rules between the wildcard and a later WireGuard hook. The rules are reported,
+  not rewritten. An earlier WireGuard transport-port ACCEPT still admits inner
+  UDP targeting that port. Verdicts inside foreign chains remain outside this
+  bounded report; no universal coverage claim is made.
+- A shared cross-process lifecycle lock covers boot enable/disable/purge, the boot
+  restore decision, bridge operations through final readback, and CLI mutations.
+  Nested scripts inherit its descriptor. The engine snapshot lock remains
+  separate; lock order is lifecycle then snapshot. Mutation requires usable
+  `flock`; read-only engine inspection remains available. Runtime lock files stay
+  private in `/dev` until reboot and are never unlinked while other operations
+  might use them.
+- Boot cleanup disarms the marker first and retains the hook for a later retry
+  if owned data cannot be removed. Boot installation refuses an unrecognized
+  staging file or directory instead of overwriting it.
+- The development rollback tool serializes installation, confirmation and
+  removal with an inherited lock. A clean table while an installer is pending
+  is not FIRED. Confirmation after expiry is refused. The tool still requires
+  a responsive engine and kernel; a reboot remains the independent recovery path.
+
+Local validation: the original ten audit regressions failed before the fixes.
+The full Python suite completed 570 tests with one unrelated icon-art check
+skipped because Pillow is unavailable. The final focused security suite passed
+all 16 tests, including additional stale-port and interruption cases. Android's
+offline `:app:testDebugUnitTest` passed all 203 tests. Host packet tests used
+isolated network namespaces; no phone tests, signing or deployment were performed.
+
+### Stale UDP exceptions
+
+Successful explicit refresh replaces old exceptions as before. If discovery of
+new listeners fails, a separate, read-only scan may retire an existing allowance
+only when no Tailscale-owned socket remains at its port. It checks listening and
+connected sockets in both families, conservatively preserving possible dual-stack
+listeners. Unreadable package/socket ownership means unknown and preserves the
+allowance. A failed refresh opens no new ports, remains a failed operation, and
+tells the app when it removed proven-stale allowances. Committed policy is not
+automatically reconciled by the app.
+
+This is a snapshot, not enforcement of socket ownership per packet. A port can
+still become stale after any check and remain allowed until an explicit operation
+or rule removal. There is no background monitor or automatic repair. A reachable
+unrelated listener reusing that port is the meaningful exposure; an unbound port
+is not an exposed application service.
+
+### Tailnet policy proposal — not implemented
+
+The safest small static improvement that preserves ordinary automatic reconnects
+is **explicit address trust pinned to this node's verified IPv4 `/32` and IPv6
+`/128` destinations**, with the existing tailnet source ranges. Capture the node
+addresses only with verified Tailscale ownership, retain them while its interface
+is down or renumbered, and do not automatically widen them to a range. Enabling
+while Tailscale is down needs previously supplied trusted addresses or an explicit
+refusal; it must not silently install a policy that cuts off the next reconnect.
+
+| Choice | Reconnection | Remaining tradeoff |
+| --- | --- | --- |
+| Current whole-range trust | Works before Tailscale starts and after renumbering | Unrelated CGNAT VPNs inherit trust; any `tun*` injector can target a local tailnet address |
+| Pin verified node destinations, with explicit opt-in | Ordinary disconnect/reconnect and renumbering keep working | Reduces accidental CGNAT trust, but a deliberate injector can still spoof traffic to those addresses; re-registration/address changes need re-authorization |
+| Bind trust to the currently verified interface | Requires a refresh if its name changes | Stronger at that inspection, but a name can be reused; static names are not lasting ownership proof and can break unattended reconnects |
+| Trusted provider lifecycle update | Could update ownership-bound rules without a watcher | Requires an authenticated, supported provider integration that this project does not have; do not assume Android broadcasts provide it |
+
+Pinning destinations is a risk reduction, not Tailscale ownership enforcement.
+`-m owner` is not an INPUT match. `addrtype` is unavailable on the tested phone
+and, even where available, interface/address association does not authenticate
+who supplies the packet. A kernel WireGuard named `tun*` also needs explicit
+consideration; classifying currently known devices cannot guarantee the type of
+a future device without an update mechanism.
+
+Recommendation: keep this experimental feature off by default and retain the
+current policy in this fix series. Before release, decide whether explicit,
+narrowed address trust and its residual injection risk are acceptable. If actual
+owner enforcement is required, defer release of automatic tailnet exemption
+until a trustworthy lifecycle mechanism exists. No watcher, allowlist UI or
+provider integration is being added in this series.

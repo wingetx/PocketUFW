@@ -8,12 +8,12 @@ CHAIN='POCKETUFW_IN'
 TSCHAIN='POCKETUFW_TS'
 # Optional tunnel filter. Off unless asked for, and never restored at boot.
 VPNCHAIN='POCKETUFW_VPN'
-TRUSTCHAIN='POCKETUFW_TRUST'
 # Its own tag, so the physical hooks' exact signature stays what it always was.
 VPNTAG='PocketUFW-VPN'
 MAX_TUNNEL_HOOKS=8
-MAX_TRUST_RULES=6
-TRUST=''
+# What Tailscale assigns every node's addresses from.
+TAILNET4='100.64.0.0/10'
+TAILNET6='fd7a:115c:a1e0::/48'
 # Android interface wildcard syntax supported by iptables (-i wlan+, etc.).
 IFACES='wlan+ rmnet+ v4-rmnet+'
 TS4=''
@@ -47,15 +47,14 @@ Usage:
   pocketufw set-ports --udp4 PORT|none --udp6 PORT|none  # session-only advanced UDP exceptions
   pocketufw disable
   pocketufw residue    # read-only: does anything in either filter table still mention PocketUFW?
-  pocketufw tunnel-plan [--trust PROTO:PEER:PORT]...  # print the optional tunnel rules; change nothing
-  pocketufw tunnel-on [--trust PROTO:PEER:PORT]...    # filter tun+ and verified kernel WireGuard
-  pocketufw tunnel-refresh  # recheck tunnels and rebind allowances to Tailscale's current tun
-  pocketufw tunnel-status   # read-only: filter state, tunnel owners and their proof, allowances
+  pocketufw tunnel-plan     # print the optional tunnel rules; change nothing
+  pocketufw tunnel-on       # filter tun+ and verified kernel WireGuard; tailnet traffic stays trusted
+  pocketufw tunnel-refresh  # recheck for kernel WireGuard tunnels that came or went
+  pocketufw tunnel-status   # read-only: filter state, tunnel owners and their proof, who holds tailnet addresses
   pocketufw tunnel-off      # remove only the tunnel rules
 
 Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+.
 The tunnel filter is optional and lasts until disable, tunnel-off or the next restart.
---trust takes one Tailscale address, for example tcp:100.64.0.2:22000.
 No boot persistence. --auto-tailscale verifies ports on enable; refresh
 rechecks Tailscale's verified UDP listeners without restarting the firewall.
 Continuous monitoring of subsequent port changes is NOT implemented yet.
@@ -82,10 +81,6 @@ while [ "$#" -gt 0 ]; do
       shift ;;
     --auto-tailscale)
       AUTO_TS=1; shift ;;
-    --trust)
-      shift; [ "$#" -gt 0 ] || fail '--trust requires PROTO:PEER:PORT'
-      case "$1" in ''|*[!0-9a-z:.]*) fail 'Invalid --trust value' ;; esac
-      TRUST="${TRUST:+$TRUST }$1"; shift ;;
     --tailscale-udp4|--tailscale-udp6)
       opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port"
       check_port "$1"
@@ -97,10 +92,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$CMD" ] || { usage; exit 1; }
-case "$CMD" in
-  tunnel-on|tunnel-plan) : ;;
-  *) [ -z "$TRUST" ] || fail '--trust applies only to tunnel-on and tunnel-plan' ;;
-esac
 if [ "$CMD" = set-ports ]; then
   [ "$UDP4_SET" -eq 1 ] && [ "$UDP6_SET" -eq 1 ] ||
     fail 'set-ports requires both --udp4 and --udp6 (use none to close one)'
@@ -280,16 +271,15 @@ verify_all() {
 }
 
 # --- Optional tunnel filter ---------------------------------------------------
-# Deny is broad and needs no proof: tun+ covers every Android VPN, whichever app
-# holds it and whatever number the kernel gave it. An allowance is the opposite:
-# it binds one peer and port to a tunnel proven to be Tailscale's, addressed to
-# Tailscale's own address. See docs/tunnel-filtering.md.
+# tun+ covers every Android VPN, whichever app holds it and whatever number the kernel
+# gave it, so nothing has to watch for a new one. Tailnet traffic passes on its addresses,
+# which stay the same when Tailscale comes back on another tun number. The kernel can't
+# match a tun by who holds it, so ownership is checked and reported, not enforced: see
+# tailnet_report and docs/tunnel-filtering.md.
 
 fwf() { family="$1"; shift; if [ "$family" = 4 ]; then fw4 "$@"; else fw6 "$@"; fi; }
-tunnel_present() {
-  "$IPT4" -w -S "$VPNCHAIN" >/dev/null 2>&1 || "$IPT6" -w -S "$VPNCHAIN" >/dev/null 2>&1 ||
-    "$IPT4" -w -S "$TRUSTCHAIN" >/dev/null 2>&1 || "$IPT6" -w -S "$TRUSTCHAIN" >/dev/null 2>&1
-}
+tunnel_present() { "$IPT4" -w -S "$VPNCHAIN" >/dev/null 2>&1 || "$IPT6" -w -S "$VPNCHAIN" >/dev/null 2>&1; }
+tailnet_range() { if [ "$1" = 4 ]; then echo "$TAILNET4"; else echo "$TAILNET6"; fi; }
 
 # Interface names reach iptables as arguments, so they must not read as options or
 # wildcards. Physical patterns already have their own policy and are never tunnels.
@@ -297,39 +287,6 @@ iface_is_safe() {
   case "$1" in ''|-*|*[!A-Za-z0-9_.-]*) return 1 ;; lo|wlan*|rmnet*|v4-rmnet*) return 1 ;; esac
   [ "${#1}" -le 15 ]
 }
-
-# One address a tailnet can assign, never a range, so a typo can't widen an allowance
-# to the internet. Prints the family.
-tailnet_family() {
-  case "$1" in
-    *[!0-9.]*)
-      case "$1" in fd7a:115c:a1e0:*) : ;; *) return 1 ;; esac
-      case "$1" in *[!0-9a-f:]*) return 1 ;; esac
-      [ "${#1}" -le 39 ] || return 1
-      echo 6 ;;
-    *)
-      old_ifs="$IFS"; IFS=.; set -- $1; IFS="$old_ifs"
-      [ "$#" -eq 4 ] && [ "$1" = 100 ] || return 1
-      for octet in "$@"; do
-        case "$octet" in ''|0?*|*[!0-9]*) return 1 ;; esac
-        [ "${#octet}" -le 3 ] && [ "$octet" -le 255 ] || return 1
-      done
-      [ "$2" -ge 64 ] && [ "$2" -le 127 ] || return 1
-      echo 4 ;;
-  esac
-}
-parse_trust() {
-  trust_proto=${1%%:*}
-  trust_rest=${1#*:}
-  trust_port=${trust_rest##*:}
-  trust_peer=${trust_rest%:*}
-  case "$trust_proto" in tcp|udp) : ;; *) return 1 ;; esac
-  [ "$trust_rest" != "$trust_port" ] || return 1
-  case "$trust_port" in 0*) return 1 ;; esac
-  port_is_valid "$trust_port" || return 1
-  trust_family=$(tailnet_family "$trust_peer")
-}
-family_bits() { if [ "$1" = 4 ]; then echo 32; else echo 128; fi; }
 
 # The probe's report is all or nothing: one that didn't finish decides nothing.
 read_inventory() {
@@ -348,68 +305,64 @@ wireguard_names() {
     fi
   done
 }
-# Exactly one tunnel, which the kernel and Android both say is Tailscale's.
-tailscale_tun() {
-  ts_tuns=$(printf '%s\n' "$INVENTORY" |
-    sed -n 's/^tunnel=\([^ ]*\) kind=tun owner=com\.tailscale\.ipn proof=verified$/\1/p')
-  case "$ts_tuns" in ''|*[!A-Za-z0-9_.-]*) return 1 ;; esac
-  iface_is_safe "$ts_tuns" && printf '%s\n' "$ts_tuns"
+
+address_in_tailnet() {
+  case "$1" in
+    fd7a:115c:a1e0:*) return 0 ;;
+    100.*)
+      second=${1#100.}; second=${second%%.*}
+      case "$second" in ''|*[!0-9]*) return 1 ;; esac
+      [ "$second" -ge 64 ] && [ "$second" -le 127 ] ;;
+    *) return 1 ;;
+  esac
 }
-own_tailnet_addr() {
-  for own_addr in $(ip -o "-$1" addr show dev "$2" scope global 2>/dev/null |
-                    awk '{ sub(/\/.*/, "", $4); print $4 }'); do
-    if [ "$(tailnet_family "$own_addr" 2>/dev/null)" = "$1" ]; then
-      printf '%s\n' "$own_addr"
-      return 0
-    fi
+holds_tailnet_address() {
+  for held in $(ip -o addr show dev "$1" scope global 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }'); do
+    if address_in_tailnet "$held"; then return 0; fi
   done
   return 1
 }
+# Who the tailnet rule applies to right now, from INVENTORY. VERIFIED is Tailscale, proven
+# by both Android and the kernel. UNVERIFIED is the coverage gap: some other tun, or one
+# nobody could prove, holds an address in Tailscale's range, so the rule applies to it too.
+tailnet_report() {
+  command -v ip >/dev/null 2>&1 || { say 'tailnet=UNKNOWN'; return 0; }
+  tailnet_holders=0
+  while read -r t_name t_owner t_proof; do
+    [ -n "$t_name" ] || continue
+    case "$t_name" in tun*) : ;; *) continue ;; esac
+    holds_tailnet_address "$t_name" || continue
+    tailnet_holders=$((tailnet_holders + 1))
+    if [ "$t_owner" = com.tailscale.ipn ] && [ "$t_proof" = verified ]; then
+      say "tailnet=VERIFIED iface=$t_name"
+    else
+      say "tailnet=UNVERIFIED iface=$t_name owner=$t_owner proof=$t_proof"
+    fi
+  done <<EOF
+$(printf '%s\n' "$INVENTORY" | sed -n 's/^tunnel=\([^ ]*\) kind=[^ ]* owner=\([^ ]*\) proof=\([^ ]*\)$/\1 \2 \3/p')
+EOF
+  [ "$tailnet_holders" -gt 0 ] || say 'tailnet=DOWN'
+}
 
-# Fills TUNNEL_NAMES and TRUST_PLAN, or stops before anything has been changed.
+# Fills TUNNEL_NAMES, or stops before anything has been changed.
 prepare_tunnel() {
   read_inventory || fail 'Could not read the current tunnels; nothing changed'
   TUNNEL_NAMES=$(wireguard_names)
   hook_total=1
   for name in $TUNNEL_NAMES; do hook_total=$((hook_total + 1)); done
   [ "$hook_total" -le "$MAX_TUNNEL_HOOKS" ] || fail 'Too many tunnels to hook; nothing changed'
-  TRUST_PLAN=''
-  [ -n "$TRUST" ] || return 0
-  ts_tun=$(tailscale_tun) ||
-    fail 'An allowance needs a Tailscale tunnel proven by both the kernel and Android; nothing changed'
-  trust_total4=0; trust_total6=0
-  for spec in $TRUST; do
-    parse_trust "$spec" || fail "Invalid --trust $spec: use tcp|udp:TAILSCALE_ADDRESS:PORT; nothing changed"
-    own=$(own_tailnet_addr "$trust_family" "$ts_tun") ||
-      fail "Tailscale's tunnel has no IPv$trust_family address for --trust $spec; nothing changed"
-    if [ "$trust_family" = 4 ]; then trust_total4=$((trust_total4 + 1)); else trust_total6=$((trust_total6 + 1)); fi
-    TRUST_PLAN="$TRUST_PLAN$trust_family $trust_proto $trust_peer $own $ts_tun $trust_port
-"
-  done
-  [ "$trust_total4" -le "$MAX_TRUST_RULES" ] && [ "$trust_total6" -le "$MAX_TRUST_RULES" ] ||
-    fail 'Too many allowances; nothing changed'
-}
-# trust_rule -A|-D FAMILY PROTO PEER OWN IFACE PORT
-trust_rule() {
-  fwf "$2" "$1" "$TRUSTCHAIN" -s "$4/$(family_bits "$2")" -d "$5/$(family_bits "$2")" \
-    -i "$6" -p "$3" --dport "$7" -j ACCEPT
 }
 install_tunnel_rules() {
   for family_now in 4 6; do
+    range_now=$(tailnet_range "$family_now")
     fwf "$family_now" -N "$VPNCHAIN"
-    fwf "$family_now" -N "$TRUSTCHAIN"
+    # First, so conntrack's view of a flow can't affect the tailnet. Only on a tun: a
+    # kernel WireGuard shares this chain, and has no claim to these addresses.
+    fwf "$family_now" -A "$VPNCHAIN" -s "$range_now" -d "$range_now" -i tun+ -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate INVALID -j DROP
-    fwf "$family_now" -A "$VPNCHAIN" -j "$TRUSTCHAIN"
     fwf "$family_now" -A "$VPNCHAIN" -j DROP
   done
-  # Allowances exist before any hook does, so trusted traffic never sees a gap.
-  while read -r p_family p_proto p_peer p_own p_iface p_port; do
-    [ -n "$p_family" ] || continue
-    trust_rule -A "$p_family" "$p_proto" "$p_peer" "$p_own" "$p_iface" "$p_port"
-  done <<EOF
-$TRUST_PLAN
-EOF
   for family_now in 4 6; do
     for name in tun+ $TUNNEL_NAMES; do
       fwf "$family_now" -A INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN"
@@ -431,34 +384,9 @@ tunnel_hook_names() {
     END { exit bad }
   '
 }
-# Prints "proto peer own iface port" per allowance, and fails on anything else, so
-# only exact peer-to-own-address rules on one interface can ever pass.
-read_trust() {
-  trust_listing=$("$1" -w -S "$TRUSTCHAIN") || return 1
-  trust_seen=0
-  while IFS= read -r line; do
-    case "$line" in
-      "-N $TRUSTCHAIN") continue ;;
-      "-A $TRUSTCHAIN "*)
-        fields=$(printf '%s\n' "$line" | sed -n -E "s#^-A $TRUSTCHAIN -s ([0-9a-f:.]+)/([0-9]+) -d ([0-9a-f:.]+)/([0-9]+) -i ([A-Za-z0-9_.-]+) -p (tcp|udp) (-m (tcp|udp) )?--dport ([0-9]+) -j ACCEPT\$#\\6 \\1 \\3 \\5 \\9 \\2 \\4#p")
-        [ -n "$fields" ] || return 2
-        set -- "$1" "$2" $fields
-        [ "$8" = "$(family_bits "$2")" ] && [ "$9" = "$(family_bits "$2")" ] || return 2
-        [ "$(tailnet_family "$4" 2>/dev/null)" = "$2" ] || return 2
-        [ "$(tailnet_family "$5" 2>/dev/null)" = "$2" ] || return 2
-        iface_is_safe "$6" && port_is_valid "$7" || return 2
-        trust_seen=$((trust_seen + 1))
-        [ "$trust_seen" -le "$MAX_TRUST_RULES" ] || return 2
-        printf '%s %s %s %s %s\n' "$3" "$4" "$5" "$6" "$7"
-        ;;
-      *) return 2 ;;
-    esac
-  done <<EOF
-$trust_listing
-EOF
-}
 verify_tunnel_family() {
-  vbin="$1"; vfam="$2"
+  vbin="$1"
+  vrange=$(tailnet_range "$2")
   vrules=$("$vbin" -w -S "$VPNCHAIN") || return 1
   vcount=$(printf '%s\n' "$vrules" | grep -c -- "^-A $VPNCHAIN ") || return 1
   [ "$vcount" -eq 4 ] || return 1
@@ -468,12 +396,12 @@ verify_tunnel_family() {
       printf "%s ", $NF
     }
   ') || return 1
-  [ "$vtargets" = "ACCEPT DROP $TRUSTCHAIN DROP " ] || return 1
+  [ "$vtargets" = "ACCEPT ACCEPT DROP DROP " ] || return 1
+  # With four rules and those targets, these two are the only things ever accepted.
+  "$vbin" -w -C "$VPNCHAIN" -s "$vrange" -d "$vrange" -i tun+ -j ACCEPT >/dev/null 2>&1 || return 1
   "$vbin" -w -C "$VPNCHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1 || return 1
   "$vbin" -w -C "$VPNCHAIN" -m conntrack --ctstate INVALID -j DROP >/dev/null 2>&1 || return 1
-  "$vbin" -w -C "$VPNCHAIN" -j "$TRUSTCHAIN" >/dev/null 2>&1 || return 1
   [ "$(printf '%s\n' "$vrules" | tail -n 1)" = "-A $VPNCHAIN -j DROP" ] || return 1
-  (read_trust "$vbin" "$vfam" >/dev/null 2>&1) || return 1
   vhooks=$(tunnel_hook_names "$vbin") || return 1
   vtotal=0; vtun=0
   for name in $vhooks; do
@@ -497,19 +425,20 @@ remove_tunnel_family() {
       "$rbin" -w -D INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" || break
     done
   done
-  for owned in "$VPNCHAIN" "$TRUSTCHAIN"; do
-    if "$rbin" -w -S "$owned" >/dev/null 2>&1; then
-      "$rbin" -w -F "$owned" || :
-      "$rbin" -w -X "$owned" || :
-    fi
-  done
+  if "$rbin" -w -S "$VPNCHAIN" >/dev/null 2>&1; then
+    "$rbin" -w -F "$VPNCHAIN" || :
+    "$rbin" -w -X "$VPNCHAIN" || :
+  fi
 }
-read_trust_hits() {
-  hits_listing=$("$1" -w -L "$TRUSTCHAIN" -n -v -x) || return 1
+read_tailnet_hits() {
+  hits_listing=$("$1" -w -L "$VPNCHAIN" -n -v -x) || return 1
   printf '%s\n' "$hits_listing" | awk '
     NR == 1 && $1 != "Chain" { exit 2 }
-    $1 ~ /^[0-9]+$/ && $3 == "ACCEPT" { total += $1 }
-    END { printf "%.0f\n", total }
+    $1 ~ /^[0-9]+$/ && $3 == "ACCEPT" && !/ctstate/ { hits += $1; rules++ }
+    END {
+      if (rules != 1) exit 3
+      printf "%.0f\n", hits
+    }
   '
 }
 # Separate from the physical counters, which keep meaning exactly what they meant.
@@ -519,8 +448,8 @@ collect_tunnel_counters() {
   TUNNEL_FILTER=ON
   tcount4=$(read_counters "$IPT4" "$VPNCHAIN") || fail 'Cannot read IPv4 tunnel counters; not claiming a measurement'
   tcount6=$(read_counters "$IPT6" "$VPNCHAIN") || fail 'Cannot read IPv6 tunnel counters; not claiming a measurement'
-  ttrusted4=$(read_trust_hits "$IPT4") || fail 'Cannot read IPv4 allowance counters; not claiming a measurement'
-  ttrusted6=$(read_trust_hits "$IPT6") || fail 'Cannot read IPv6 allowance counters; not claiming a measurement'
+  ttailnet4=$(read_tailnet_hits "$IPT4") || fail 'Cannot read IPv4 tailnet counters; not claiming a measurement'
+  ttailnet6=$(read_tailnet_hits "$IPT6") || fail 'Cannot read IPv6 tailnet counters; not claiming a measurement'
   set -- $tcount4
   tblocked4="$1"; tbytes4="$2"; treplies4="$3"
   set -- $tcount6
@@ -724,12 +653,10 @@ case "$CMD" in
       "$IPT4" -w -S "$CHAIN" 2>/dev/null || true
       "$IPT4" -w -S "$TSCHAIN" 2>/dev/null || true
       "$IPT4" -w -S "$VPNCHAIN" 2>/dev/null || true
-      "$IPT4" -w -S "$TRUSTCHAIN" 2>/dev/null || true
       say '--- IPv6 ---'
       "$IPT6" -w -S "$CHAIN" 2>/dev/null || true
       "$IPT6" -w -S "$TSCHAIN" 2>/dev/null || true
       "$IPT6" -w -S "$VPNCHAIN" 2>/dev/null || true
-      "$IPT6" -w -S "$TRUSTCHAIN" 2>/dev/null || true
     else
       say 'PocketUFW: disabled'
     fi
@@ -762,10 +689,8 @@ case "$CMD" in
     fw4 -Z "$TSCHAIN" || fail 'IPv4 VPN counter reset failed; parent counters already reset'
     fw6 -Z "$TSCHAIN" || fail 'IPv6 VPN counter reset failed; other owned counters already reset'
     if tunnel_present; then
-      for owned in "$VPNCHAIN" "$TRUSTCHAIN"; do
-        fw4 -Z "$owned" || fail 'IPv4 tunnel counter reset failed; other owned counters already reset'
-        fw6 -Z "$owned" || fail 'IPv6 tunnel counter reset failed; other owned counters already reset'
-      done
+      fw4 -Z "$VPNCHAIN" || fail 'IPv4 tunnel counter reset failed; other owned counters already reset'
+      fw6 -Z "$VPNCHAIN" || fail 'IPv6 tunnel counter reset failed; other owned counters already reset'
     fi
     say 'PocketUFW: owned counters reset; newly arriving packets may already be counted.'
     ;;
@@ -791,8 +716,8 @@ case "$CMD" in
         say "ipv6_tunnel_blocked_bytes=$tbytes6"
         say "ipv4_tunnel_established_replies=$treplies4"
         say "ipv6_tunnel_established_replies=$treplies6"
-        say "ipv4_tunnel_trusted=$ttrusted4"
-        say "ipv6_tunnel_trusted=$ttrusted6"
+        say "ipv4_tunnel_tailnet=$ttailnet4"
+        say "ipv6_tunnel_tailnet=$ttailnet6"
       fi
     else
       say 'PocketUFW verbose status'
@@ -807,8 +732,8 @@ case "$CMD" in
       say "Tunnel filter: $TUNNEL_FILTER"
       if [ "$TUNNEL_FILTER" = ON ]; then
         say "Tunnel hooks: $thooks"
-        say "Tunnel IPv4 blocked: $tblocked4 packets ($tbytes4 bytes), established $treplies4, allowed $ttrusted4"
-        say "Tunnel IPv6 blocked: $tblocked6 packets ($tbytes6 bytes), established $treplies6, allowed $ttrusted6"
+        say "Tunnel IPv4 blocked: $tblocked4 packets ($tbytes4 bytes), established $treplies4, tailnet $ttailnet4"
+        say "Tunnel IPv6 blocked: $tblocked6 packets ($tbytes6 bytes), established $treplies6, tailnet $ttailnet6"
       fi
       say 'Counters: kernel rule matches since install or counter reset'
       say 'Limit: preceding Android/OEM rules and other interfaces are not covered by this proof'
@@ -945,6 +870,7 @@ case "$CMD" in
     committed=1
     trap - 0
     say 'tunnel_filter=ON'
+    tailnet_report
     say 'PocketUFW: tunnel filter on until disable, tunnel-off or the next restart.'
     ;;
   tunnel-refresh)
@@ -952,11 +878,7 @@ case "$CMD" in
     prereqs
     tunnel_present || fail 'Tunnel filter is off; nothing to refresh'
     verify_all || fail 'Firewall degraded; no refresh attempted'
-    read_inventory || fail 'Could not read the current tunnels; nothing changed'
-    TUNNEL_NAMES=$(wireguard_names)
-    hook_total=1
-    for name in $TUNNEL_NAMES; do hook_total=$((hook_total + 1)); done
-    [ "$hook_total" -le "$MAX_TUNNEL_HOOKS" ] || fail 'Too many tunnels to hook; nothing changed'
+    prepare_tunnel
     current_hooks=$(tunnel_hook_names "$IPT4") || fail 'Cannot read tunnel hooks; nothing changed'
     # A tunnel that came up since gets its hook. A hook whose kernel WireGuard is
     # gone goes, so names can't pile up. tun+ always stays.
@@ -979,28 +901,9 @@ case "$CMD" in
            done ;;
       esac
     done
-    # Follow Tailscale to its current tun, new rule first. Unproven now means leaving
-    # the rule alone: its interface and address no longer match, so it can only be idle.
-    if ts_tun=$(tailscale_tun); then
-      for family_now in 4 6; do
-        if [ "$family_now" = 4 ]; then ipt_now="$IPT4"; else ipt_now="$IPT6"; fi
-        trust_now=$(read_trust "$ipt_now" "$family_now") || fail 'Unrecognized allowance chain; inspect tunnel-status'
-        [ -n "$trust_now" ] || continue
-        own=$(own_tailnet_addr "$family_now" "$ts_tun") || continue
-        while read -r t_proto t_peer t_own t_iface t_port; do
-          [ -n "$t_proto" ] || continue
-          if [ "$t_iface" = "$ts_tun" ] && [ "$t_own" = "$own" ]; then continue; fi
-          trust_rule -A "$family_now" "$t_proto" "$t_peer" "$own" "$ts_tun" "$t_port" ||
-            fail 'Could not rebind an allowance; inspect tunnel-status'
-          trust_rule -D "$family_now" "$t_proto" "$t_peer" "$t_own" "$t_iface" "$t_port" ||
-            fail 'Could not remove an old allowance; inspect tunnel-status'
-        done <<EOF
-$trust_now
-EOF
-      done
-    fi
     verify_all || fail 'Tunnel refresh could not be verified; inspect tunnel-status'
     say 'tunnel_filter=ON'
+    tailnet_report
     ;;
   tunnel-status)
     root_needed
@@ -1014,26 +917,13 @@ EOF
     fi
     if read_inventory; then
       printf '%s\n' "$INVENTORY" | grep '^tunnel=' || :
-      ts_tun=$(tailscale_tun) || ts_tun=''
+      tailnet_report
     else
       say 'inventory=UNAVAILABLE'
-      ts_tun=''
     fi
     if tunnel_present; then
       hooks_now=$(tunnel_hook_names "$IPT4" | tr '\n' ',') || hooks_now=''
       say "tunnel_hooks=${hooks_now%,}"
-      for family_now in 4 6; do
-        if [ "$family_now" = 4 ]; then ipt_now="$IPT4"; else ipt_now="$IPT6"; fi
-        trust_now=$(read_trust "$ipt_now" "$family_now") || { say "allowances$family_now=UNREADABLE"; continue; }
-        while read -r t_proto t_peer t_own t_iface t_port; do
-          [ -n "$t_proto" ] || continue
-          binding=STALE
-          if [ "$t_iface" = "$ts_tun" ] && [ "$(own_tailnet_addr "$family_now" "$ts_tun")" = "$t_own" ]; then binding=BOUND; fi
-          say "allowance=$t_proto:$t_peer:$t_port iface=$t_iface binding=$binding"
-        done <<EOF
-$trust_now
-EOF
-      done
     fi
     ;;
   tunnel-off)

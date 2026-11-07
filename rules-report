@@ -27,7 +27,7 @@ emit_rules() {
       if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
                                   (/-j POCKETUFW_IN/ || /-j POCKETUFW_VPN/))) next
       if (kind == "main" && $2 != "POCKETUFW_IN") next
-      if (kind == "tunnel" && $2 != "POCKETUFW_VPN" && $2 != "POCKETUFW_TRUST") next
+      if (kind == "tunnel" && $2 != "POCKETUFW_VPN") next
       if (kind == "vpn" && $2 != "POCKETUFW_TS") next
       n++
       if (n > max || length($0) > 190) exit 9
@@ -51,8 +51,7 @@ emit_family() {
   # Optional. Once a hook points at it, a chain we can't read makes the report incomplete.
   tunnel=''
   has_tunnel=0
-  if tunnel=$("$ipt" -w -S POCKETUFW_VPN 2>/dev/null) && trust=$("$ipt" -w -S POCKETUFW_TRUST 2>/dev/null); then
-    tunnel=$(printf '%s\n%s\n' "$tunnel" "$trust")
+  if tunnel=$("$ipt" -w -S POCKETUFW_VPN 2>/dev/null); then
     has_tunnel=1
   else
     tunnel=''
@@ -74,8 +73,8 @@ emit_family() {
   emit_rules main "$fam" "$main" 12 || return 1
   if [ "$has_tunnel" -eq 1 ]; then
     main_lines=$(printf '%s\n' "$main" | grep -c '^-A ') || main_lines=0
-    # Four rules plus at most MAX_TRUST_RULES, in the same numbered list the app reads.
-    emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 10))" "$main_lines" || return 1
+    # Its four rules, in the same numbered list the app reads.
+    emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 4))" "$main_lines" || return 1
   fi
   emit_rules vpn "$fam" "$vpn" 3 || return 1
 }

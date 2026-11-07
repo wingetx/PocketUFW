@@ -546,7 +546,7 @@ if [ "$state" = ACTIVE ]; then
   # These counters were measured by the same verified 'activity' command.
   # A degraded or incomplete response must never become a fabricated zero.
   if [ -n "$snapshot" ]; then
-    printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_trusted=[0-9]+|tunnel_filter=(ON|OFF))$' || :
+    printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_tailnet=[0-9]+|tunnel_filter=(ON|OFF))$' || :
   fi
 fi
 

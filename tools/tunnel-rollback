@@ -1,17 +1,22 @@
 #!/system/bin/sh
-# Dead-man switch for hardware tests of PocketUFW's optional tunnel filter.
+# Dead-man switch for hardware tests of PocketUFW's rules.
 #
 # Development tooling, deliberately not packaged in the app: the shipped scripts
 # promise that nothing stays running. Copy it to the phone for a test.
 #
-#   tunnel-rollback on SECONDS /path/to/pocketufw [--trust PROTO:PEER:PORT]...
+#   tunnel-rollback on SECONDS /path/to/pocketufw            # tunnel-on; tunnel-off at expiry
+#   tunnel-rollback physical SECONDS /path/to/pocketufw [enable options]  # enable; disable at expiry
 #   tunnel-rollback confirm     # keep the rules; reach the phone over the path under test
 #   tunnel-rollback status
 #
 # The timer is armed BEFORE any rule exists, in its own session, so losing the shell
-# that started it, including to the rules themselves, can't stop it. When it fires it
-# runs `pocketufw tunnel-off`, which removes only tunnel rules. The physical policy
-# isn't touched, and a restart is a separate way out: the tunnel filter never restores.
+# that started it, including to the rules themselves, can't stop it. Tunnel mode removes
+# only tunnel rules, and a restart is a separate way out: neither mode's rules come back
+# unless boot restoration was armed separately.
+#
+# Whether rules are gone is read from the kernel here, never taken from the engine's
+# exit status. A failed install stands the timer down only once that reading is clean.
+# Otherwise it reports UNCLEAN, refuses confirm, and the timer keeps trying.
 #
 # Time is the wall clock, so a phone in deep sleep fires as soon as it next wakes.
 set -eu
@@ -19,93 +24,124 @@ set -eu
 STATE="${POCKETUFW_ROLLBACK_STATE:-/dev/.pocketufw-rollback}"
 RETRIES=5
 RETRY_SECONDS="${POCKETUFW_ROLLBACK_RETRY_SECONDS:-5}"
+IPT4="${POCKETUFW_IPTABLES4:-iptables}"
+IPT6="${POCKETUFW_IPTABLES6:-ip6tables}"
 
 fail() { echo "tunnel-rollback: $*" >&2; exit 1; }
-usage() { sed -n '7,9p' "$0" >&2; exit 2; }
+usage() { sed -n '7,10p' "$0" >&2; exit 2; }
 [ "$#" -ge 1 ] || usage
 [ "$(id -u)" = 0 ] || fail 'root required'
 case "$0" in */*) : ;; *) fail 'invoke by path' ;; esac
 
-# Line format: STATE TOKEN DEADLINE ENGINE. Replaced whole, so a reader never sees half.
+# Line format: STATE TOKEN DEADLINE MODE ENGINE. Replaced whole, so a reader never sees half.
 write_state() {
-  ( umask 077; printf '%s %s %s %s\n' "$1" "$2" "$3" "$4" > "$STATE.new" )
+  ( umask 077; printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$5" > "$STATE.new" )
   mv -f "$STATE.new" "$STATE"
 }
 read_state() {
   [ -f "$STATE" ] || return 1
-  read -r s_state s_token s_deadline s_engine < "$STATE"
+  read -r s_state s_token s_deadline s_mode s_engine < "$STATE"
 }
+# ARMED waits for its deadline. UNCLEAN means a failed install left rules, so nothing waits.
 still_armed() {
-  read_state && [ "$s_state" = ARMED ] && [ "$s_token" = "$1" ]
+  read_state && { [ "$s_state" = ARMED ] || [ "$s_state" = UNCLEAN ]; } && [ "$s_token" = "$1" ]
 }
 timer_alive() {
   [ -f "$STATE.timer" ] || return 1
   read -r timer_pid < "$STATE.timer" || return 1
   [ -n "$timer_pid" ] && kill -0 "$timer_pid" 2>/dev/null
 }
+undo_command() { if [ "$1" = physical ]; then echo disable; else echo tunnel-off; fi; }
+# True if the rules this mode is responsible for may still exist. Reads the tables itself,
+# since the engine's word is what's in doubt, and a table it can't read isn't clean.
+rules_remain() {
+  for ipt in "$IPT4" "$IPT6"; do
+    listing=$("$ipt" -w -S 2>/dev/null) || return 0
+    if [ "$1" = physical ]; then
+      if printf '%s\n' "$listing" | grep -qi pocketufw; then return 0; fi
+    else
+      if printf '%s\n' "$listing" | grep -qE 'POCKETUFW_VPN|PocketUFW-VPN'; then return 0; fi
+    fi
+  done
+  return 1
+}
 
 cmd="$1"; shift
 case "$cmd" in
   --timer)
-    [ "$#" -eq 3 ] || exit 2
-    token="$1"; deadline="$2"; engine="$3"
+    [ "$#" -eq 4 ] || exit 2
+    token="$1"; deadline="$2"; mode="$3"; engine="$4"
     ( umask 077; printf '%s\n' "$$" > "$STATE.timer" )
     # Only its own marker: a re-arm may already have replaced it.
     trap 'if read -r marker < "$STATE.timer" && [ "$marker" = "$$" ]; then rm -f "$STATE.timer"; fi' 0
+    undo=$(undo_command "$mode")
     while [ "$(date +%s)" -lt "$deadline" ]; do
       still_armed "$token" || exit 0
+      [ "$s_state" != UNCLEAN ] || break
       sleep 1
     done
-    still_armed "$token" || exit 0
     attempt=0
     while [ "$attempt" -lt "$RETRIES" ]; do
       # A later `confirm` wins. Another engine operation can hold the lock for a while.
       still_armed "$token" || exit 0
-      if sh "$engine" tunnel-off >/dev/null 2>&1; then
-        write_state FIRED "$token" "$deadline" "$engine"
+      sh "$engine" "$undo" >/dev/null 2>&1 || :
+      if ! rules_remain "$mode"; then
+        write_state FIRED "$token" "$deadline" "$mode" "$engine"
         exit 0
       fi
       attempt=$((attempt + 1))
       sleep "$RETRY_SECONDS"
     done
-    write_state FAILED "$token" "$deadline" "$engine"
+    write_state FAILED "$token" "$deadline" "$mode" "$engine"
     ;;
-  on)
+  on|physical)
     [ "$#" -ge 2 ] || usage
     seconds="$1"; engine="$2"; shift 2
+    if [ "$cmd" = physical ]; then mode=physical; install=enable; else mode=tunnel; install=tunnel-on; fi
     case "$seconds" in ''|0|0*|*[!0-9]*) fail 'SECONDS must be 1..3600' ;; esac
     [ "${#seconds}" -le 4 ] && [ "$seconds" -le 3600 ] || fail 'SECONDS must be 1..3600'
     [ -r "$engine" ] || fail "cannot read $engine"
     command -v setsid >/dev/null 2>&1 || fail 'setsid unavailable; refusing to test without a rollback'
-    if read_state && [ "$s_state" = ARMED ] && timer_alive; then
+    if read_state && { [ "$s_state" = ARMED ] || [ "$s_state" = UNCLEAN ]; } && timer_alive; then
       fail 'a rollback is already armed; confirm it or wait for it'
     fi
+    # A rollback may only ever remove what it installed.
+    rules_remain "$mode" && fail 'these rules already exist, or the tables cannot be read; nothing armed'
     now=$(date +%s)
     deadline=$((now + seconds))
     token="$$.$now"
     rm -f "$STATE.timer"
-    write_state ARMED "$token" "$deadline" "$engine"
-    setsid sh "$0" --timer "$token" "$deadline" "$engine" </dev/null >/dev/null 2>&1 &
+    write_state ARMED "$token" "$deadline" "$mode" "$engine"
+    setsid sh "$0" --timer "$token" "$deadline" "$mode" "$engine" </dev/null >/dev/null 2>&1 &
     # No rule goes in until the timer has answered.
     polls=0
     until timer_alive; do
       polls=$((polls + 1))
       if [ "$polls" -ge 30 ]; then
-        write_state CANCELLED "$token" "$deadline" "$engine"
+        write_state CANCELLED "$token" "$deadline" "$mode" "$engine"
         fail 'the rollback timer did not start; no rules installed'
       fi
       sleep 0.1
     done
-    if ! sh "$engine" tunnel-on "$@"; then
-      write_state CANCELLED "$token" "$deadline" "$engine"
-      fail 'tunnel-on failed; rollback cancelled, nothing left to roll back'
+    if sh "$engine" "$install" "$@"; then
+      echo "rollback=ARMED seconds=$seconds"
+      exit 0
     fi
-    echo "rollback=ARMED seconds=$seconds"
+    # A failed install may have left anything, whatever the engine's own cleanup reported.
+    if rules_remain "$mode"; then
+      sh "$engine" "$(undo_command "$mode")" >/dev/null 2>&1 || :
+    fi
+    if rules_remain "$mode"; then
+      write_state UNCLEAN "$token" "$deadline" "$mode" "$engine"
+      fail "$install failed and rules remain; the timer stays armed and keeps trying. Check status"
+    fi
+    write_state CANCELLED "$token" "$deadline" "$mode" "$engine"
+    fail "$install failed; tables read back clean, rollback cancelled"
     ;;
   confirm)
     read_state || fail 'nothing is armed'
     [ "$s_state" = ARMED ] || fail "nothing is armed (state $s_state)"
-    write_state CONFIRMED "$s_token" "$s_deadline" "$s_engine"
+    write_state CONFIRMED "$s_token" "$s_deadline" "$s_mode" "$s_engine"
     # A timer already past its last check may still fire, so wait and report what happened.
     polls=0
     while timer_alive && [ "$polls" -lt 40 ]; do
@@ -120,11 +156,11 @@ case "$cmd" in
   status)
     if ! read_state; then
       echo 'rollback=NONE'
-    elif [ "$s_state" = ARMED ] && ! timer_alive; then
+    elif { [ "$s_state" = ARMED ] || [ "$s_state" = UNCLEAN ]; } && ! timer_alive; then
       # The worst state to misread: nothing will clean up.
       echo 'rollback=LOST'
-    elif [ "$s_state" = ARMED ]; then
-      echo "rollback=ARMED remaining=$((s_deadline - $(date +%s)))"
+    elif [ "$s_state" = ARMED ] || [ "$s_state" = UNCLEAN ]; then
+      echo "rollback=$s_state remaining=$((s_deadline - $(date +%s)))"
     else
       echo "rollback=$s_state"
     fi

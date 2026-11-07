@@ -47,13 +47,12 @@ case "$action" in
       shape="${PUFW_TEST_TUNNEL_SHAPE:-$shape}"
       dropped="${PUFW_TEST_TUNNEL_DROP:-0}"; replies="${PUFW_TEST_TUNNEL_REPLIES:-0}"
       invalid="${PUFW_TEST_TUNNEL_INVALID:-0}"; drop_bytes="${PUFW_TEST_TUNNEL_BYTES:-0}"; invalid_bytes=0
-    elif [ "$name" = POCKETUFW_TRUST ]; then
-      printf 'Chain %s (1 references)\n    pkts      bytes target     prot opt in out source destination\n' "$name"
-      printf '      %s        1 ACCEPT     tcp  --  tun0 * 100.64.0.2 100.64.0.1 tcp dpt:22\n' "${PUFW_TEST_TRUSTED:-0}"
-      exit 0
     fi
     [ "$shape" = no_header ] || printf 'Chain %s (3 references)\n' "$name"
     printf '    pkts      bytes target     prot opt in out source destination\n'
+    if [ "$name" = POCKETUFW_VPN ] && [ "$shape" != no_tailnet ]; then
+      printf '      %s        1 ACCEPT     all  --  tun+ * 100.64.0.0/10 100.64.0.0/10\n' "${PUFW_TEST_TAILNET:-0}"
+    fi
     [ "$shape" = no_established ] || printf '      %s        500 ACCEPT     all  --  * * 0/0 0/0 ctstate ESTABLISHED,RELATED\n' "$replies"
     [ "$shape" = no_invalid ] || printf '      %s        %s DROP       all  --  * * 0/0 0/0 ctstate INVALID\n' "$invalid" "$invalid_bytes"
     [ "$shape" = no_final_drop ] || printf '      %s        %s DROP       all  --  * * 0/0 0/0\n' "$dropped" "$drop_bytes"
@@ -63,6 +62,7 @@ case "$action" in
     if [ -z "$name" ]; then
       [ "${PUFW_TEST_TABLE_FAIL:-0}" = 0 ] || exit 7
       [ "${PUFW_TEST_TABLE_FAIL_FAMILY:-}" != "$fam" ] || exit 7
+      [ ! -e "$state/table_fail" ] || exit 7
       for chain_file in "$state/$fam".*; do
         [ -f "$chain_file" ] || continue
         chain=${chain_file##*/}; chain=${chain#"$fam".}
@@ -95,10 +95,16 @@ if [ -n "${PUFW_TEST_FAIL:-}" ] &&
    { [ "$action $name $*" = "$PUFW_TEST_FAIL" ] ||
      [ "$action $name" = "$PUFW_TEST_FAIL" ]; } &&
    { [ -z "${PUFW_TEST_FAIL_FAMILY:-}" ] || [ "$fam" = "$PUFW_TEST_FAIL_FAMILY" ]; }; then exit 7; fi
+# Failures a test can start and stop while a process that inherited its environment runs.
+if [ -f "$state/fail_commands" ]; then
+  for attempt in "$action $name $*" "$action $name" "$fam $action $name $*" "$fam $action $name"; do
+    if grep -Fqx -- "$attempt" "$state/fail_commands"; then exit 7; fi
+  done
+fi
 case "$action" in
   -Z)
     [ -f "$file" ] || exit 1
-    case "$name" in POCKETUFW_IN|POCKETUFW_TS|POCKETUFW_VPN|POCKETUFW_TRUST) : ;; *) exit 7 ;; esac
+    case "$name" in POCKETUFW_IN|POCKETUFW_TS|POCKETUFW_VPN) : ;; *) exit 7 ;; esac
     echo "$fam $name" >> "$state/zero_events"
     if [ "$name" = POCKETUFW_IN ]; then
       printf '0 0 0 0 0\n' > "$state/$fam.counters"

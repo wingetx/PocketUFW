@@ -24,12 +24,22 @@ ROLLBACK = ROOT / 'tools' / 'tunnel-rollback'
 TAG = 'PocketUFW-VPN'
 
 FAKE_IP = r'''#!/bin/sh
-# ip -o -4 addr show dev NAME scope global
-[ "$1 $3 $4 $5" = "-o addr show dev" ] || exit 2
-if [ "$2" = -4 ] && [ -n "${PUFW_TEST_ADDR4:-}" ]; then echo "52: $6    inet $PUFW_TEST_ADDR4/32 scope global $6"; fi
-if [ "$2" = -6 ] && [ -n "${PUFW_TEST_ADDR6:-}" ]; then echo "52: $6    inet6 $PUFW_TEST_ADDR6/128 scope global"; fi
+# ip -o addr show dev NAME scope global, from a file a test writes for that interface.
+[ "$1 $2 $3 $4" = "-o addr show dev" ] || exit 2
+[ -f "$PUFW_TEST_DIR/addr.$5" ] || exit 1
+while read -r address; do
+  case "$address" in
+    *:*) echo "52: $5    inet6 $address/128 scope global" ;;
+    *) echo "52: $5    inet $address/32 scope global $5" ;;
+  esac
+done < "$PUFW_TEST_DIR/addr.$5"
 '''
+TAILNET = {'iptables': '100.64.0.0/10', 'ip6tables': 'fd7a:115c:a1e0::/48'}
 HOOK_TUN = f'-i tun+ -m comment --comment {TAG} -j POCKETUFW_VPN'
+
+
+def tailnet_rule(fam):
+    return f'-s {TAILNET[fam]} -d {TAILNET[fam]} -i tun+ -j ACCEPT\n'
 
 
 class Base(unittest.TestCase):
@@ -91,7 +101,10 @@ class Base(unittest.TestCase):
         self.device(iface, tun_flags='0x1001')
         self.process(1000 + len(list(self.proc.iterdir())), uid, fd138=iface)
         self.android_says(('com.tailscale.ipn', iface))
-        self.env |= {'PUFW_TEST_ADDR4': '100.64.0.1', 'PUFW_TEST_ADDR6': 'fd7a:115c:a1e0::1'}
+        self.holds(iface, '100.64.0.1', 'fd7a:115c:a1e0::1')
+
+    def holds(self, iface, *addresses):
+        (self.base / f'addr.{iface}').write_text(''.join(f'{address}\n' for address in addresses))
 
     def run_cmd(self, *args, **extra):
         return subprocess.run(['sh', str(ENGINE), *args], text=True, capture_output=True,
@@ -113,8 +126,7 @@ class Base(unittest.TestCase):
 
     def tunnel_chains_absent(self):
         for fam in ('iptables', 'ip6tables'):
-            for chain in ('POCKETUFW_VPN', 'POCKETUFW_TRUST'):
-                self.assertFalse(self.exists(fam, chain), f'{fam} {chain}')
+            self.assertFalse(self.exists(fam, 'POCKETUFW_VPN'), fam)
             self.assertNotIn(TAG, self.read(fam))
 
     def verify(self):
@@ -167,9 +179,10 @@ class OptionalAndSeparate(Base):
         self.proven_tailscale()
         self.ok('enable')
         before = sorted(path.name for path in self.base.iterdir())
-        output = self.ok('tunnel-plan', '--trust', 'tcp:100.64.0.2:22000')
+        output = self.ok('tunnel-plan')
         self.assertIn('DRY RUN', output)
-        self.assertIn('-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22000 -j ACCEPT', output)
+        self.assertIn('iptables -w -A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.0/10 -i tun+ -j ACCEPT', output)
+        self.assertIn('ip6tables -w -A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::/48 -i tun+ -j ACCEPT', output)
         self.assertEqual(sorted(path.name for path in self.base.iterdir()), before)
         self.tunnel_chains_absent()
 
@@ -178,10 +191,10 @@ class OptionalAndSeparate(Base):
         self.ok('tunnel-on')
         for fam in ('iptables', 'ip6tables'):
             self.assertEqual(self.read(fam, 'POCKETUFW_VPN'), (
+                tailnet_rule(fam) +
                 '-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
                 '-m conntrack --ctstate INVALID -j DROP\n'
-                '-j POCKETUFW_TRUST\n-j DROP\n'))
-            self.assertEqual(self.read(fam, 'POCKETUFW_TRUST'), '')
+                '-j DROP\n'))
             self.assertEqual(self.read(fam).count(HOOK_TUN), 1)
         self.assertEqual(self.verify(), 'ACTIVE')
 
@@ -309,91 +322,102 @@ class Ownership(Base):
         self.assertEqual(result.stdout, 'tailscale_udp4=\ntailscale_udp6=\n')
 
 
-class Allowances(Base):
-    def rule(self, fam='iptables'):
-        return self.read(fam, 'POCKETUFW_TRUST')
+class Tailnet(Base):
+    def report(self, *command):
+        return [line for line in self.ok(*(command or ('tunnel-status',))).splitlines() if line.startswith('tailnet=')]
 
-    def test_an_allowance_binds_peer_own_address_interface_protocol_and_port(self):
-        self.proven_tailscale()
+    def test_no_rule_names_a_tun_number_so_a_new_one_changes_nothing(self):
+        self.proven_tailscale('tun1')
         self.ok('enable')
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22000', '--trust', 'udp:fd7a:115c:a1e0::2:22000')
-        self.assertEqual(self.rule(), '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22000 -j ACCEPT\n')
-        self.assertEqual(self.rule('ip6tables'),
-                         '-s fd7a:115c:a1e0::2/128 -d fd7a:115c:a1e0::1/128 -i tun1 -p udp --dport 22000 -j ACCEPT\n')
+        self.ok('tunnel-on')
+        rules = {fam: self.read(fam) + self.read(fam, 'POCKETUFW_VPN') for fam in TAILNET}
+        for fam, text in rules.items():
+            self.assertNotIn('tun1', text)
+        subprocess.run(['rm', '-rf', str(self.sys / 'tun1'), str(self.proc)], check=True)
+        self.proc.mkdir()
+        self.proven_tailscale('tun2')
+        self.assertEqual(self.report(), ['tailnet=VERIFIED iface=tun2'])
         self.assertEqual(self.verify(), 'ACTIVE')
+        for fam, text in rules.items():
+            self.assertEqual(self.read(fam) + self.read(fam, 'POCKETUFW_VPN'), text)
 
-    def test_no_allowance_without_proof_that_the_tunnel_is_tailscales(self):
-        cases = {
-            'no tunnel at all': lambda: None,
-            'unclaimed tun': lambda: (self.device('tun1', tun_flags='0x1001'), self.process(50, 10345, fd9='tun1')),
-            'android only': lambda: (self.device('tun1', tun_flags='0x1001'),
-                                     self.android_says(('com.tailscale.ipn', 'tun1'))),
-            'impostor process': lambda: (self.device('tun1', tun_flags='0x1001'), self.process(50, 10999, fd9='tun1'),
-                                         self.android_says(('com.tailscale.ipn', 'tun1'))),
-            'proton owns it': lambda: (self.device('tun1', tun_flags='0x1001'), self.process(50, 10328, fd9='tun1'),
-                                       self.android_says(('ch.protonvpn.android', 'tun1'))),
-        }
+    def test_the_rules_do_not_depend_on_what_can_be_proven_at_install(self):
+        """Tailscale might be off, or dumpsys slow. Either way it mustn't lose its tailnet later."""
+        expected = None
+        for arrange in (lambda: self.proven_tailscale('tun1'),
+                        lambda: None,
+                        lambda: (self.device('tun3', tun_flags='0x1001'), self.holds('tun3', '100.64.0.1'))):
+            arrange()
+            self.ok('enable')
+            self.ok('tunnel-on')
+            rules = self.read('iptables', 'POCKETUFW_VPN') + self.read('ip6tables', 'POCKETUFW_VPN')
+            expected = expected or rules
+            self.assertEqual(rules, expected)
+            self.ok('disable')
+
+    def test_proven_tailscale_is_reported_verified(self):
+        self.proven_tailscale('tun7')
         self.ok('enable')
-        for name, arrange in cases.items():
+        self.assertEqual(self.report('tunnel-on'), ['tailnet=VERIFIED iface=tun7'])
+        self.assertEqual(self.report(), ['tailnet=VERIFIED iface=tun7'])
+        self.assertEqual(self.report('tunnel-refresh'), ['tailnet=VERIFIED iface=tun7'])
+
+    def test_a_tailnet_address_on_anything_unproven_is_reported_as_the_gap_it_is(self):
+        cases = {
+            'no android record': (lambda: self.process(50, 10345, fd9='tun1'),
+                                  'tailnet=UNVERIFIED iface=tun1 owner=unknown proof=none'),
+            'android only': (lambda: self.android_says(('com.tailscale.ipn', 'tun1')),
+                             'tailnet=UNVERIFIED iface=tun1 owner=com.tailscale.ipn proof=android-only'),
+            'impostor process': (lambda: (self.process(50, 10999, fd9='tun1'),
+                                          self.android_says(('com.tailscale.ipn', 'tun1'))),
+                                 'tailnet=UNVERIFIED iface=tun1 owner=com.tailscale.ipn proof=android-only'),
+            'another vpn': (lambda: (self.process(50, 10328, fd9='tun1'),
+                                     self.android_says(('ch.protonvpn.android', 'tun1'))),
+                            'tailnet=UNVERIFIED iface=tun1 owner=ch.protonvpn.android proof=verified'),
+        }
+        for name, (arrange, expected) in cases.items():
             with self.subTest(name):
                 for tree in (self.sys, self.proc):
-                    for child in tree.iterdir():
-                        subprocess.run(['rm', '-rf', str(child)], check=True)
+                    subprocess.run(['rm', '-rf', str(tree)], check=True)
+                    tree.mkdir()
                 (self.base / 'dumpsys.txt').write_text('')
-                self.env |= {'PUFW_TEST_ADDR4': '100.64.0.1', 'PUFW_TEST_ADDR6': 'fd7a:115c:a1e0::1'}
+                self.device('tun1', tun_flags='0x1001')
+                self.holds('tun1', '100.70.0.9')
                 arrange()
-                result = self.run_cmd('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn('proven', result.stderr)
-                self.tunnel_chains_absent()
+                self.assertEqual(self.report(), [expected])
 
-    def test_two_proven_tailscale_tunnels_are_ambiguous(self):
-        self.proven_tailscale('tun1')
-        self.device('tun2', tun_flags='0x1001')
-        self.process(77, 10345, fd9='tun2')
-        self.android_says(('com.tailscale.ipn', 'tun1'), ('com.tailscale.ipn', 'tun2'))
-        self.ok('enable')
-        self.assertNotEqual(self.run_cmd('tunnel-on', '--trust', 'tcp:100.64.0.2:22').returncode, 0)
-        self.tunnel_chains_absent()
+    def test_nobody_holding_a_tailnet_address_is_down(self):
+        self.device('tun0', tun_flags='0x1001')
+        self.holds('tun0', '10.2.0.2', '2a07:b944::2:2')
+        self.assertEqual(self.report(), ['tailnet=DOWN'])
 
-    def test_only_one_tailscale_address_and_one_port_is_accepted(self):
-        self.proven_tailscale()
-        self.ok('enable')
-        for spec in ('tcp:0.0.0.0:22', 'tcp:8.8.8.8:22', 'tcp:192.168.1.5:22', 'tcp:100.63.255.255:22',
-                     'tcp:100.128.0.1:22', 'tcp:100.64.0.1/10:22', 'tcp:100.64.0:22', 'tcp:100.64.0.1.2:22',
-                     'tcp:100.064.0.1:22', 'tcp:::1:22', 'tcp:fd7a:115c:a1e1::1:22', 'tcp:2001:db8::1:22',
-                     'tcp:fe80::1:22', 'icmp:100.64.0.2:22', 'all:100.64.0.2:22', 'tcp:100.64.0.2',
-                     'tcp:100.64.0.2:', 'tcp:100.64.0.2:0', 'tcp:100.64.0.2:65536', 'tcp:100.64.0.2:022',
-                     'tcp:100.64.0.2:22 -j ACCEPT', 'tcp:100.64.0.2:1-65535', 'TCP:100.64.0.2:22', 'x'):
-            with self.subTest(spec):
-                self.assertNotEqual(self.run_cmd('tunnel-on', '--trust', spec).returncode, 0)
-                self.tunnel_chains_absent()
+    def test_the_rule_reaches_tun_names_only_so_a_kernel_wireguard_is_not_reported(self):
+        self.device('US-TEST-1', wireguard=True)
+        self.holds('US-TEST-1', '100.70.0.9')
+        self.assertEqual(self.report(), ['tailnet=DOWN'])
 
-    def test_an_allowance_for_a_family_tailscale_has_no_address_in_is_refused(self):
-        self.proven_tailscale()
+    def test_what_counts_as_a_tailnet_address(self):
+        self.device('tun0', tun_flags='0x1001')
+        for address, inside in (('100.64.0.1', True), ('100.127.255.254', True), ('fd7a:115c:a1e0::1', True),
+                                ('100.63.255.255', False), ('100.128.0.1', False), ('10.100.64.1', False),
+                                ('fd7a:115c:a1e1::1', False), ('fd00::1', False)):
+            with self.subTest(address):
+                self.holds('tun0', address)
+                self.assertEqual(self.report(), ['tailnet=UNVERIFIED iface=tun0 owner=unknown proof=none']
+                                 if inside else ['tailnet=DOWN'])
+
+    def test_manual_allowances_no_longer_exist(self):
         self.ok('enable')
-        result = self.run_cmd('tunnel-on', '--trust', 'tcp:fd7a:115c:a1e0::2:22', PUFW_TEST_ADDR6='')
+        result = self.run_cmd('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
         self.assertNotEqual(result.returncode, 0)
         self.tunnel_chains_absent()
-
-    def test_too_many_allowances_are_refused(self):
-        self.proven_tailscale()
-        self.ok('enable')
-        args = [arg for port in range(1, 8) for arg in ('--trust', f'tcp:100.64.0.2:{port}')]
-        self.assertNotEqual(self.run_cmd('tunnel-on', *args).returncode, 0)
-        self.tunnel_chains_absent()
-
-    def test_trust_is_accepted_only_where_it_means_something(self):
-        for command in ('enable', 'tunnel-refresh', 'tunnel-status', 'tunnel-off', 'verify', 'disable'):
-            with self.subTest(command):
-                self.assertNotEqual(self.run_cmd(command, '--trust', 'tcp:100.64.0.2:22').returncode, 0)
 
 
 class Verification(Base):
     def fresh_tables(self):
         """A hook edited by hand isn't ours to delete, so start over rather than disable."""
         for fam in ('iptables', 'ip6tables'):
-            for chain in ('POCKETUFW_IN', 'POCKETUFW_TS', 'POCKETUFW_VPN', 'POCKETUFW_TRUST'):
+            for chain in ('POCKETUFW_IN', 'POCKETUFW_TS', 'POCKETUFW_VPN'):
                 (self.base / f'{fam}.{chain}').unlink(missing_ok=True)
             self.write(fam, 'INPUT', '-j oem_in\n-j bw_INPUT\n-j fw_INPUT\n')
 
@@ -402,33 +426,30 @@ class Verification(Base):
         self.assertEqual(self.verify(), 'DEGRADED')
 
     def test_any_change_to_the_tunnel_rules_is_degraded(self):
-        ok_trust = '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j ACCEPT\n'
-        cases = {
-            'unconditional accept first': ('POCKETUFW_VPN', lambda t: '-j ACCEPT\n' + t),
-            'unconditional accept last': ('POCKETUFW_VPN', lambda t: t + '-j ACCEPT\n'),
-            'final drop gone': ('POCKETUFW_VPN', lambda t: t.replace('-j DROP\n', '')),
-            'final drop becomes accept': ('POCKETUFW_VPN', lambda t: t.replace('-j DROP\n', '-j ACCEPT\n')),
-            'established gone': ('POCKETUFW_VPN', lambda t: t.split('\n', 1)[1]),
-            'established widened to all states': ('POCKETUFW_VPN', lambda t: t.replace('ESTABLISHED,RELATED', 'NEW,ESTABLISHED,RELATED')),
-            'reordered': ('POCKETUFW_VPN', lambda t: ''.join(reversed(t.splitlines(True)))),
-            'wide open allowance': ('POCKETUFW_TRUST', lambda t: '-j ACCEPT\n'),
-            'any port': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -j ACCEPT\n'),
-            'any peer': ('POCKETUFW_TRUST', lambda t: '-d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j ACCEPT\n'),
-            'any interface': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -d 100.64.0.1/32 -p tcp --dport 22 -j ACCEPT\n'),
-            'any destination': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -i tun1 -p tcp --dport 22 -j ACCEPT\n'),
-            'peer range': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.0/10 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j ACCEPT\n'),
-            'peer off the tailnet': ('POCKETUFW_TRUST', lambda t: '-s 8.8.8.8/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j ACCEPT\n'),
-            'wildcard interface': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun+ -p tcp --dport 22 -j ACCEPT\n'),
-            'physical interface': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -d 100.64.0.1/32 -i wlan0 -p tcp --dport 22 -j ACCEPT\n'),
-            'jumps elsewhere': ('POCKETUFW_TRUST', lambda t: '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j RETURN\n'),
-            'too many': ('POCKETUFW_TRUST', lambda t: ok_trust * 7),
-            'hook gone': ('INPUT', lambda t: t.replace(HOOK_TUN + '\n', '')),
-            'hook narrowed': ('INPUT', lambda t: t.replace(HOOK_TUN, f'-i tun+ -p tcp -m comment --comment {TAG} -j POCKETUFW_VPN')),
-            'hook retagged': ('INPUT', lambda t: t.replace(TAG, 'Other')),
-        }
         for fam in ('iptables', 'ip6tables'):
-            if fam == 'ip6tables':
-                cases = {k: v for k, v in cases.items() if v[0] != 'POCKETUFW_TRUST'}
+            rule = tailnet_rule(fam)
+            tailnet = TAILNET[fam]
+            wider = '0.0.0.0/0' if fam == 'iptables' else '::/0'
+            cases = {
+                'unconditional accept first': ('POCKETUFW_VPN', lambda t: '-j ACCEPT\n' + t),
+                'unconditional accept last': ('POCKETUFW_VPN', lambda t: t + '-j ACCEPT\n'),
+                'final drop gone': ('POCKETUFW_VPN', lambda t: t.replace('-j DROP\n', '')),
+                'final drop becomes accept': ('POCKETUFW_VPN', lambda t: t.replace('-j DROP\n', '-j ACCEPT\n')),
+                'established gone': ('POCKETUFW_VPN', lambda t: t.replace('-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n', '')),
+                'established widened to all states': ('POCKETUFW_VPN', lambda t: t.replace('ESTABLISHED,RELATED', 'NEW,ESTABLISHED,RELATED')),
+                'reordered': ('POCKETUFW_VPN', lambda t: ''.join(reversed(t.splitlines(True)))),
+                'tailnet rule gone': ('POCKETUFW_VPN', lambda t: t.replace(rule, '')),
+                'tailnet rule from anyone': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-d {tailnet} -i tun+ -j ACCEPT\n')),
+                'tailnet rule to anywhere': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {tailnet} -i tun+ -j ACCEPT\n')),
+                'tailnet rule source widened': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {wider} -d {tailnet} -i tun+ -j ACCEPT\n')),
+                'tailnet rule on any interface': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {tailnet} -d {tailnet} -j ACCEPT\n')),
+                'tailnet rule on a physical interface': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {tailnet} -d {tailnet} -i wlan+ -j ACCEPT\n')),
+                'tailnet rule pinned to one tun': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {tailnet} -d {tailnet} -i tun1 -j ACCEPT\n')),
+                'tailnet rule jumps elsewhere': ('POCKETUFW_VPN', lambda t: t.replace(rule, f'-s {tailnet} -d {tailnet} -i tun+ -j RETURN\n')),
+                'hook gone': ('INPUT', lambda t: t.replace(HOOK_TUN + '\n', '')),
+                'hook narrowed': ('INPUT', lambda t: t.replace(HOOK_TUN, f'-i tun+ -p tcp -m comment --comment {TAG} -j POCKETUFW_VPN')),
+                'hook retagged': ('INPUT', lambda t: t.replace(TAG, 'Other')),
+            }
             for name, (chain, change) in cases.items():
                 with self.subTest(fam=fam, case=name):
                     self.ok('enable')
@@ -441,13 +462,12 @@ class Verification(Base):
 
     def test_a_chain_missing_from_one_family_is_degraded(self):
         for fam in ('iptables', 'ip6tables'):
-            for chain in ('POCKETUFW_VPN', 'POCKETUFW_TRUST'):
-                with self.subTest(fam=fam, chain=chain):
-                    self.ok('enable')
-                    self.ok('tunnel-on')
-                    (self.base / f'{fam}.{chain}').unlink()
-                    self.assertEqual(self.verify(), 'DEGRADED')
-                    self.ok('disable')
+            with self.subTest(fam=fam):
+                self.ok('enable')
+                self.ok('tunnel-on')
+                (self.base / f'{fam}.POCKETUFW_VPN').unlink()
+                self.assertEqual(self.verify(), 'DEGRADED')
+                self.ok('disable')
 
     def test_hooks_that_differ_between_families_are_degraded(self):
         self.device('US-TEST-1', wireguard=True)
@@ -477,23 +497,23 @@ class Counters(Base):
     def test_tunnel_counters_are_their_own_and_do_not_change_the_physical_ones(self):
         self.proven_tailscale()
         self.ok('enable')
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
+        self.ok('tunnel-on')
         values = self.values(PUFW_TEST_DROP4='3', PUFW_TEST_REPLIES4='9', PUFW_TEST_DROP_BYTES4='30',
                              PUFW_TEST_TUNNEL_DROP='5', PUFW_TEST_TUNNEL_INVALID='2', PUFW_TEST_TUNNEL_REPLIES='11',
-                             PUFW_TEST_TUNNEL_BYTES='70', PUFW_TEST_TRUSTED='4')
+                             PUFW_TEST_TUNNEL_BYTES='70', PUFW_TEST_TAILNET='4')
         self.assertEqual(values['ipv4_blocked'], '3')
         self.assertEqual(values['ipv4_established_replies'], '9')
         self.assertEqual(values['ipv4_tunnel_blocked'], '7')
         self.assertEqual(values['ipv4_tunnel_blocked_bytes'], '70')
         self.assertEqual(values['ipv4_tunnel_established_replies'], '11')
-        self.assertEqual(values['ipv4_tunnel_trusted'], '4')
+        self.assertEqual(values['ipv4_tunnel_tailnet'], '4')
         self.assertEqual(values['tunnel_hooks'], 'tun+')
         self.assertEqual(values['tunnel_filter'], 'ON')
 
     def test_a_listing_that_cannot_be_read_is_never_a_zero(self):
         self.ok('enable')
         self.ok('tunnel-on')
-        for shape in ('no_header', 'no_established', 'no_invalid', 'no_final_drop', 'extra_drop'):
+        for shape in ('no_header', 'no_established', 'no_invalid', 'no_final_drop', 'extra_drop', 'no_tailnet'):
             with self.subTest(shape):
                 result = self.run_cmd('activity', PUFW_TEST_TUNNEL_SHAPE=shape)
                 self.assertNotEqual(result.returncode, 0)
@@ -518,9 +538,9 @@ class Counters(Base):
         self.ok('reset-counters')
         events = (self.base / 'zero_events').read_text().splitlines()
         for fam in ('iptables', 'ip6tables'):
-            for chain in ('POCKETUFW_IN', 'POCKETUFW_TS', 'POCKETUFW_VPN', 'POCKETUFW_TRUST'):
+            for chain in ('POCKETUFW_IN', 'POCKETUFW_TS', 'POCKETUFW_VPN'):
                 self.assertIn(f'{fam} {chain}', events)
-        self.assertEqual(len(events), 8)
+        self.assertEqual(len(events), 6)
 
 
 class Lifecycle(Base):
@@ -529,7 +549,7 @@ class Lifecycle(Base):
         self.device('US-TEST-1', wireguard=True)
         self.ok('enable')
         baseline = '-j oem_in\n-j bw_INPUT\n-j fw_INPUT\n'
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
+        self.ok('tunnel-on')
         self.assertIn('residue_ipv4=', self.ok('residue'))
         self.assertNotIn('residue_ipv4=0', self.ok('residue'))
         self.ok('disable')
@@ -573,39 +593,6 @@ class Lifecycle(Base):
 
 
 class Refresh(Base):
-    def test_allowances_follow_tailscale_to_its_new_tun(self):
-        self.proven_tailscale('tun1')
-        self.ok('enable')
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22', '--trust', 'udp:fd7a:115c:a1e0::2:53')
-        self.assertIn('binding=BOUND', self.ok('tunnel-status'))
-        # Android re-established the VPN on the next free number.
-        subprocess.run(['rm', '-rf', str(self.sys / 'tun1'), str(self.proc)], check=True)
-        self.proc.mkdir()
-        self.proven_tailscale('tun2')
-        status = self.ok('tunnel-status')
-        self.assertIn('allowance=tcp:100.64.0.2:22 iface=tun1 binding=STALE', status)
-        self.assertEqual(self.verify(), 'ACTIVE')
-        self.ok('tunnel-refresh')
-        self.assertEqual(self.read('iptables', 'POCKETUFW_TRUST'),
-                         '-s 100.64.0.2/32 -d 100.64.0.1/32 -i tun2 -p tcp --dport 22 -j ACCEPT\n')
-        self.assertEqual(self.read('ip6tables', 'POCKETUFW_TRUST'),
-                         '-s fd7a:115c:a1e0::2/128 -d fd7a:115c:a1e0::1/128 -i tun2 -p udp --dport 53 -j ACCEPT\n')
-        self.assertIn('allowance=tcp:100.64.0.2:22 iface=tun2 binding=BOUND', self.ok('tunnel-status'))
-
-    def test_an_allowance_never_moves_to_a_tunnel_that_is_not_proven(self):
-        self.proven_tailscale('tun1')
-        self.ok('enable')
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
-        before = self.read('iptables', 'POCKETUFW_TRUST')
-        subprocess.run(['rm', '-rf', str(self.sys / 'tun1'), str(self.proc)], check=True)
-        self.proc.mkdir()
-        self.device('tun2', tun_flags='0x1001')
-        self.process(50, 10328, fd9='tun2')
-        self.android_says(('ch.protonvpn.android', 'tun2'))
-        self.ok('tunnel-refresh')
-        self.assertEqual(self.read('iptables', 'POCKETUFW_TRUST'), before)
-        self.assertIn('binding=STALE', self.ok('tunnel-status'))
-
     def test_a_new_wireguard_is_hooked_and_a_gone_one_unhooked(self):
         self.device('US-TEST-1', wireguard=True)
         self.ok('enable')
@@ -645,6 +632,7 @@ class Refresh(Base):
         self.assertIn('tunnel=tun1 kind=tun owner=com.tailscale.ipn proof=verified', status)
         self.assertIn('tunnel=US-TEST-1 kind=wireguard owner=kernel proof=kernel-type', status)
         self.assertIn('tunnel_hooks=tun+,US-TEST-1', status)
+        self.assertIn('tailnet=VERIFIED iface=tun1', status)
         self.write('iptables', 'POCKETUFW_VPN', '-j ACCEPT\n')
         self.assertIn('tunnel_filter=DEGRADED', self.ok('tunnel-status'))
 
@@ -663,14 +651,15 @@ class Report(Base):
     def test_with_the_filter_on_its_hooks_and_rules_continue_the_same_lists(self):
         self.proven_tailscale()
         self.ok('enable')
-        self.ok('tunnel-on', '--trust', 'tcp:100.64.0.2:22')
+        self.ok('tunnel-on')
         result = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertIn(f'hook4_04=-A INPUT {HOOK_TUN}', lines)
-        self.assertIn('main4_09=-A POCKETUFW_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT', lines)
+        self.assertIn('main4_09=-A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.0/10 -i tun+ -j ACCEPT', lines)
+        self.assertIn('main6_09=-A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::/48 -i tun+ -j ACCEPT', lines)
+        self.assertIn('main4_10=-A POCKETUFW_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT', lines)
         self.assertIn('main4_12=-A POCKETUFW_VPN -j DROP', lines)
-        self.assertIn('main4_13=-A POCKETUFW_TRUST -s 100.64.0.2/32 -d 100.64.0.1/32 -i tun1 -p tcp --dport 22 -j ACCEPT', lines)
         self.assertEqual(lines[-1], 'rules_report=READY')
 
     def test_a_hooked_chain_that_cannot_be_read_voids_the_report(self):
@@ -762,12 +751,125 @@ class Rollback(Base):
         self.assertTrue(seen.read_text().strip().isdigit())
         self.wait_for_status('rollback=FIRED')
 
-    def test_if_tunnel_on_fails_it_stands_down_and_says_so(self):
-        result = self.tool('on', '1', str(ENGINE), '--trust', 'tcp:8.8.8.8:22')
+    def test_a_failed_install_that_read_back_clean_stands_down(self):
+        """The real engine's own cleanup worked, and the kernel's tables agree."""
+        physical = self.read('iptables', 'POCKETUFW_IN')
+        result = self.tool('on', '30', str(ENGINE), PUFW_TEST_FAIL=f'-A INPUT {HOOK_TUN}', PUFW_TEST_FAIL_FAMILY='ip6tables')
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn('read back clean', result.stderr)
         self.assertEqual(self.status(), 'rollback=CANCELLED')
         self.wait_for_no_timer()
         self.tunnel_chains_absent()
+        self.assertEqual(self.read('iptables', 'POCKETUFW_IN'), physical)
+
+    def break_cleanup(self):
+        """A partial install: IPv4's hook goes in, IPv6's fails, and nothing can be removed."""
+        (self.base / 'fail_commands').write_text(
+            f'ip6tables -A INPUT {HOOK_TUN}\n'
+            f'-D INPUT {HOOK_TUN}\n'
+            '-F POCKETUFW_VPN\n'
+            '-X POCKETUFW_VPN\n')
+
+    def test_a_partial_install_with_failed_cleanup_keeps_the_timer_until_the_rules_are_gone(self):
+        self.break_cleanup()
+        result = self.tool('on', '60', str(ENGINE), POCKETUFW_ROLLBACK_RETRY_SECONDS='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('rules remain', result.stderr)
+        # The partial install is real, it wasn't cancelled, and nobody can talk it into staying.
+        self.assertIn(HOOK_TUN, self.read('iptables'))
+        self.assertNotIn(HOOK_TUN, self.read('ip6tables'))
+        self.assertEqual(self.status(), 'rollback=UNCLEAN')
+        self.assertTrue((self.base / 'rollback.timer').exists())
+        self.assertNotEqual(self.tool('confirm').returncode, 0)
+        self.assertNotEqual(self.tool('on', '60', str(ENGINE)).returncode, 0)
+        # Cleanup starts working. The timer finishes it long before the 60 s deadline.
+        (self.base / 'fail_commands').unlink()
+        self.wait_for_status('rollback=FIRED')
+        self.tunnel_chains_absent()
+        self.assertEqual(self.verify(), 'ACTIVE')
+        self.wait_for_no_timer()
+
+    def test_a_partial_install_that_can_never_be_cleaned_ends_failed_and_never_cancelled(self):
+        self.break_cleanup()
+        self.assertNotEqual(self.tool('on', '60', str(ENGINE)).returncode, 0)
+        self.wait_for_status('rollback=FAILED', 12)
+        self.assertTrue(self.exists('iptables', 'POCKETUFW_VPN'))
+        self.assertEqual(self.verify(), 'DEGRADED')
+
+    def lying_engine(self, *body):
+        path = self.base / 'lying-engine'
+        path.write_text('case "$1" in\n' + ''.join(line + '\n' for line in body) + 'esac\n')
+        return str(path)
+
+    def test_an_engine_claiming_it_cleaned_up_is_not_believed(self):
+        engine = self.lying_engine(
+            'tunnel-on) iptables -w -N POCKETUFW_VPN; exit 1 ;;',
+            'tunnel-off) exit 0 ;;')
+        result = self.tool('on', '60', engine)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(self.status(), 'rollback=CANCELLED')
+        self.wait_for_status('rollback=FAILED', 12)
+        self.assertTrue(self.exists('iptables', 'POCKETUFW_VPN'))
+
+    def test_a_timer_is_not_fired_by_an_exit_status_alone(self):
+        engine = self.lying_engine(
+            'tunnel-on) iptables -w -N POCKETUFW_VPN; exit 0 ;;',
+            'tunnel-off) exit 0 ;;')
+        self.assertEqual(self.tool('on', '1', engine).returncode, 0)
+        self.wait_for_status('rollback=FAILED', 12)
+
+    def test_a_table_that_cannot_be_read_is_not_clean(self):
+        engine = self.lying_engine(
+            f'tunnel-on) : > "{self.base}/table_fail"; exit 1 ;;',
+            'tunnel-off) exit 0 ;;')
+        self.assertNotEqual(self.tool('on', '60', engine).returncode, 0)
+        self.assertNotEqual(self.status(), 'rollback=CANCELLED')
+        self.wait_for_status('rollback=FAILED', 12)
+
+    def test_it_never_arms_over_rules_it_did_not_install(self):
+        self.ok('tunnel-on')
+        result = self.tool('on', '1', str(ENGINE))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.status(), 'rollback=NONE')
+        time.sleep(1.5)
+        self.assertTrue(self.exists('iptables', 'POCKETUFW_VPN'))
+
+    def test_an_engine_that_refuses_before_changing_anything_stands_down(self):
+        """tunnel-on needs a verified firewall, so it refuses here and the physical policy stays out of it."""
+        self.ok('disable')
+        result = self.tool('on', '30', str(ENGINE))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.status(), 'rollback=CANCELLED')
+        self.wait_for_no_timer()
+
+    def test_physical_mode_installs_the_firewall_and_removes_all_of_it(self):
+        self.ok('disable')
+        result = self.tool('physical', '1', str(ENGINE))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.verify(), 'ACTIVE')
+        self.wait_for_status('rollback=FIRED')
+        self.assertEqual(self.verify(), 'INACTIVE')
+        self.assertEqual(self.ok('residue'), 'residue_ipv4=0\nresidue_ipv6=0\n')
+        self.wait_for_no_timer()
+
+    def test_physical_mode_counts_every_rule_of_ours_before_calling_it_fired(self):
+        self.ok('disable')
+        self.assertEqual(self.tool('physical', '1', str(ENGINE)).returncode, 0)
+        (self.base / 'fail_commands').write_text('-X POCKETUFW_IN\n')
+        self.wait_for_status('rollback=FAILED', 12)
+        self.assertTrue(self.exists('iptables', 'POCKETUFW_IN'))
+
+    def test_physical_mode_never_arms_over_a_firewall_that_is_already_on(self):
+        result = self.tool('physical', '1', str(ENGINE))
+        self.assertNotEqual(result.returncode, 0)
+        time.sleep(1.5)
+        self.assertEqual(self.verify(), 'ACTIVE')
+
+    def test_tunnel_mode_counts_only_tunnel_rules_as_its_own(self):
+        """Its timer must be able to finish with the physical firewall still on."""
+        self.tool('on', '1', str(ENGINE))
+        self.wait_for_status('rollback=FIRED')
+        self.assertEqual(self.verify(), 'ACTIVE')
 
     def test_a_rollback_that_cannot_remove_the_rules_reports_failure(self):
         result = self.tool('on', '1', str(ENGINE), PUFW_TEST_FAIL='-X POCKETUFW_VPN')
@@ -822,7 +924,6 @@ class Limits(unittest.TestCase):
         for name in ('android-bridge',):
             source = self.source(name)
             self.assertNotIn('tunnel-on', source)
-            self.assertNotIn('--trust', source)
 
     def test_no_dns_rules_and_no_output_or_forward_hook(self):
         source = self.source('pocketufw')

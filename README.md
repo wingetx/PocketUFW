@@ -60,7 +60,7 @@ Last checked down to the second. Refresh never resets counters or changes rules.
 - Outbound: **left unchanged** (other apps/system policy may still restrict it).
 - Tailscale virtual interfaces and WireGuard tunnels: **not filtered directly** by default, though their *underlying* UDP listeners may require explicit allowances. An [optional tunnel filter](docs/tunnel-filtering.md) is in development: command line only, off by default, and not yet tested on a phone.
 - Android's preexisting INPUT/OUTPUT/FORWARD rules and their default policies: **never flushed or modified**.
-- PocketUFW owns two filter chains per address family: `POCKETUFW_IN` for inbound policy and `POCKETUFW_TS` for verified Tailscale UDP exceptions, with tagged hooks into `INPUT`. The optional tunnel filter adds `POCKETUFW_VPN` and `POCKETUFW_TRUST` while it's on, and leaves those two alone.
+- PocketUFW owns two filter chains per address family: `POCKETUFW_IN` for inbound policy and `POCKETUFW_TS` for verified Tailscale UDP exceptions, with tagged hooks into `INPUT`. The optional tunnel filter adds `POCKETUFW_VPN` while it's on, and leaves those two alone.
 - The standalone CLI does not persist rules after reboot. The Android alpha offers **optional Magisk boot restoration**, tested on the Moto; no continuous background monitoring.
 
 ## Why this exists
@@ -119,7 +119,6 @@ for t in iptables ip6tables; do
     $t -w -D INPUT -i "$i" -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN
   done
   $t -w -F POCKETUFW_VPN; $t -w -X POCKETUFW_VPN
-  $t -w -F POCKETUFW_TRUST; $t -w -X POCKETUFW_TRUST
   for i in wlan+ rmnet+ v4-rmnet+; do
     $t -w -D INPUT -i "$i" -m comment --comment PocketUFW -j POCKETUFW_IN
   done

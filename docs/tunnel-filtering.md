@@ -33,7 +33,7 @@ PocketUFW's physical policy never sees traffic inside a tunnel. This optional fi
 
 - A packet a process writes to a tun arrives as received on that interface, and `-i` matches it.
 - A kernel WireGuard's decrypted packet arrives on the WireGuard interface, and `-i` matches it. Its encrypted UDP arrives on the physical interface.
-- A forged packet written to a second tun is delivered if addressed to any local address. The interface is the only thing that tells the tunnels apart.
+- A forged packet written to a second tun is delivered if addressed to any local address, with `rp_filter` off.
 
 ### Documented, not measured for this provider
 
@@ -43,7 +43,7 @@ PocketUFW's physical policy never sees traffic inside a tunnel. This optional fi
 
 ### Not established
 
-Proton's Android tunnel backend. Which Tailscale features run inside its own process and so never reach the tun: a phone with Tailscale up had no Tailscale TCP listener in the kernel, which suggests they don't, but Taildrop and similar weren't tested. The IPv6 prefix `fd7a:115c:a1e0::/48` comes from addresses seen on real devices, and the Tailscale page checked doesn't state it.
+Proton's Android tunnel backend.
 
 ## What gets filtered
 
@@ -51,61 +51,66 @@ Proton's Android tunnel backend. Which Tailscale features run inside its own pro
 INPUT ... -i tun+   -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN
 INPUT ... -i NAME   -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN   (each kernel WireGuard)
 
-POCKETUFW_VPN    ESTABLISHED,RELATED ACCEPT · INVALID DROP · POCKETUFW_TRUST · DROP
-POCKETUFW_TRUST  -s PEER -d OWN_TAILNET_ADDRESS -i PROVEN_TUN -p tcp|udp --dport PORT ACCEPT
+POCKETUFW_VPN   -s TAILNET -d TAILNET -i tun+ ACCEPT · ESTABLISHED,RELATED ACCEPT · INVALID DROP · DROP
 ```
 
-**Denying needs no proof, and allowing needs a lot.** `tun+` matches whichever app holds a tun and whatever number it was given, so a new VPN is denied as soon as it appears. An interface isn't called anyone's on the strength of its name anywhere in this design.
+`TAILNET` is `100.64.0.0/10` for IPv4 and `fd7a:115c:a1e0::/48` for IPv6, the ranges [Tailscale's source](https://github.com/tailscale/tailscale/blob/main/net/tsaddr/tsaddr.go) assigns from.
 
-A kernel WireGuard is hooked by name because it has no common prefix, but only once the kernel reports that kind. One that comes up later is named as not filtered until `tunnel-refresh`.
+`tun+` matches whichever app holds a tun and whatever number it was given, so a new VPN is filtered as soon as it appears, with nothing watching for it. A kernel WireGuard is hooked by name because it has no common prefix, but only once the kernel reports that kind. One that comes up later is named as not filtered until `tunnel-refresh`.
 
-Other tunnels, such as carrier `ipsec`, aren't touched and stay listed as not filtered. Unlike the physical chain, this one has no ICMP allowance: errors for existing connections pass as `RELATED`, and pings to the phone's tunnel addresses are dropped.
+Other tunnels, such as carrier `ipsec`, aren't touched and stay listed as not filtered. Outside the tailnet there's no ICMP allowance, unlike the physical chain: errors for existing connections pass as `RELATED`, and pings to a VPN's address are dropped.
 
-## Identifying who owns a tunnel
+## The tailnet is trusted by default
+
+Traffic between tailnet devices passes without any per-port rule: Syncthing, Taildrop, existing SSH sessions and new ones, on any port, in both families. The rule comes first, so conntrack's view of a flow can't affect it.
+
+**Why addresses and not the interface.** A VPN that re-establishes can come back on a different tun number, so an exemption naming `tun1` would cut the tailnet off until something noticed. Avoiding that needs a process watching for changes, and the kernel offers nothing else to match on:
+
+- No netfilter match identifies who holds a tun. sysfs reports its owner as `-1`, and `-m owner` doesn't work on inbound traffic.
+- `addrtype --limit-iface-in` would tie a destination to the interface that holds it. The test phone's kernel doesn't have `addrtype`.
+- Android marks each network's packets, but with a rule that names the interface, set up as the network comes up. Matching that mark would still need something to follow it.
+
+A node's tailnet addresses don't depend on any of that, so they're what the rule matches. They change only if the node is re-registered or signs in to another tailnet, and the rule covers the whole range, so that's fine too. It needs no proof at install and no refresh afterwards, and works the same whether Tailscale was up when the filter went on.
+
+**Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain but can't use the rule, because of `-i tun+`. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
+
+## What ownership does now
 
 `vpn-probe tunnels` prints one line per tunnel. An app's tun is `proof=verified` only when both sources agree:
 
 1. Android's VPN record names the package for that interface.
 2. A process running under that package's app ID, from `packages.list`, holds `/dev/tun`, and fdinfo names exactly that interface.
 
-An app can choose its process name but not its app ID, and it can't open `/dev/tun` itself. Any disagreement gives `android-only` or `none`, and that only withholds allowances. The scan covers just the claimed app's processes: walking every descriptor on the phone hadn't finished after two minutes, while the whole probe takes about 1.4 s.
+An app can choose its process name but not its app ID, and it can't open `/dev/tun` itself. The scan covers just the claimed app's processes: walking every descriptor on the phone hadn't finished after two minutes, while the whole probe takes about 1.4 s.
 
-## Allowances
+The kernel can't enforce any of this, so the proof audits the rule and doesn't decide connectivity. `tunnel-on`, `tunnel-refresh` and `tunnel-status` say who holds tailnet addresses right now:
 
-```sh
-pocketufw tunnel-on --trust tcp:100.64.0.2:22000
-```
+| Line | Meaning |
+| --- | --- |
+| `tailnet=VERIFIED iface=tun1` | Tailscale, proven by Android and the kernel. |
+| `tailnet=UNVERIFIED iface=tun9 owner=... proof=...` | A tun holds a tailnet address and isn't proven Tailscale's, so the rule reaches it too. That's coverage gap 2 below. A slow `dumpsys` can also cause this for Tailscale itself. |
+| `tailnet=DOWN` | No tun holds one. |
 
-An allowance is refused unless exactly one tunnel is `verified` as `com.tailscale.ipn`. It takes one Tailscale address and one port, with no ranges or wildcards. The rule binds the peer, Tailscale's own address, the proven interface, the protocol and the port.
+## Coverage gaps
 
-**What each binding stops:**
+Trusting the tailnet with no watcher costs these. The first two are pinned by a test that passes packets on purpose.
 
-- `-i`: a forged packet arriving through another tunnel. Without it, a VPN server could claim to be a trusted peer, because `rp_filter` is off.
-- `-d`: the interface name being reused. If Tailscale goes away and another VPN gets its old name, the rule still names that interface, but Tailscale's address is no longer local, so it can't fire.
-- `-s` relies on WireGuard's design, where a peer's packets are accepted only from addresses assigned to that peer. That wasn't tested for Tailscale here.
+1. **A second tun alongside Tailscale can claim tailnet addresses.** Its packets pass if they use a tailnet source and a local tailnet destination, because the kernel can't tell the two tuns apart. Android allows one VPN per user, so this needs a second user or work profile, or a root-run tunnel. A kernel WireGuard can't do it.
+2. **Another VPN whose own address is in `100.64.0.0/10`** gets the rule for traffic from that range. Everything else on that VPN is still filtered, and `tunnel-status` reports it as `UNVERIFIED`. The Proton WireGuard configuration seen on the test phone uses `10.2.0.2`.
+3. **Trust is for the whole tailnet.** A compromised tailnet device can reach anything listening on the phone's tailnet address. Tailscale's ACLs are what limit that.
 
-**When Tailscale re-establishes its VPN,** it can get a new number. The filter keeps holding through `tun+`, and existing connections continue, because conntrack isn't tied to an interface. New connections matching an allowance are dropped until `tunnel-refresh` rebinds it, which `tunnel-status` reports as `binding=STALE`. This fails closed, and there's no watcher to do it automatically.
+## A reverse SSH tunnel
 
-**A remaining gap:** while an allowance is stale and Tailscale is still up, a second VPN running at the same time could hold the old interface name, and then a forged packet from it would match. Android allows one VPN per user, so this needs a second user or work profile, or a root-run tunnel. `tunnel-status` shows `binding=STALE` during that time, and `tunnel-refresh` closes it.
-
-## A reverse SSH tunnel needs no allowance
-
-If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then:
-
-- The tunnel is a connection the phone started, so everything coming back is `ESTABLISHED`.
-- Connections it forwards reach `sshd` on `lo`, which is never hooked.
-- Nothing listens on the tailnet address, so an inbound allowance gets a refused connection.
-
-The lab reproduces this exactly: a session started before the filter keeps working, a reconnect during it works, a direct connection is dropped, and adding an allowance only changes that to refused. Keep the allowance list empty unless something really listens on the tailnet address.
+If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then the tunnel is a connection the phone started, and connections it forwards reach `sshd` on `lo`, which is never hooked. It works whatever the filter does. The lab reproduces this: a session started before the filter keeps working, and a reconnect during it works. A direct connection to port 8022 is refused, because nothing listens on the tailnet address.
 
 ## Lifecycle
 
 | Action | Tunnel rules |
 | --- | --- |
 | `enable` | Never installed. Refused if any remain. |
-| `tunnel-on` | Requires a verified firewall. Installs chains first and hooks last. Rolls back on any failure or failed read-back. |
+| `tunnel-on` | Requires a verified firewall. Installs chains first and hooks last. Rolls back on any failure or failed read-back, and reports who holds tailnet addresses. |
 | `verify` | Off is fine. If on, the exact rules in both families, or `DEGRADED`, which also blocks refreshes and counter resets. |
-| `activity`, `verbose` | `tunnel_filter`, `tunnel_hooks`, and separate `ipv4_tunnel_*` and `ipv6_tunnel_*` counters. Physical counters mean what they always meant. |
+| `activity`, `verbose` | `tunnel_filter`, `tunnel_hooks`, and separate `ipv4_tunnel_*` and `ipv6_tunnel_*` counters, including `ipv4_tunnel_tailnet`. Physical counters mean what they always meant. |
 | `reset-counters` | Includes the tunnel chains when present. |
 | `disable`, Off, Remove PocketUFW | Removed with everything else. `residue` reads the whole table back. |
 | `tunnel-off` | Removes only tunnel rules. |
@@ -119,26 +124,33 @@ In the app: the Status screen lists the extra hooks and rules, and a hooked tunn
 `tools/tunnel-rollback` is a dead-man switch, not packaged in the app, because the shipped scripts promise nothing stays running.
 
 ```sh
-sh tunnel-rollback on 120 "$ENGINE"   # arm, then install. Unconfirmed, tunnel-off runs at 120 s.
-sh tunnel-rollback confirm            # keep the rules; run this over the path being tested
-sh tunnel-rollback status             # ARMED, CONFIRMED, FIRED, FAILED, CANCELLED, LOST or NONE
+sh tunnel-rollback on 120 "$ENGINE"        # arm, then tunnel-on. Unconfirmed, tunnel-off runs at 120 s.
+sh tunnel-rollback physical 120 "$ENGINE"  # arm, then enable. Unconfirmed, disable runs at 120 s.
+sh tunnel-rollback confirm                 # keep the rules; run this over the path being tested
+sh tunnel-rollback status   # ARMED, UNCLEAN, CONFIRMED, FIRED, FAILED, CANCELLED, LOST or NONE
 ```
 
-The timer starts in its own session before any rule exists, and no rule is installed until it answers, so losing the shell can't stop it. It removes only tunnel rules. It uses the wall clock, so a phone in deep sleep fires when it next wakes. A restart is a second way out.
+The timer starts in its own session before any rule exists, and no rule is installed until it answers, so losing the shell can't stop it. Tunnel mode removes only tunnel rules. It uses the wall clock, so a phone in deep sleep fires when it next wakes. A restart is a second way out.
+
+**Whether rules are gone is read from the kernel, never taken from the engine's exit status,** and a table that can't be read isn't clean:
+
+- A failed install stands the timer down, `CANCELLED`, only if both tables read back clean.
+- If rules remain, it tries the removal once more and reports `UNCLEAN`. The timer stays armed and retries straight away, and `confirm` is refused.
+- `FIRED` means the tables read back clean. If that never happens within five tries, the state is `FAILED`, and the rules need removing by hand.
+- It refuses to arm while the rules it would remove already exist, so a rollback only ever removes what it installed.
 
 ## Hardware test plan
 
-Not run yet. Needs an installed build containing this code. Keep USB attached throughout.
+Run from this branch's scripts, pushed to a temporary folder over adb. No app build is needed. Keep USB attached throughout.
 
-1. **Baseline.** Tailscale up, firewall `ACTIVE`, bridge up. Save `iptables -S` and `ip6tables -S` for both families. Confirm `tunnel-status` shows `proof=verified`.
-2. **Prove the rollback first.** `tunnel-rollback on 30`, change nothing else, and confirm it fires: `status` says `FIRED`, the firewall is still `ACTIVE`, and the tables match the baseline.
-3. **Filter with a rollback armed.** `tunnel-rollback on 300`. Check `verify` and `activity`.
-4. **Bridge.** Over the existing session, run a command. Close and reconnect it. Run `confirm` over the bridge, which proves the path works.
-5. **Inbound.** From a tailnet peer, send unsolicited UDP and TCP to a closed port, in both families. Expect no ICMP refusal, and tunnel counters rising by exactly that amount, with physical counters unchanged. Watch the `INVALID` rule with `iptables -L POCKETUFW_VPN -n -v -x`: drops there on an established flow would mean connections are being hurt.
-6. **Normal use.** Browsing, DNS, MagicDNS, Taildrop, Syncthing, and anything else that reaches the phone over the tailnet.
-7. **Reconnect.** Toggle Tailscale, and note the new tun number. Existing sessions, the bridge's reconnect, and `tunnel-refresh` if allowances are in use.
-8. **Kernel WireGuard.** `tunnel-status` reports its kind. Public traffic still works. Sending inner packets needs control of the far end, which isn't available, so unless that changes this is covered by the lab only.
-9. **Proton.** Switch to it. Check its owner, its proof and browsing.
-10. **Removal.** Remove PocketUFW with the filter on: read-back clean, and the tables match the baseline. Then a restart with boot restoration armed: the firewall returns and the tunnel filter doesn't.
+1. **Physical firewall, no VPN.** With every VPN off, `tunnel-rollback physical`. Send a known number of unsolicited UDP datagrams and TCP SYNs to an unbound port in both families from a LAN host. Each DROP counter must rise by exactly that number, in packets and in bytes, with no change while nothing is being sent, and the same probes must get answers once the firewall is off.
+2. **Prove the rollback fires.** Leave it unconfirmed: `FIRED`, and the tables match the baseline.
+3. **Filter on, tailnet up.** Tailscale up, `enable`, then `tunnel-rollback on`. `tunnel-status` shows `tailnet=VERIFIED`.
+4. **Tailnet.** From a tailnet peer: ping, a TCP connection to a listener, Taildrop, and the SSH bridge. `ipv4_tunnel_tailnet` rises and tunnel drops don't.
+5. **Reconnect.** Toggle Tailscale with no refresh. It may get a new tun number. Repeat step 4.
+6. **Physical filter underneath.** LAN probes from step 1 still drop exactly, with the tunnel filter on.
+7. **Kernel WireGuard.** `tunnel-status` reports its kind. Public traffic still works. Sending inner packets needs control of the far end, so unless that changes this is covered by the lab only.
+8. **Proton.** Switch to it. Check its owner, its proof and browsing. No unsolicited traffic can be sent into its tunnel from here.
+9. **Removal.** `disable` with the filter on: `residue` is clean and the tables match the baseline.
 
-**If anything goes wrong:** wait for the timer, or over USB run `su -c "sh $ENGINE tunnel-off"`, or restart.
+**If anything goes wrong:** wait for the timer, or over USB run `su -c "sh $ENGINE disable"`, or restart.

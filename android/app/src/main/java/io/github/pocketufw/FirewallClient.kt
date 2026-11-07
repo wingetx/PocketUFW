@@ -155,7 +155,7 @@ internal class FirewallClient(
             "android-bridge", "rules-report", "udp-config")
         val ENGINE_LOCK = Any()
         /** The chains rules-report may list as inbound policy. Anything else voids the report. */
-        val INBOUND_CHAINS = listOf("POCKETUFW_IN", "POCKETUFW_VPN", "POCKETUFW_TRUST")
+        val INBOUND_CHAINS = listOf("POCKETUFW_IN", "POCKETUFW_VPN")
         var enginePrepared = false
 
         /**

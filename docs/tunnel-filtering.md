@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch. Tested on real netfilter, tun and kernel WireGuard in isolated namespaces, and on one Pixel 9a with Tailscale. Not yet tested on a phone with kernel WireGuard or Proton up.** Off by default, with no switch in the app.
+**Status: development branch. Tested on real netfilter, tun and kernel WireGuard in isolated namespaces, and on one Pixel 9a with Tailscale and kernel WireGuard together. Not yet tested on a phone with Proton or on cellular.** Off by default, with no switch in the app.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -75,7 +75,7 @@ A node's tailnet addresses don't depend on any of that, so they're what the rule
 
 **Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain but can't use the rule, because of `-i tun+`. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
 
-**A few drops at startup are normal.** Each time Tailscale's tun came up on the test phone, `ipv6_tunnel_blocked` rose by about 6 within a second, then stayed still. In the run that was captured, their byte counts fit the phone's own multicast listener reports exactly, and no peer sent anything like them. That phone holds a multicast routing socket (`mc_forwarding=1`), which is the likely reason its own reports loop back through `INPUT`. This wasn't reproduced in the lab, where the test tun sent no reports at all, so the mechanism is unproven. Tailnet traffic was unaffected.
+**A few drops at startup are normal.** Each time Tailscale's tun came up on the test phone, `ipv6_tunnel_blocked` rose by about 6 within a second, then stayed still. In the run that was captured, their byte counts fit the phone's own multicast listener reports exactly, and no peer sent anything like them. A later run showed the same 6 packets and 536 bytes. That phone holds a multicast routing socket (`mc_forwarding=1`), which is the likely reason its own reports loop back through `INPUT`. This wasn't reproduced in the lab, where the test tun sent no reports at all, so the mechanism is unproven. Tailnet traffic was unaffected.
 
 ## What ownership does now
 
@@ -95,6 +95,8 @@ The kernel can't enforce any of this, so the proof audits the rule and doesn't d
 | `tailnet=DOWN` | No tun holds one. |
 
 ## Coverage gaps
+
+**For the independent audit before release: the tailnet rule trusts addresses, not Tailscale ownership.** Any tun that holds or claims an address in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` gets the rule. The kernel can't enforce ownership, so `tailnet=VERIFIED` describes the moment it was read and doesn't guarantee anything afterwards. The audit should decide whether this is acceptable for release, and whether `UNVERIFIED` should do more than report.
 
 Trusting the tailnet with no watcher costs these. The first two are pinned by a test that passes packets on purpose.
 
@@ -155,12 +157,15 @@ Run on a Pixel 9a from this branch's scripts, pushed over adb and deleted afterw
 | Tailscale toggled, and force-stopped | Ping, TCP and rules unaffected, with no refresh. |
 | `scp` pulling from a tailnet host | Delivered with a matching hash, after a force stop. |
 | Existing TCP connection as the filter goes on | Kept working. |
+| Tailscale and kernel WireGuard together | Both hooked. Browser traffic and forced fetches on both families went through WireGuard, with replies passing as established. |
+| Reverse SSH bridge | A connection through it kept working as the filters went on, a new one connected, and it was back about 15 s after a Tailscale toggle. Checked as far as SSH key exchange, not a full login. |
+| Real Syncthing sync | Both directions, twice, with matching hashes and no conflict copies, and reconnected about 15 s after a toggle. One connection was dialed to the phone from outside, through the filter. |
 | `disable` with the filter on | `residue` clean, tables at baseline. |
 
 **Not run on a phone:**
 
 - **Blocking a real unsolicited packet inside a tunnel.** From a tailnet host, everything is tailnet traffic, and nothing else can be sent into these tunnels from outside. The phone never showed this rule dropping a packet from a peer. That's covered by the lab only.
-- Kernel WireGuard and Tailscale up together, Proton, and the filter on cellular.
-- A completed Taildrop, a real Syncthing sync, and the SSH bridge. Taildrop's request reached the app, which was waiting for a folder to be chosen. Syncthing's port accepted a TCP connection.
+- Proton and cellular.
+- A completed Taildrop, a full SSH login through the bridge, and kernel WireGuard restarting while the filter is on. Taildrop's request reached the app, which was waiting for a folder to be chosen.
 
 **If anything goes wrong:** wait for the timer, or over USB run `su -c "sh $ENGINE disable"`, or restart.

@@ -267,4 +267,27 @@ Proton did not cause the quiet: IPv4 was just as quiet with no VPN at all. The q
 
 **A gap this confirmed:** after the force stop, Tailscale's UDP ports changed and the physical exceptions kept the old ones until a `refresh`. The peers still reached a direct path in this run. This is the documented limit of having no watcher, and it isn't new.
 
-**Not tested here:** a real unsolicited packet dropped inside a tunnel, which is lab only because nothing else can be sent into these tunnels from outside. Also kernel WireGuard with Tailscale, Proton, cellular, a completed Taildrop, a real Syncthing sync, and the SSH bridge.
+**Tailscale and kernel WireGuard together, both filters on:** the owner's normal setup, with the bridge and Syncthing running. `tunnel-status` showed hooks on `tun+` and the WireGuard interface, Tailscale `VERIFIED`, and WireGuard `kernel-type`. The report named WireGuard's own IPv4 port rule as an earlier ACCEPT. Tailscale was toggled partway through, and these all ran both before and after the toggle unless noted:
+
+| Check | Result |
+| --- | --- |
+| Tailnet | Ping 5 of 5 on both families, and new TCP connections carrying data on both |
+| Through WireGuard | Fetches forced through its interface returned HTTP 200 on both families, with its received bytes rising each time |
+| Real browsing | The owner opened a page in their browser, and WireGuard received about 2.5 MB. About 2,900 replies passed as established |
+| Reverse SSH bridge, before the toggle | A connection opened before the firewall still completed SSH's first exchange after both filters went on, and a new one got a banner |
+| Reverse SSH bridge, after the toggle | Banner again about 15 s after Tailscale returned |
+| Real Syncthing | Files synced in each direction, each round, with matching hashes in about 12 s, most of which is its 10 s scan delay. Reconnected about 15 s after Tailscale returned, that time dialed by the other host to the phone, through the filter |
+| Shared folder afterwards | Same file count on both sides, no conflict copies, test files and their archived versions removed |
+
+| Physical firewall | Sent | Answered | Round 1 DROP | Round 2 DROP |
+| --- | --- | --- | --- | --- |
+| UDP IPv4 | 9 | 0 | 9, exact bytes | 9, exact bytes |
+| UDP IPv6 | 11 | 0 | 11, exact bytes | 11, exact bytes |
+| TCP SYN IPv4 | 5 | 0 | 8, of which 3 were other traffic | 5, exact bytes |
+| TCP SYN IPv6 | 5 | 0 | 5, exact bytes | 9, of which 4 were other traffic |
+
+Every probe was seen arriving at Wi-Fi. Other traffic also reached these rules during the run, so a count above the probes isn't a miss, and the byte totals show the extra packets. Tunnel drops were 0 on IPv4 and 6 on IPv6, the same startup packets as before, and `INVALID` was 0 on both. Afterwards `residue` was clean and the tables matched the baseline.
+
+**Limits of this run:** the bridge was checked as far as SSH key exchange, because this test host had no login for it. WireGuard wasn't restarted while the filter was on, and no unsolicited packet was sent inside it, because that needs control of the far end.
+
+**Not tested here:** a real unsolicited packet dropped inside a tunnel, which is lab only because nothing else can be sent into these tunnels from outside. Also Proton, cellular, and a completed Taildrop.

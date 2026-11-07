@@ -21,7 +21,7 @@ The home screen now also lists a `tun` VPN as not filtered, named from Android's
 
 ## Update: optional tunnel filter on `feature/tunnel-inbound-filter`
 
-Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, never restored at boot, and with tailnet traffic trusted by default. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard. **Never activated on a phone.**
+Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, never restored at boot, and with tailnet traffic trusted by default. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard, and on the Pixel 9a with Tailscale. **Not yet tested on a phone with kernel WireGuard or Proton up.** See [hardware validation](hardware-validation.md).
 
 ## Release blocker: uninstall leaves an active firewall
 

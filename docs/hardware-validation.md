@@ -226,3 +226,45 @@ The app now lists a `tun` VPN as not filtered too, named from Android's own VPN 
 Proton did not cause the quiet: IPv4 was just as quiet with no VPN at all. The queries appeared only while Tailscale was up, including a moment without kernel WireGuard. That fits Tailscale's port-mapping probe, which looks for a router through SSDP, but the sending process wasn't identified. A LAN device answers by unicast, conntrack can't tie that answer to a multicast query, and the answer reaches the final DROP. Turning Tailscale off, as switching to Proton did here, stops the queries and so the answers.
 
 **Side effect, not yet assessed:** answers to the phone's own SSDP queries are dropped while PocketUFW is active. If these are Tailscale's probes, it may not be able to map a port on the router, which could mean fewer direct connections. Any other app that finds devices through SSDP would be affected the same way. Neither effect was tested.
+
+### Physical firewall and tunnel filter on the Pixel 9a (November 6, 2026)
+
+**Why:** the owner saw zero drops with no VPN active, and earlier captures suggested that was because Tailscale's SSDP traffic had stopped. A quiet firewall is fine, but one that can't catch deliberate test packets isn't, so this tested that directly.
+
+**Method:** development branch scripts pushed over adb, not an app build. Every run had a rollback timer armed, and the owner approved it first. Probes came from a host on the same Wi-Fi, to an unused port. A capture on the phone, limited to that port, counted what arrived.
+
+**Physical firewall, no VPN at all:**
+
+| Probe | Sent | Arrived at Wi-Fi | DROP count | DROP bytes | Other family |
+| --- | --- | --- | --- | --- | --- |
+| UDP IPv4, 64 bytes | 20 | 20 | +20 | +1840 | +0 |
+| UDP IPv6, 64 bytes | 20 | 20 | +20 | +2240 | +0 |
+| TCP SYN IPv4 | 10 | 10 | +10 | +600 | +0 |
+| TCP SYN IPv6 | 10 | 10 | +10 | +800 | +0 |
+| UDP IPv4, 200 bytes | 7 | 7 | +7 | +1596 | +0 |
+| UDP IPv6, 300 bytes | 13 | 13 | +13 | +4524 | +0 |
+
+- While filtered, the host got no replies, and the kernel's `NoPorts` counters didn't move.
+- With the firewall off, the same probes raised `NoPorts` by exactly the UDP count, and every SYN was refused. So they did reach an unbound port.
+- Nothing was sent for 25 s beforehand, and the counters stayed at 0.
+
+**Interpretation:** the physical firewall works without any VPN, so the zero was a quiet network. With Tailscale up, IPv4 drops returned without any probes, 86 in one window of about a minute. That fits the earlier SSDP explanation, but SSDP wasn't captured again here.
+
+**Rules ahead of the hooks:** the physical interfaces were `wlan0`, `rmnet16`, `rmnet17` and `v4-rmnet16`, all matched by the hooks. `fw_INPUT` was empty and `bw_INPUT` had no ACCEPT. `oem_in` was empty at first, then later held IPv6 DROP rules for the carrier IMS address on SIP-related ports, which came and went. Those packets never reach PocketUFW's counters, but nothing there accepts anything. Kernel WireGuard's port rule, ACCEPT on IPv4 and DROP on IPv6, exists only while that tunnel is up. Cellular hooks weren't probed, because a LAN host can't reach them.
+
+**Rollback:** left unconfirmed, the physical timer fired at 180 s and the tables matched the baseline. With a tunnel install forced to fail partway and its cleanup also failing, one IPv4 hook stayed in the kernel, `verify` said `DEGRADED`, the state was `UNCLEAN`, and `confirm` and a second arming were refused. Once cleanup could work, the timer removed the rules within 3 s. With only the install failing, the engine's own cleanup worked and the rollback cancelled after reading the tables back clean.
+
+**Tailnet, with both filters on and no refresh, tested three ways:** Tailscale already up, Tailscale coming up after the filter, and a force stop and restart.
+
+- Ping 5 of 5 on IPv4 and IPv6, and new TCP connections carrying data on both.
+- UDP to a closed port reached the kernel, 10 of 10 on each family, where it was tested. The force-stop run didn't include this check.
+- A TCP connection opened before the firewall kept working after both filters went on.
+- The owner's real file transfer, `scp` run in Termux to pull from another tailnet host over Tailscale SSH, delivered a file with a matching hash after the force stop.
+- Rules stayed byte-identical through each restart. `tailnet=VERIFIED` followed Tailscale each time.
+- A real Syncthing listener on the tailnet address accepted a TCP connection, but no sync was tested.
+- Taildrop's peer API answered on both families, and the request reached the app, which was waiting for a folder to be chosen. The transfer didn't complete, for that reason.
+- LAN probes still hit the physical DROP rules. The IPv4 and post-toggle IPv6 counts were exact. One IPv6 window read 14 for 11 probes, with the bytes showing 3 extra packets of other traffic.
+
+**A gap this confirmed:** after the force stop, Tailscale's UDP ports changed and the physical exceptions kept the old ones until a `refresh`. The peers still reached a direct path in this run. This is the documented limit of having no watcher, and it isn't new.
+
+**Not tested here:** a real unsolicited packet dropped inside a tunnel, which is lab only because nothing else can be sent into these tunnels from outside. Also kernel WireGuard with Tailscale, Proton, cellular, a completed Taildrop, a real Syncthing sync, and the SSH bridge.

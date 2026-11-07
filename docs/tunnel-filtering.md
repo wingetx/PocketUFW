@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch. Tested on real netfilter, tun and kernel WireGuard in isolated namespaces. Not yet activated on any phone.** Off by default, with no switch in the app.
+**Status: development branch. Tested on real netfilter, tun and kernel WireGuard in isolated namespaces, and on one Pixel 9a with Tailscale. Not yet tested on a phone with kernel WireGuard or Proton up.** Off by default, with no switch in the app.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -13,6 +13,7 @@ PocketUFW's physical policy never sees traffic inside a tunnel. This optional fi
 | Fact | What was seen |
 | --- | --- |
 | A tun's number says nothing | Tailscale was on `tun1`. Proton was on `tun0` on another phone. |
+| A tun comes back as a new interface | After toggling and force-stopping Tailscale it was `tun1` each time, with a new interface index and a new Android network mark. A changed number hasn't been seen on this phone, and the rule doesn't depend on either. |
 | A kernel WireGuard's name says nothing | Named after its server, with no "wg" in it. |
 | The kernel reports the kind | WireGuard: `DEVTYPE=wireguard` in `/sys/class/net/NAME/uevent`. tun: a `tun_flags` file, `0x1001` (IFF_TUN, IFF_NO_PI). |
 | sysfs doesn't name a tun's owner | `owner` and `group` are both `-1`. |
@@ -43,7 +44,7 @@ PocketUFW's physical policy never sees traffic inside a tunnel. This optional fi
 
 ### Not established
 
-Proton's Android tunnel backend.
+Proton's Android tunnel backend. Whether a Taildrop transfer ever touches the firewall: its peer API answered on port 1 with no matching kernel listener, so it appears to end inside Tailscale's own process.
 
 ## What gets filtered
 
@@ -68,11 +69,13 @@ Traffic between tailnet devices passes without any per-port rule: Syncthing, Tai
 
 - No netfilter match identifies who holds a tun. sysfs reports its owner as `-1`, and `-m owner` doesn't work on inbound traffic.
 - `addrtype --limit-iface-in` would tie a destination to the interface that holds it. The test phone's kernel doesn't have `addrtype`.
-- Android marks each network's packets, but with a rule that names the interface, set up as the network comes up. Matching that mark would still need something to follow it.
+- Android marks each network's packets, but with a rule that names the interface, and the mark changed each time Tailscale came back. Matching it would still need something to follow it.
 
 A node's tailnet addresses don't depend on any of that, so they're what the rule matches. They change only if the node is re-registered or signs in to another tailnet, and the rule covers the whole range, so that's fine too. It needs no proof at install and no refresh afterwards, and works the same whether Tailscale was up when the filter went on.
 
 **Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain but can't use the rule, because of `-i tun+`. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
+
+**A few drops at startup are normal.** Each time Tailscale's tun came up on the test phone, `ipv6_tunnel_blocked` rose by about 6 within a second, then stayed still. In the run that was captured, their byte counts fit the phone's own multicast listener reports exactly, and no peer sent anything like them. That phone holds a multicast routing socket (`mc_forwarding=1`), which is the likely reason its own reports loop back through `INPUT`. This wasn't reproduced in the lab, where the test tun sent no reports at all, so the mechanism is unproven. Tailnet traffic was unaffected.
 
 ## What ownership does now
 
@@ -139,18 +142,25 @@ The timer starts in its own session before any rule exists, and no rule is insta
 - `FIRED` means the tables read back clean. If that never happens within five tries, the state is `FAILED`, and the rules need removing by hand.
 - It refuses to arm while the rules it would remove already exist, so a rollback only ever removes what it installed.
 
-## Hardware test plan
+## Hardware results
 
-Run from this branch's scripts, pushed to a temporary folder over adb. No app build is needed. Keep USB attached throughout.
+Run on a Pixel 9a from this branch's scripts, pushed over adb and deleted afterwards. Details are in [hardware validation](hardware-validation.md).
 
-1. **Physical firewall, no VPN.** With every VPN off, `tunnel-rollback physical`. Send a known number of unsolicited UDP datagrams and TCP SYNs to an unbound port in both families from a LAN host. Each DROP counter must rise by exactly that number, in packets and in bytes, with no change while nothing is being sent, and the same probes must get answers once the firewall is off.
-2. **Prove the rollback fires.** Leave it unconfirmed: `FIRED`, and the tables match the baseline.
-3. **Filter on, tailnet up.** Tailscale up, `enable`, then `tunnel-rollback on`. `tunnel-status` shows `tailnet=VERIFIED`.
-4. **Tailnet.** From a tailnet peer: ping, a TCP connection to a listener, Taildrop, and the SSH bridge. `ipv4_tunnel_tailnet` rises and tunnel drops don't.
-5. **Reconnect.** Toggle Tailscale with no refresh. It may get a new tun number. Repeat step 4.
-6. **Physical filter underneath.** LAN probes from step 1 still drop exactly, with the tunnel filter on.
-7. **Kernel WireGuard.** `tunnel-status` reports its kind. Public traffic still works. Sending inner packets needs control of the far end, so unless that changes this is covered by the lab only.
-8. **Proton.** Switch to it. Check its owner, its proof and browsing. No unsolicited traffic can be sent into its tunnel from here.
-9. **Removal.** `disable` with the filter on: `residue` is clean and the tables match the baseline.
+| Step | Result |
+| --- | --- |
+| Physical firewall, no VPN | Every probe counted exactly, in packets and bytes, in the right family. |
+| Rollback fires unconfirmed | Yes, on time, with the tables back at baseline. |
+| Partial install, failed cleanup | `UNCLEAN`, `confirm` refused, and removed once cleanup worked. |
+| Filter on before Tailscale starts | Tailnet works with no refresh. |
+| Tailscale toggled, and force-stopped | Ping, TCP and rules unaffected, with no refresh. |
+| `scp` pulling from a tailnet host | Delivered with a matching hash, after a force stop. |
+| Existing TCP connection as the filter goes on | Kept working. |
+| `disable` with the filter on | `residue` clean, tables at baseline. |
+
+**Not run on a phone:**
+
+- **Blocking a real unsolicited packet inside a tunnel.** From a tailnet host, everything is tailnet traffic, and nothing else can be sent into these tunnels from outside. The phone never showed this rule dropping a packet from a peer. That's covered by the lab only.
+- Kernel WireGuard and Tailscale up together, Proton, and the filter on cellular.
+- A completed Taildrop, a real Syncthing sync, and the SSH bridge. Taildrop's request reached the app, which was waiting for a folder to be chosen. Syncthing's port accepted a TCP connection.
 
 **If anything goes wrong:** wait for the timer, or over USB run `su -c "sh $ENGINE disable"`, or restart.

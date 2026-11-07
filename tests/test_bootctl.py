@@ -37,6 +37,7 @@ class BootTests(unittest.TestCase):
         self.config_dir.mkdir()
         self.env = dict(os.environ,
                         POCKETUFW_CONFIG_DIR=str(self.config_dir),
+                        POCKETUFW_LOCK=str(self.root / "engine.lock"),
                         PATH=f"{self.fakebin}:/usr/bin:/bin",
                         TEST_ENGINE_STATE=str(self.state),
                         TEST_ENGINE_CALLS=str(self.calls),

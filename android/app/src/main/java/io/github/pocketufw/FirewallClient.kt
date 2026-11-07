@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 
 /** Exit status for "we stopped waiting". The root shell itself may still be running. */
 private const val ROOT_TIMEOUT_EXIT = 124
+private const val LIFECYCLE_BUSY_EXIT = 75
 
 /** What one privileged command returned. */
 internal data class ShellResult(val exitCode: Int, val text: String) {
@@ -69,6 +70,7 @@ internal class FirewallClient(
     enum class Protection { CHECKING, ACTIVE, INACTIVE, DEGRADED, ROOT_REQUIRED }
     enum class BootRestore { ENABLED, DISABLED, UNSUPPORTED, DEGRADED, CONFLICT, UNKNOWN }
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
+    enum class TunnelFilter { ON, OFF, UNKNOWN }
 
     data class Snapshot(
         val protection: Protection = Protection.CHECKING,
@@ -84,7 +86,9 @@ internal class FirewallClient(
         /** Live interfaces PocketUFW has no hook on. Empty does not prove full coverage. */
         val uncoveredInterfaces: List<String> = emptyList(),
         /** The interface Android's own record gives the active VPN, when it says. */
-        val vpnInterface: String? = null
+        val vpnInterface: String? = null,
+        /** Session-only CLI feature. ON verifies installed hooks, not all interfaces or ownership. */
+        val tunnelFilter: TunnelFilter = TunnelFilter.UNKNOWN
     )
     /**
      * Kernel rule counters are read-only measurements, not a universal proof
@@ -318,6 +322,10 @@ internal class FirewallClient(
     }
 
     internal fun dashboardFromOutput(exitCode: Int, text: String, vpn: Boolean): Dashboard {
+        if (exitCode == LIFECYCLE_BUSY_EXIT) return Dashboard(Snapshot(
+            protection = Protection.DEGRADED, rootReady = true, vpnActive = vpn,
+            details = "A firewall operation is still running or its lock is unavailable. Recheck status before retrying."
+        ))
         // Not "root is missing": the shell outlives our wait and may finish the job.
         if (exitCode == ROOT_TIMEOUT_EXIT) return Dashboard(Snapshot(
             protection = Protection.DEGRADED,
@@ -377,7 +385,13 @@ internal class FirewallClient(
             committedUdp6 = values["committed_udp6"] ?: "none",
             uncoveredInterfaces = if (!rootGranted) emptyList() else
                 values["uncovered_ifaces"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() },
-            vpnInterface = if (rootGranted) values["vpn_iface"]?.takeIf { it.isNotEmpty() } else null
+            vpnInterface = if (rootGranted) values["vpn_iface"]?.takeIf { it.isNotEmpty() } else null,
+            tunnelFilter = when {
+                !rootGranted -> TunnelFilter.UNKNOWN
+                values["tunnel_filter"] == "ON" && protection == Protection.ACTIVE -> TunnelFilter.ON
+                values["tunnel_filter"] == "OFF" -> TunnelFilter.OFF
+                else -> TunnelFilter.UNKNOWN
+            }
         ), activity, policyReport)
     }
 
@@ -433,6 +447,7 @@ internal class FirewallClient(
             val dashboard = dashboardFromOutput(result.exitCode, result.text, vpn)
             val success = dashboard.snapshot.rootReady && values["operation"] == "SUCCESS"
             val message = when {
+                result.exitCode == LIFECYCLE_BUSY_EXIT -> dashboard.snapshot.details
                 result.timedOut -> ROOT_TIMEOUT_MESSAGE
                 !dashboard.snapshot.rootReady -> "Root access is needed for this action."
                 else -> values["message"]?.takeIf { it.isNotBlank() }

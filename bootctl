@@ -18,6 +18,31 @@ fail() { say "pocketufw boot: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || fail 'root required'
 case "$CMD" in status|enable|disable|purge|residue) : ;; *) fail 'use status, enable, disable, purge, or residue' ;; esac
 
+case "$CMD" in enable|disable|purge)
+# Serialize the whole lifecycle, including boot files and final removal readback.
+# FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
+# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
+command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
+if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
+  [ ! -L "$operation_lock" ] || { echo 'pocketufw: unsafe lifecycle lock' >&2; exit 1; }
+  ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
+  exec 8>>"$operation_lock"
+fi
+operation_polls=0
+while [ "$operation_polls" -le 150 ]; do
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
+    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+    exit 75
+  fi
+  operation_polls=$((operation_polls + 1))
+  sleep 0.1
+done
+# mksh closes descriptors above 2 for children unless they are passed explicitly.
+sh() { command sh "$@" 8>&8; }
+;; esac
+
 owned_hook() {
   [ -f "$HOOK" ] && [ ! -L "$HOOK" ] &&
     grep -qxF "$SIGNATURE" "$HOOK"
@@ -41,6 +66,9 @@ safe_paths() {
     [ ! -d "$STORE/$name" ] || fail 'Refusing directory in boot data'
   done
   [ ! -L "$HOOK.stage" ] || fail 'Refusing symlink at hook staging path'
+  if [ "$CMD" = enable ] && [ -e "$HOOK.stage" ]; then
+    owned_stage || fail 'Boot hook staging path belongs to something else'
+  fi
 }
 
 supported() {

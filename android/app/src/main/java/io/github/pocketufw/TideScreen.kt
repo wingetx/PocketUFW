@@ -343,6 +343,13 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") { uncoveredLabel(it, state) } + ".", true)
     }
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
+    if (state.rootReady && !ui.verificationInDoubt) when (state.tunnelFilter) {
+        FirewallClient.TunnelFilter.ON -> TideNotice(
+            "Tunnel rules are on for listed hooks, until restart. Tailnet addresses are trusted without owner enforcement.", true)
+        FirewallClient.TunnelFilter.OFF -> Text("Tunnel filtering is off.",
+            style = MaterialTheme.typography.bodySmall, color = Muted)
+        FirewallClient.TunnelFilter.UNKNOWN -> Unit
+    }
     restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
 
     // Keep verified appearance steady during other operations; the existing busy guard ignores taps.

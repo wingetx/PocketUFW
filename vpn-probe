@@ -29,9 +29,10 @@ HELP
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
     ''|tunnels) ;;
+    stale-ports) [ "$#" -eq 3 ] || exit 2 ;;
     *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
 esac
-if [ "$#" -gt 1 ]; then
+if [ "$#" -gt 1 ] && [ "$1" != stale-ports ]; then
     echo "vpn-probe: too many arguments" >&2
     exit 2
 fi
@@ -141,6 +142,46 @@ validate_port() {
     esac
     [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
+
+# Only used after an explicit refresh failed. Inspect all UDP sockets (including
+# connected ones), not just discoverable listeners. Missing metadata means unknown,
+# never permission to close a possibly live Tailscale socket. This opens no ports.
+stale_port() {
+    wanted="$2"
+    [ "$wanted" != none ] || { echo no; return; }
+    validate_port "$wanted" || return 2
+    [ -n "$ts_appid" ] || { echo unknown; return; }
+    # A dual-stack IPv6 socket can also serve IPv4. A Tailscale socket at this
+    # port in either family prevents retirement; never infer IPV6_V6ONLY from ss.
+    sockets4=$("$SS_BIN" -H -u -a -n -p -4 2>/dev/null) || { echo unknown; return; }
+    sockets6=$("$SS_BIN" -H -u -a -n -p -6 2>/dev/null) || { echo unknown; return; }
+    sockets="$sockets4
+$sockets6"
+    stale=yes
+    while IFS= read -r socket; do
+        [ -n "$socket" ] || continue
+        address=$(printf '%s\n' "$socket" | awk '{print $4}')
+        validate_port "${address##*:}" || { stale=unknown; continue; }
+        [ "${address##*:}" = "$wanted" ] || continue
+        owners=$(printf '%s\n' "$socket" | grep -o 'pid=[0-9][0-9]*' | sed 's/pid=//g') || owners=''
+        [ -n "$owners" ] || stale=unknown
+        for owner_pid in $owners; do
+            owner_uid=$(awk '$1 == "Uid:" {print $2; exit}' "$PROC_ROOT/$owner_pid/status" 2>/dev/null) || owner_uid=''
+            case "$owner_uid" in ''|*[!0-9]*) stale=unknown; continue ;; esac
+            # Same package, even a differently named process: keep it conservatively.
+            if [ "$((owner_uid % 100000))" = "$ts_appid" ]; then echo no; return; fi
+        done
+    done <<EOF
+$sockets
+EOF
+    echo "$stale"
+}
+if [ "${1:-}" = stale-ports ]; then
+    stale4=$(stale_port 4 "$2") || exit $?
+    stale6=$(stale_port 6 "$3") || exit $?
+    printf 'stale_udp4=%s\nstale_udp6=%s\n' "$stale4" "$stale6"
+    exit 0
+fi
 
 scan() {
     family="$1"

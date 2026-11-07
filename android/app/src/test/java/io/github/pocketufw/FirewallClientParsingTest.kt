@@ -25,6 +25,19 @@ class FirewallClientParsingTest {
 
     // ---- protection state ----
 
+    @Test fun tunnelOnNeedsAnActiveVerifiedSnapshotAndNeverComesFromBootOptIn() {
+        assertEquals(FirewallClient.TunnelFilter.ON,
+            parse(bridgeOutput() + "\ntunnel_filter=ON").snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
+            parse(bridgeOutput(state = "DEGRADED") + "\ntunnel_filter=ON").snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
+            parse(bridgeOutput(boot = "ENABLED")).snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelFilter.OFF,
+            parse(bridgeOutput(boot = "ENABLED") + "\ntunnel_filter=OFF").snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
+            parse(bridgeOutput() + "\ntunnel_filter=ON", exitCode = 3).snapshot.tunnelFilter)
+    }
+
     @Test fun everyBridgeStateMapsToItsOwnProtection() {
         val expected = mapOf(
             "ACTIVE" to Protection.ACTIVE,
@@ -79,6 +92,14 @@ class FirewallClientParsingTest {
         assertNull(timedOut.activity)
         assertNull(timedOut.kernelReport)
         assertEquals(BootRestore.UNKNOWN, timedOut.snapshot.bootRestore)
+    }
+
+    @Test fun lifecycleContentionIsUnverifiedRatherThanMissingRootOrActive() {
+        val result = parse(bridgeOutput(), exitCode = 75)
+        assertEquals(Protection.DEGRADED, result.snapshot.protection)
+        assertTrue(result.snapshot.rootReady)
+        assertNull(result.activity)
+        assertNull(result.kernelReport)
     }
 
     // ---- boot and config ----

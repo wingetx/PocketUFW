@@ -126,6 +126,20 @@ afwall_active() { "$IPT4" -w -S OUTPUT 2>/dev/null | grep -q -- '-A OUTPUT -j af
 # The firewall must never depend on Tailscale. For enable, a discovery problem
 # withholds only the UDP exceptions; plan and refresh must not guess, so they fail.
 probe_problem() {
+  if [ "$CMD" = refresh ]; then
+    # Discovery failure must never open a guessed port. Independently retire an
+    # existing exception only on positive evidence that Tailscale no longer owns
+    # a socket there. An unreadable socket or package record leaves it unchanged.
+    stale_report=$(sh "${probe_dir:-.}/vpn-probe" stale-ports "${old4:-none}" "${old6:-none}" 9>&- 2>/dev/null) || stale_report=''
+    TS4="$old4"; TS6="$old6"
+    if printf '%s\n' "$stale_report" | grep -qx 'stale_udp4=yes'; then TS4=''; fi
+    if printf '%s\n' "$stale_report" | grep -qx 'stale_udp6=yes'; then TS6=''; fi
+    if [ "$TS4" != "$old4" ] || [ "$TS6" != "$old6" ]; then
+      apply_verified_refresh || fail 'Retiring stale UDP exceptions failed; inspect rules'
+      verify_all || fail 'Retired UDP exceptions could not be verified; inspect rules'
+      say 'stale_exceptions=REMOVED'
+    fi
+  fi
   [ "$CMD" = enable ] || fail "$1"
   say "pocketufw: $1" >&2
   PROBE_FAILED=1
@@ -148,7 +162,7 @@ resolve_tailscale_ports() {
   [ -r "$probe_dir/vpn-probe" ] || { probe_problem 'vpn-probe not installed alongside PocketUFW'; return 0; }
   # The probe does not need the engine lock, so a stuck child cannot keep it.
   discovered=$(sh "$probe_dir/vpn-probe" 9>&-) || {
-    probe_problem 'Tailscale port discovery failed; no VPN port exceptions changed'
+    probe_problem 'Tailscale port discovery failed; no new VPN port exceptions opened'
     return 0
   }
   TS4=$(printf '%s\n' "$discovered" | sed -n 's/^tailscale_udp4=//p')
@@ -322,9 +336,9 @@ holds_tailnet_address() {
   done
   return 1
 }
-# Who the tailnet rule applies to right now, from INVENTORY. VERIFIED is Tailscale, proven
-# by both Android and the kernel. UNVERIFIED is the coverage gap: some other tun, or one
-# nobody could prove, holds an address in Tailscale's range, so the rule applies to it too.
+# Report current address holders, not authenticated ingress. VERIFIED is Tailscale,
+# proven by both Android and the kernel at inspection. Any tun* can still inject
+# tailnet-addressed traffic to a local destination it does not itself hold.
 tailnet_report() {
   command -v ip >/dev/null 2>&1 || { say 'tailnet=UNKNOWN'; return 0; }
   tailnet_holders=0
@@ -356,8 +370,8 @@ install_tunnel_rules() {
   for family_now in 4 6; do
     range_now=$(tailnet_range "$family_now")
     fwf "$family_now" -N "$VPNCHAIN"
-    # First, so conntrack's view of a flow can't affect the tailnet. Only on a tun: a
-    # kernel WireGuard shares this chain, and has no claim to these addresses.
+    # First, so conntrack's view of a flow can't affect the tailnet. tun+ matches
+    # names, not owners or kinds: a WireGuard named tun* can also use this trust.
     fwf "$family_now" -A "$VPNCHAIN" -s "$range_now" -d "$range_now" -i tun+ -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate INVALID -j DROP
@@ -408,7 +422,32 @@ verify_tunnel_family() {
     vtotal=$((vtotal + 1))
     if [ "$name" = 'tun+' ]; then vtun=1; fi
   done
+  [ "$(printf '%s\n' "$vhooks" | sort -u | wc -l)" -eq "$vtotal" ] || return 1
   [ "$vtun" -eq 1 ] && [ "$vtotal" -le "$MAX_TUNNEL_HOOKS" ]
+}
+
+# Roll back only this refresh, in reverse order. Reinsert deleted hooks at their
+# former positions; appending them could move them behind another owner's ACCEPT.
+rollback_tunnel_refresh() {
+  while read -r undo_family undo_position undo_name; do
+    [ -n "$undo_family" ] || continue
+    if ! fwf "$undo_family" -C INPUT -i "$undo_name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" >/dev/null 2>&1; then
+      fwf "$undo_family" -I INPUT "$undo_position" -i "$undo_name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" || :
+    fi
+  done <<EOF
+$refresh_removed
+EOF
+  while read -r undo_family undo_name; do
+    [ -n "$undo_family" ] || continue
+    if fwf "$undo_family" -C INPUT -i "$undo_name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" >/dev/null 2>&1; then
+      fwf "$undo_family" -D INPUT -i "$undo_name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" || :
+    fi
+  done <<EOF
+$refresh_added
+EOF
+  if ! verify_all || [ "$(tunnel_hook_names "$IPT4")" != "$current_hooks" ]; then
+    say 'pocketufw: tunnel refresh rollback incomplete; inspect tunnel-status' >&2
+  fi
 }
 # Off is a correct state: this filter is optional. On has to be complete and alike
 # in both families, or the firewall as a whole is degraded.
@@ -486,7 +525,7 @@ collect_counters() {
     say 'state=INACTIVE'
     return 3
   fi
-  if ! verify_family "$IPT4" 4 || ! verify_family "$IPT6" 6; then
+  if ! verify_all; then
     if [ "$CMD" = 'verbose' ]; then say 'Status: degraded (rules or hooks missing)'; else say 'state=DEGRADED'; fi
     return 4
   fi
@@ -621,6 +660,33 @@ lock_engine() {
   [ "$1" = -s ] || fail 'Another PocketUFW operation is still running; no changes made. Try again.'
   say 'pocketufw: another operation is still running; reading without the lock' >&2
 }
+case "$CMD" in
+  enable|disable|refresh|set-ports|reset-counters|tunnel-on|tunnel-refresh|tunnel-off)
+    root_needed
+# Serialize the whole lifecycle, including boot files and final removal readback.
+# FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
+# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
+command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
+if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
+  [ ! -L "$operation_lock" ] || { echo 'pocketufw: unsafe lifecycle lock' >&2; exit 1; }
+  ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
+  exec 8>>"$operation_lock"
+fi
+operation_polls=0
+while [ "$operation_polls" -le 150 ]; do
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
+    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+    exit 75
+  fi
+  operation_polls=$((operation_polls + 1))
+  sleep 0.1
+done
+# mksh closes descriptors above 2 for children unless they are passed explicitly.
+sh() { command sh "$@" 8>&8; }
+;; esac
+
 case "$CMD" in
   enable|disable|refresh|set-ports|reset-counters|tunnel-on|tunnel-refresh|tunnel-off) lock_engine -x ;;
   verify|activity|verbose|status|get-ports|residue|tunnel-status) lock_engine -s ;;
@@ -787,13 +853,14 @@ case "$CMD" in
     verify_all ||
       fail 'Firewall degraded or disabled; no refresh attempted'
     afwall_active && fail 'AFWall+ active; refresh refused'
-    # Detect and validate both families before altering either one.
-    AUTO_TS=1
-    resolve_tailscale_ports
     old4=$(current_tailscale_port "$IPT4") ||
       fail 'Unrecognized IPv4 VPN exception chain; no changes made'
     old6=$(current_tailscale_port "$IPT6") ||
       fail 'Unrecognized IPv6 VPN exception chain; no changes made'
+    # Detect and validate both families before adding anything. Failed discovery
+    # may only retire proven-stale exceptions; it still reports refresh failure.
+    AUTO_TS=1
+    resolve_tailscale_ports
     # Only report a change when the desired listener ports differ from the
     # ports read from our live child chains. Do not mutate a second time just
     # to determine whether the first refresh changed anything.
@@ -880,12 +947,17 @@ case "$CMD" in
     verify_all || fail 'Firewall degraded; no refresh attempted'
     prepare_tunnel
     current_hooks=$(tunnel_hook_names "$IPT4") || fail 'Cannot read tunnel hooks; nothing changed'
+    refresh_added=''; refresh_removed=''; refresh_committed=0
+    trap 'if [ "$refresh_committed" -eq 0 ]; then rollback_tunnel_refresh; fi' 0
+    trap 'exit 1' 1 2 15
     # A tunnel that came up since gets its hook. A hook whose kernel WireGuard is
     # gone goes, so names can't pile up. tun+ always stays.
     for name in $TUNNEL_NAMES; do
       case " $(printf '%s' "$current_hooks" | tr '\n' ' ') " in
         *" $name "*) : ;;
         *) for family_now in 4 6; do
+             refresh_added="$family_now $name
+$refresh_added"
              fwf "$family_now" -A INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" ||
                fail 'Could not add a tunnel hook; inspect tunnel-status'
            done ;;
@@ -896,12 +968,20 @@ case "$CMD" in
       case " $(printf '%s' "$TUNNEL_NAMES" | tr '\n' ' ') " in
         *" $name "*) : ;;
         *) for family_now in 4 6; do
+             hook_position=$(fwf "$family_now" -S INPUT | awk -v wanted="-A INPUT -i $name -m comment --comment $VPNTAG -j $VPNCHAIN" '
+               $1 == "-A" { n++; if ($0 == wanted) print n }
+             ')
+             case "$hook_position" in ''|*[!0-9]*) fail 'Cannot locate tunnel hook; rolling back refresh' ;; esac
+             refresh_removed="$family_now $hook_position $name
+$refresh_removed"
              fwf "$family_now" -D INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" ||
                fail 'Could not remove a tunnel hook; inspect tunnel-status'
            done ;;
       esac
     done
     verify_all || fail 'Tunnel refresh could not be verified; inspect tunnel-status'
+    refresh_committed=1
+    trap - 0 1 2 15
     say 'tunnel_filter=ON'
     tailnet_report
     ;;
@@ -918,6 +998,14 @@ case "$CMD" in
     if read_inventory; then
       printf '%s\n' "$INVENTORY" | grep '^tunnel=' || :
       tailnet_report
+      uncovered_tunnels=''
+      for name in $(wireguard_names); do
+        if ! "$IPT4" -w -C INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" >/dev/null 2>&1 ||
+           ! "$IPT6" -w -C INPUT -i "$name" -m comment --comment "$VPNTAG" -j "$VPNCHAIN" >/dev/null 2>&1; then
+          uncovered_tunnels="${uncovered_tunnels:+$uncovered_tunnels,}$name"
+        fi
+      done
+      say "tunnel_uncovered=$uncovered_tunnels"
     else
       say 'inventory=UNAVAILABLE'
     fi

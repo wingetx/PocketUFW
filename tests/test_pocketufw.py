@@ -102,6 +102,11 @@ if [ -f "$state/fail_commands" ]; then
   done
 fi
 case "$action" in
+  -I)
+    [ -f "$file" ] || exit 1
+    position=$1; shift
+    awk -v pos="$position" -v rule="$*" 'NR == pos { print rule } { print } END { if (pos == NR+1) print rule }' "$file" > "$file.tmp"
+    mv "$file.tmp" "$file" ;;
   -Z)
     [ -f "$file" ] || exit 1
     case "$name" in POCKETUFW_IN|POCKETUFW_TS|POCKETUFW_VPN) : ;; *) exit 7 ;; esac
@@ -1139,7 +1144,8 @@ class PocketUFWTests(unittest.TestCase):
                 result = self.run_cmd(*command)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 mode = '-x' if command[0] in exclusive else '-s'
-                self.assertEqual(calls.read_text().splitlines(), [f'-n {mode} 9'])
+                lifecycle = ['-n -x 8'] if command[0] in exclusive else []
+                self.assertEqual(calls.read_text().splitlines(), lifecycle + [f'-n {mode} 9'])
 
     def test_plan_and_doctor_take_no_lock(self):
         calls = self.record_flock_calls()
@@ -1284,19 +1290,23 @@ class PocketUFWTests(unittest.TestCase):
         self.assertEqual(self.run_cmd('refresh').returncode, 0)
         self.assertLess(time.monotonic() - started, 14)
 
-    def test_unusable_lock_file_proceeds_unlocked(self):
+    def test_unusable_snapshot_lock_needs_a_usable_lifecycle_lock_for_mutations(self):
         cases = {'parent missing': str(self.base / 'no' / 'such' / 'dir' / 'x'),
                  'is a directory': str(self.base / 'locks')}
         for name, path in cases.items():
             with self.subTest(case=name):
                 started = time.monotonic()
                 enabled = self.run_cmd('enable', extra_env={'POCKETUFW_LOCK': path})
+                if name == 'parent missing':
+                    self.assertNotEqual(enabled.returncode, 0)
+                    self.assertEqual(self.run_cmd('verify').stdout.strip(), 'INACTIVE')
+                    continue
                 self.assertEqual(enabled.returncode, 0, enabled.stderr)
                 self.assertEqual(self.run_cmd('verify', extra_env={'POCKETUFW_LOCK': path}).stdout.strip(), 'ACTIVE')
                 self.assertEqual(self.run_cmd('disable', extra_env={'POCKETUFW_LOCK': path}).returncode, 0)
                 self.assertLess(time.monotonic() - started, 14)  # Nothing waited out the lock.
 
-    def test_absent_flock_proceeds_unlocked(self):
+    def test_absent_flock_refuses_mutations_but_allows_inspection(self):
         tools = self.base / 'tools'
         tools.mkdir()
         for tool in ('sh', 'awk', 'sed', 'grep', 'tail', 'cat', 'mv', 'rm', 'sleep'):
@@ -1306,21 +1316,21 @@ class PocketUFWTests(unittest.TestCase):
         path = {'PATH': str(tools)}
         run = lambda *args: subprocess.run([str(tools / 'sh'), str(SCRIPT), *args], text=True,
                                            capture_output=True, env=self.env | path, timeout=15)
-        self.assertEqual(run('enable').returncode, 0)
-        self.assertEqual(run('verify').stdout.strip(), 'ACTIVE')
-        self.assertEqual(run('disable').returncode, 0)
+        self.assertNotEqual(run('enable').returncode, 0)
+        self.assertEqual(run('verify').stdout.strip(), 'INACTIVE')
+        self.assertNotEqual(run('disable').returncode, 0)
         self.assertFalse(self.lock.exists())
 
-    def test_flock_that_cannot_work_here_proceeds_unlocked_without_waiting(self):
+    def test_broken_flock_refuses_mutations_without_waiting(self):
         # Contention is silent. A diagnostic means flock itself cannot work on this
-        # shell or filesystem, which must not take the firewall's controls away.
+        # shell or filesystem. Inspection remains available, mutation must refuse.
         shim = self.base / 'bin' / 'flock'
         shim.write_text('#!/bin/sh\necho "flock: 9: Bad file descriptor" >&2\nexit 1\n')
         shim.chmod(0o755)
         started = time.monotonic()
         result = self.run_cmd('enable')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.run_cmd('verify').stdout.strip(), 'ACTIVE')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.run_cmd('verify').stdout.strip(), 'INACTIVE')
         self.assertLess(time.monotonic() - started, 14)  # Nothing waited out the lock.
 
     def test_no_output_forward_changes(self):

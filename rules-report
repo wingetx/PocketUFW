@@ -12,18 +12,9 @@ emit_rules() {
   fam="$2"
   listing="$3"
   max="$4"
-  printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" -v n="${5:-0}" -v tunnel="${6:-0}" '
+  printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" -v n="${5:-0}" '
     BEGIN { label = (kind == "tunnel") ? "main" : kind }
     $1 == "-A" {
-      if (kind == "input_bypass") {
-        if ($2 != "INPUT") next
-        # With the tunnel filter on, what could bypass it reaches as far as its first hook.
-        if (tunnel) {
-          if (/--comment PocketUFW-VPN/ && /-j POCKETUFW_VPN/) exit
-          if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) next
-        } else if (/--comment PocketUFW/ && /-j POCKETUFW_IN/) exit
-        if ($(NF-1) != "-j" || $NF != "ACCEPT") next
-      }
       if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
                                   (/-j POCKETUFW_IN/ || /-j POCKETUFW_VPN/))) next
       if (kind == "main" && $2 != "POCKETUFW_IN") next
@@ -32,6 +23,44 @@ emit_rules() {
       n++
       if (n > max || length($0) > 190) exit 9
       printf "%s%s_%02d=%s\n", label, fam, n, $0
+    }
+  '
+}
+
+# A hook for tun+ says nothing about a later hook for WireGuard. Compare each
+# direct ACCEPT with every relevant hook. Unknown/negated ingress is conservative.
+# This does not audit verdicts inside Android/OEM chains; the UI says so explicitly.
+emit_bypasses() {
+  printf '%s\n' "$input" | awk -v fam="$fam" '
+    function covers(a, b) {
+      if (a ~ /[+]$/) { sub(/[+]$/, "", a); return index(b, a) == 1 }
+      return a == b
+    }
+    $1 == "-A" && $2 == "INPUT" {
+      pos++
+      iface = "+"
+      for (i = 3; i < NF; i++) if ($i == "-i" && $(i-1) != "!") iface = $(i+1)
+      if (NF == 10 && $3 == "-i" && $5 == "-m" && $6 == "comment" && $7 == "--comment" &&
+          (($8 == "PocketUFW" && $10 == "POCKETUFW_IN") ||
+           ($8 == "PocketUFW-VPN" && $10 == "POCKETUFW_VPN")) && $9 == "-j") hook[pos] = iface
+      if ($(NF-1) == "-j" && $NF == "ACCEPT") { rule[pos] = $0; ingress[pos] = iface }
+    }
+    END {
+      for (r = 1; r <= pos; r++) if (r in rule) {
+        bypass = 0
+        for (h = r+1; h <= pos; h++) if (h in hook) {
+          if (!covers(ingress[r], hook[h]) && !covers(hook[h], ingress[r])) continue
+          already = 0
+          for (p = 1; p < r; p++) if (p in hook &&
+              (covers(hook[p], hook[h]) || covers(hook[p], ingress[r]))) already = 1
+          if (!already) bypass = 1
+        }
+        if (bypass) {
+          n++
+          if (n > 6 || length(rule[r]) > 190) exit 9
+          printf "input_bypass%s_%02d=%s\n", fam, n, rule[r]
+        }
+      }
     }
   '
 }
@@ -64,7 +93,7 @@ emit_family() {
   # An ACCEPT ahead of our hooks is a hole the rule audit cannot see. Android's
   # own chains jump to oem_in, pl_INPUT and so on. With no hook, nothing is bypassed.
   case "$input" in
-    *'--comment PocketUFW'*) emit_rules input_bypass "$fam" "$input" 6 0 "$has_tunnel" || return 1 ;;
+    *'--comment PocketUFW'*) emit_bypasses || return 1 ;;
   esac
   # Three physical hooks, plus at most MAX_TUNNEL_HOOKS when the tunnel filter is on.
   hook_limit=6

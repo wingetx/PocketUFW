@@ -22,7 +22,8 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Restore after reboot", style = MaterialTheme.typography.titleMedium)
-                Text("Uses Magisk at startup. No background app.", style = MaterialTheme.typography.bodySmall, color = Muted)
+                Text("Uses Magisk at startup. No background app. Restores physical filtering only; CLI tunnel filtering never restores.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
             }
             if (bootProblemText(state.bootRestore) == null) {
                 Switch(checked = state.bootRestore == FirewallClient.BootRestore.ENABLED,

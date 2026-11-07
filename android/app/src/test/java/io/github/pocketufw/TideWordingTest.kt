@@ -61,6 +61,13 @@ class TideWordingTest {
 
     // ---- Firewall tab headline ----
 
+    @Test fun cliTunnelFilteringDisclosesSessionAndTrustLimits() {
+        show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON)))
+        node("Tunnel rules are on for listed hooks, until restart. Tailnet addresses are trusted without owner enforcement.").assertExists()
+        node("Settings").performClick()
+        node("Restores physical filtering only; CLI tunnel filtering never restores.", substring = true).assertExists()
+    }
+
     private data class Headline(val title: String, val label: String, val body: String, val button: String)
 
     private val headlines = listOf(

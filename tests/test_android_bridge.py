@@ -31,6 +31,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.config_dir.mkdir()
         self.env = dict(os.environ,
                         POCKETUFW_CONFIG_DIR=str(self.config_dir),
+                        POCKETUFW_LOCK=str(self.root / "engine.lock"),
                         PATH=str(self.bin) + ":/usr/bin:/bin",
                         TEST_ENGINE_STATE=str(self.state),
                         TEST_BOOT_STATE=str(self.boot_state),
@@ -1108,7 +1109,7 @@ class AndroidBridgeTests(unittest.TestCase):
     def test_uncovered_interfaces_are_empty_when_ip_is_missing(self):
         tools = self.root / 'tools'
         tools.mkdir()
-        for tool in ('dirname', 'sed', 'sort', 'tail', 'grep', 'awk', 'cat', 'tr', 'timeout', 'sh', 'wc', 'rm', 'mv', 'chmod'):
+        for tool in ('dirname', 'sed', 'sort', 'tail', 'grep', 'awk', 'cat', 'tr', 'timeout', 'sh', 'wc', 'rm', 'mv', 'chmod', 'flock', 'readlink'):
             (tools / tool).symlink_to(shutil.which(tool))
         (tools / 'id').symlink_to(self.bin / 'id')
         p = subprocess.run(['/bin/sh', str(self.engine / 'android-bridge'), 'inspect'], capture_output=True, text=True,

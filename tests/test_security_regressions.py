@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -14,6 +15,30 @@ import test_bootctl as boot
 
 
 class TunnelAudit(tunnel.Base):
+    def test_termination_during_tunnel_install_cleans_partial_hooks(self):
+        self.ok('enable')
+        seen, gate = self.base / 'entered', self.base / 'release'
+        pause = f'''echo "$*" >> "$file"
+    if [ "$name" = INPUT ] && [ "$*" = "{tunnel.HOOK_TUN}" ]; then
+      : > "{seen}"
+      while [ ! -f "{gate}" ]; do sleep 0.02; done
+    fi'''
+        self.script('iptables', tunnel.MOCK.replace('echo "$*" >> "$file"', pause))
+        process = subprocess.Popen(['sh', str(tunnel.ENGINE), 'tunnel-on'], env=self.env,
+                                   text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            until = time.monotonic() + 5
+            while not seen.exists() and time.monotonic() < until:
+                time.sleep(.02)
+            self.assertTrue(seen.exists())
+            os.kill(process.pid, signal.SIGTERM)
+        finally:
+            gate.touch()
+            process.communicate(timeout=10)
+        self.assertNotEqual(process.returncode, 0)
+        self.tunnel_chains_absent()
+        self.assertEqual(self.verify(), 'ACTIVE')
+
     def test_activity_rejects_a_missing_ipv6_hook(self):
         self.ok('enable')
         self.ok('tunnel-on')
@@ -69,6 +94,59 @@ class TunnelAudit(tunnel.Base):
 
 
 class BridgeAudit(integration.RealEngineTests):
+    def test_failed_discovery_closes_a_port_reused_by_another_uid(self):
+        self.tailscale(46867, None)
+        self.bridge('enable')
+        self.device.add_command('pidof', '#!/bin/sh\necho 6283\n')
+        (self.proc / '8888').mkdir()
+        (self.proc / '8888' / 'status').write_text(f'Uid:\t{self.ts_data.stat().st_uid + 1}\n')
+        (self.kernel / 'ss4').write_text('UNCONN 0 0 0.0.0.0:46867 0.0.0.0:* users:(("another.app",pid=8888,fd=2))\n')
+        values = self.bridge('vpn-refresh')
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertIn('Proven-stale', values['message'])
+        self.assertEqual(self.chain('iptables', 'POCKETUFW_TS'), [])
+
+    def test_failed_refresh_closes_proven_retired_ports_without_opening_unverified_ones(self):
+        self.tailscale(46867, 43504)
+        self.bridge('enable')
+        # Discovery sees a different UID; both old ports are now absent.
+        self.tailscale(31337, 31338, uid=self.ts_data.stat().st_uid + 1)
+        values = self.bridge('vpn-refresh')
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertEqual(self.chain('iptables', 'POCKETUFW_TS'), [])
+        self.assertEqual(self.chain('ip6tables', 'POCKETUFW_TS'), [])
+
+    def test_failed_refresh_preserves_a_still_owned_port_in_the_other_family(self):
+        self.tailscale(46867, 43504)
+        self.bridge('enable')
+        (self.kernel / 'ss6').write_text('')
+        # A second, invisible process makes new discovery ambiguous. The old IPv4
+        # socket is still Tailscale-owned and must survive the failed refresh.
+        with (self.kernel / 'ss4').open('a') as out:
+            out.write('UNCONN 0 0 0.0.0.0:31337 0.0.0.0:* users:(("m.tailscale.ipn",pid=99999,fd=2))\n')
+        values = self.bridge('vpn-refresh')
+        self.assertEqual(values['operation'], 'FAILED')
+        self.assertEqual(self.chain('iptables', 'POCKETUFW_TS'), ['-p udp --dport 46867 -j ACCEPT'])
+        self.assertEqual(self.chain('ip6tables', 'POCKETUFW_TS'), [])
+
+    def test_unreadable_socket_ownership_never_closes_an_exception(self):
+        self.tailscale(46867, 43504)
+        self.bridge('enable')
+        (self.proc / '6283' / 'status').unlink()
+        before = {f: self.chain(f, 'POCKETUFW_TS') for f in integration.FAMILIES}
+        self.assertEqual(self.bridge('vpn-refresh')['operation'], 'FAILED')
+        for family in integration.FAMILIES:
+            self.assertEqual(self.chain(family, 'POCKETUFW_TS'), before[family])
+
+    def test_ipv6_socket_might_still_serve_an_old_ipv4_port(self):
+        self.tailscale(46867, 43504)
+        self.bridge('enable')
+        self.tailscale(None, 46867)
+        with (self.kernel / 'ss6').open('a') as out:
+            out.write('UNCONN 0 0 [::]:31337 [::]:* users:(("m.tailscale.ipn",pid=99999,fd=2))\n')
+        self.assertEqual(self.bridge('vpn-refresh')['operation'], 'FAILED')
+        self.assertEqual(self.chain('iptables', 'POCKETUFW_TS'), ['-p udp --dport 46867 -j ACCEPT'])
+
     def test_broken_tunnel_stays_uncovered_and_degraded_in_the_actual_bridge(self):
         self.env['POCKETUFW_SYS_NET'] = str(self.root / 'sys')
         (self.root / 'sys').mkdir()
@@ -156,7 +234,7 @@ class RollbackAudit(tunnel.Rollback):
             while not seen.exists() and time.monotonic() < until:
                 time.sleep(.02)
             self.assertTrue(seen.exists())
-            time.sleep(1.2)
+            time.sleep(2.2)
             self.assertNotEqual(self.status(), 'rollback=FIRED')
         finally:
             gate.touch()

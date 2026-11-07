@@ -52,6 +52,16 @@ timer_alive() {
   [ -n "$timer_pid" ] && kill -0 "$timer_pid" 2>/dev/null
 }
 undo_command() { if [ "$1" = physical ]; then echo disable; else echo tunnel-off; fi; }
+# Installation, confirmation and removal share one lock. The installer inherits
+# FD 7, so losing its caller cannot let the timer declare an empty table final
+# while that child can still install rules. The detached timer closes that FD.
+lock_state() {
+  command -v flock >/dev/null 2>&1 || fail 'flock unavailable; cannot guarantee rollback ordering'
+  [ ! -L "$STATE.lock" ] || fail 'unsafe rollback lock'
+  ( umask 077; : >>"$STATE.lock" && chmod 600 "$STATE.lock" ) || exit 1
+  exec 7>>"$STATE.lock"
+  flock -n -x 7 7>&7
+}
 # True if the rules this mode is responsible for may still exist. Reads the tables itself,
 # since the engine's word is what's in doubt, and a table it can't read isn't clean.
 rules_remain() {
@@ -80,11 +90,17 @@ case "$cmd" in
       [ "$s_state" != UNCLEAN ] || break
       sleep 1
     done
+    # A pre-install probe may still be running. Clean tables are not final until
+    # that installer has released its lock. Status remains ARMED/UNCLEAN meanwhile.
+    until lock_state; do
+      still_armed "$token" || exit 0
+      sleep 0.1
+    done
     attempt=0
     while [ "$attempt" -lt "$RETRIES" ]; do
       # A later `confirm` wins. Another engine operation can hold the lock for a while.
       still_armed "$token" || exit 0
-      sh "$engine" "$undo" >/dev/null 2>&1 || :
+      sh "$engine" "$undo" 7>&7 >/dev/null 2>&1 || :
       if ! rules_remain "$mode"; then
         write_state FIRED "$token" "$deadline" "$mode" "$engine"
         exit 0
@@ -102,17 +118,19 @@ case "$cmd" in
     [ "${#seconds}" -le 4 ] && [ "$seconds" -le 3600 ] || fail 'SECONDS must be 1..3600'
     [ -r "$engine" ] || fail "cannot read $engine"
     command -v setsid >/dev/null 2>&1 || fail 'setsid unavailable; refusing to test without a rollback'
+    lock_state || fail 'an installation or rollback is still running'
     if read_state && { [ "$s_state" = ARMED ] || [ "$s_state" = UNCLEAN ]; } && timer_alive; then
       fail 'a rollback is already armed; confirm it or wait for it'
     fi
     # A rollback may only ever remove what it installed.
     rules_remain "$mode" && fail 'these rules already exist, or the tables cannot be read; nothing armed'
     now=$(date +%s)
-    deadline=$((now + seconds))
+    # date truncates sub-seconds. Round up so SECONDS always grants a full window.
+    deadline=$((now + seconds + 1))
     token="$$.$now"
     rm -f "$STATE.timer"
     write_state ARMED "$token" "$deadline" "$mode" "$engine"
-    setsid sh "$0" --timer "$token" "$deadline" "$mode" "$engine" </dev/null >/dev/null 2>&1 &
+    setsid sh "$0" --timer "$token" "$deadline" "$mode" "$engine" 7>&- </dev/null >/dev/null 2>&1 &
     # No rule goes in until the timer has answered.
     polls=0
     until timer_alive; do
@@ -123,13 +141,22 @@ case "$cmd" in
       fi
       sleep 0.1
     done
-    if sh "$engine" "$install" "$@"; then
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      fail 'rollback deadline passed before installation; timer will check cleanup'
+    fi
+    if sh "$engine" "$install" "$@" 7>&7; then
+      # Never claim an armed, usable session after its deadline or a lost timer.
+      if [ "$(date +%s)" -ge "$deadline" ] || ! timer_alive; then
+        write_state UNCLEAN "$token" "$deadline" "$mode" "$engine"
+        sh "$engine" "$(undo_command "$mode")" 7>&7 >/dev/null 2>&1 || :
+        fail 'installation outlasted its rollback window or lost its timer; cleanup requested, check status'
+      fi
       echo "rollback=ARMED seconds=$seconds"
       exit 0
     fi
     # A failed install may have left anything, whatever the engine's own cleanup reported.
     if rules_remain "$mode"; then
-      sh "$engine" "$(undo_command "$mode")" >/dev/null 2>&1 || :
+      sh "$engine" "$(undo_command "$mode")" 7>&7 >/dev/null 2>&1 || :
     fi
     if rules_remain "$mode"; then
       write_state UNCLEAN "$token" "$deadline" "$mode" "$engine"
@@ -139,9 +166,13 @@ case "$cmd" in
     fail "$install failed; tables read back clean, rollback cancelled"
     ;;
   confirm)
+    lock_state || fail 'installation or rollback still running; confirmation refused'
     read_state || fail 'nothing is armed'
     [ "$s_state" = ARMED ] || fail "nothing is armed (state $s_state)"
+    [ "$(date +%s)" -lt "$s_deadline" ] || fail 'rollback deadline passed; confirmation refused'
     write_state CONFIRMED "$s_token" "$s_deadline" "$s_mode" "$s_engine"
+    # Let a timer already waiting for the lock observe CONFIRMED and stop.
+    exec 7>&-
     # A timer already past its last check may still fire, so wait and report what happened.
     polls=0
     while timer_alive && [ "$polls" -lt 40 ]; do

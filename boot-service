@@ -32,6 +32,29 @@ while [ "$(getprop sys.boot_completed)" != '1' ]; do
   # Turning the firewall off during this wait cancels the restore.
   [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
 done
+# Serialize the whole lifecycle, including boot files and final removal readback.
+# FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
+# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
+command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
+if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
+  [ ! -L "$operation_lock" ] || { echo 'pocketufw: unsafe lifecycle lock' >&2; exit 1; }
+  ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
+  exec 8>>"$operation_lock"
+fi
+operation_polls=0
+while [ "$operation_polls" -le 150 ]; do
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
+    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+    exit 75
+  fi
+  operation_polls=$((operation_polls + 1))
+  sleep 0.1
+done
+# mksh closes descriptors above 2 for children unless they are passed explicitly.
+sh() { command sh "$@" 8>&8; }
+
 # An app uninstall cannot clean up Magisk-owned files. Self-disarm on next boot,
 # only on proof it is gone: pm says "not installed" by exiting exactly 1 with no
 # package line, and the app's data is gone too. Any other answer may be transient.
@@ -43,15 +66,23 @@ if [ "$boot_settled" -eq 1 ]; then
     # Remove only our own boot files if the app was uninstalled, by exact name.
     # The running hook goes last, so an interrupted cleanup finishes next boot.
     if [ ! -L "$STORE" ]; then
-      rm -f "$MARKER" "$ENGINE" "$PROBE" "$CONFIG" "$STORE/.pocketufw.stage" \
-        "$STORE/.vpn-probe.stage" "$STORE/.udp-config.stage" "$STORE/.boot.enabled.stage"
+      # Disarm separately. A failure below must leave this hook able to retry,
+      # but never able to restore rules after a failed uninstall cleanup.
+      rm -f "$MARKER" || exit 1
+      cleanup_failed=0
+      for owned in "$ENGINE" "$PROBE" "$CONFIG" "$STORE/.pocketufw.stage" \
+        "$STORE/.vpn-probe.stage" "$STORE/.udp-config.stage" "$STORE/.boot.enabled.stage"; do
+        rm -f "$owned" || cleanup_failed=1
+        [ ! -e "$owned" ] && [ ! -L "$owned" ] || cleanup_failed=1
+      done
+      [ "$cleanup_failed" -eq 0 ] || exit 1
       rmdir "$STORE" 2>/dev/null || :
     fi
     # Magisk runs any executable in service.d, so a leftover staging copy can be
     # what is running here. Either way, the hook path may belong to someone else.
     if [ -f "$HOOK.stage" ] && [ ! -L "$HOOK.stage" ] &&
        { [ ! -s "$HOOK.stage" ] || grep -qxF "$SIGNATURE" "$HOOK.stage"; }; then
-      rm -f "$HOOK.stage"
+      rm -f "$HOOK.stage" || exit 1
     fi
     if [ -f "$HOOK" ] && [ ! -L "$HOOK" ] && grep -qxF "$SIGNATURE" "$HOOK"; then
       rm -f "$HOOK"

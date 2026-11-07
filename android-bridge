@@ -43,6 +43,29 @@ BOOT="$BASE/bootctl"
 CONFIG="$BASE/udp-config"
 [ -r "$ENGINE" ] && [ -r "$BOOT" ] && [ -r "$CONFIG" ] || exit 4
 
+# Serialize the whole lifecycle, including boot files and final removal readback.
+# FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
+# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
+command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
+if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
+  [ ! -L "$operation_lock" ] || { echo 'pocketufw: unsafe lifecycle lock' >&2; exit 1; }
+  ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
+  exec 8>>"$operation_lock"
+fi
+operation_polls=0
+while [ "$operation_polls" -le 150 ]; do
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
+    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+    exit 75
+  fi
+  operation_polls=$((operation_polls + 1))
+  sleep 0.1
+done
+# mksh closes descriptors above 2 for children unless they are passed explicitly.
+sh() { command sh "$@" 8>&8; }
+
 # Fast, read-only counter refresh. The engine itself verifies both families,
 # their owned rules and hooks before reading kernel counters. Do not query
 # boot status, saved UDP policy, or the verbose rules report for a button tap.
@@ -280,6 +303,10 @@ case "$ACTION" in
     else
       outcome='FAILED'
       message='VPN exceptions could not be refreshed; inspect firewall state.'
+      case "${refresh_output:-}" in
+        *stale_exceptions=REMOVED*)
+          message='New Tailscale listeners could not be verified. Proven-stale UDP exceptions were removed; other exceptions were kept. Recheck and retry refresh.' ;;
+      esac
     fi
     ;;
   set-ports)
@@ -535,6 +562,11 @@ echo "previous_boot=$previous_boot"
 echo "operation=$outcome"
 echo "message=$message"
 echo "state=$state"
+case "$state:$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_filter=//p')" in
+  ACTIVE:ON) echo 'tunnel_filter=ON' ;;
+  ACTIVE:OFF|INACTIVE:*) echo 'tunnel_filter=OFF' ;;
+  *) echo 'tunnel_filter=UNKNOWN' ;;
+esac
 echo "$boot"
 if [ "$ACTION" = prepare-uninstall ]; then
   echo "removal=$removal"
@@ -546,7 +578,7 @@ if [ "$state" = ACTIVE ]; then
   # These counters were measured by the same verified 'activity' command.
   # A degraded or incomplete response must never become a fabricated zero.
   if [ -n "$snapshot" ]; then
-    printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_tailnet=[0-9]+|tunnel_filter=(ON|OFF))$' || :
+    printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_tailnet=[0-9]+)$' || :
   fi
 fi
 

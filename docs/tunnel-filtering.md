@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch. Tested on real netfilter, tun and kernel WireGuard in isolated namespaces, and on one Pixel 9a with Tailscale and kernel WireGuard together, with Proton, and across Wi-Fi and cellular.** Off by default, with no switch in the app.
+**Status: development branch, optional and off by default, with no switch in the app.** The pinned-destination policy is local and awaits independent review. The phone measurements below are historical results from the earlier whole-range policy, not hardware validation of these changes. No watcher, deployment or boot restoration is added.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -52,28 +52,44 @@ Proton's Android tunnel backend. Whether a Taildrop transfer ever touches the fi
 INPUT ... -i tun+   -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN
 INPUT ... -i NAME   -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN   (each kernel WireGuard)
 
-POCKETUFW_VPN   -s TAILNET -d TAILNET -i tun+ ACCEPT · ESTABLISHED,RELATED ACCEPT · INVALID DROP · DROP
+POCKETUFW_VPN   -s TAILNET -d NODE_HOST -i tun+ ACCEPT · ESTABLISHED,RELATED ACCEPT · INVALID DROP · DROP
 ```
 
 `TAILNET` is `100.64.0.0/10` for IPv4 and `fd7a:115c:a1e0::/48` for IPv6, the ranges [Tailscale's source](https://github.com/tailscale/tailscale/blob/main/net/tsaddr/tsaddr.go) assigns from.
+
+`NODE_HOST` is the phone's initially authorized IPv4 `/32` or IPv6 `/128`, never the whole destination range.
 
 `tun+` matches whichever app holds a tun and whatever number it was given, so a new VPN is filtered as soon as it appears, with nothing watching for it. A kernel WireGuard is hooked by name because it has no common prefix, but only once the kernel reports that kind. One that comes up later is named as not filtered until `tunnel-refresh`.
 
 Other tunnels, such as carrier `ipsec`, aren't touched and stay listed as not filtered. Outside the tailnet there's no ICMP allowance, unlike the physical chain: errors for existing connections pass as `RELATED`, and pings to a VPN's address are dropped.
 
-## The tailnet is trusted by default
+## Explicit authorization of node destinations
 
-Traffic between tailnet devices passes without any per-port rule: Syncthing, Taildrop, existing SSH sessions and new ones, on any port, in both families. The rule comes first, so conntrack's view of a flow can't affect it.
+`tunnel-plan` and `tunnel-on` require one currently verified Tailscale tun and one
+node address in each family. Android's package/interface record must agree with
+an open tun descriptor held by a process with Tailscale's app ID. The probe checks
+interface identity and ownership around the address read and refuses incomplete
+Android output, missing addresses and ambiguous ownership. It never substitutes
+routes, another VPN's address, previous output or a whole destination range.
 
-**Why addresses and not the interface.** A VPN that re-establishes can come back on a different tun number, so an exemption naming `tun1` would cut the tailnet off until something noticed. Avoiding that needs a process watching for changes, and the kernel offers nothing else to match on:
+`tunnel-on` is the explicit authorization. The live rules retain the two pins;
+there is no separate address cache. Tailscale can disconnect, reconnect, change
+its tun number or become temporarily unverifiable without changing those rules.
+`tunnel-refresh` updates ordinary WireGuard hooks only, never the pins. A new node
+address requires explicit `tunnel-off` followed by `tunnel-on` while Tailscale is
+verified. Off and reboot discard the authorization. Enabling while Tailscale is
+down is refused before any tunnel rule changes, even if it was authorized earlier.
 
-- No netfilter match identifies who holds a tun. sysfs reports its owner as `-1`, and `-m owner` doesn't work on inbound traffic.
-- `addrtype --limit-iface-in` would tie a destination to the interface that holds it. The test phone's kernel doesn't have `addrtype`.
-- Android marks each network's packets, but with a rule that names the interface, and the mark changed each time Tailscale came back. Matching it would still need something to follow it.
+Traffic from the tailnet source ranges to either pin passes on `tun*`, on any port,
+before conntrack checks. Ordinary Tailscale reconnections therefore need no watcher.
+A different local address in CGNAT or the IPv6 tailnet range is no longer trusted.
+Traffic outside the source ranges still needs an established/related connection;
+this includes subnet-router traffic with SNAT disabled.
 
-A node's tailnet addresses don't depend on any of that, so they're what the rule matches. They change only if the node is re-registered or signs in to another tailnet, and the rule covers the whole range, so that's fine too. It needs no proof at install and no refresh afterwards, and works the same whether Tailscale was up when the filter went on.
-
-**Traffic the rule doesn't cover stays filtered, even on Tailscale's own tun:** a source outside the tailnet, or a tailnet source aimed at any other local address, such as the phone's Wi-Fi address. A kernel WireGuard shares the chain. It cannot use this exemption when its name does not start with `tun`; a WireGuard named `tun5` can. The wildcard tests names, not interface kinds. A subnet router with SNAT turned off delivers its LAN's addresses as the source, so those packets are dropped unless they're replies.
+This authenticates the initial address selection, not subsequent packets. Static
+iptables rules cannot identify the app holding a tun. Matching the current name
+would break reconnections when Android renumbers it. `-m owner` is not an INPUT
+match, and interface/address association would not authenticate the packet source.
 
 **A few drops at startup are normal.** Each time Tailscale's tun came up on the test phone, `ipv6_tunnel_blocked` rose by about 6 within a second, then stayed still. In the run that was captured, their byte counts fit the phone's own multicast listener reports exactly, and no peer sent anything like them. A later run showed the same 6 packets and 536 bytes, and Proton showed the matching 4 packets and 364 bytes after a reconnect. Separately, IPv4 packets of about 1.3 KB each were dropped for a while after a reconnect, and similar ones after a network change, with none in 62 s of normal browsing on Proton. That fits servers resending for abandoned connections, but they weren't captured. That phone holds a multicast routing socket (`mc_forwarding=1`), which is the likely reason its own reports loop back through `INPUT`. This wasn't reproduced in the lab, where the test tun sent no reports at all, so the mechanism is unproven. Tailnet traffic was unaffected.
 
@@ -86,23 +102,49 @@ A node's tailnet addresses don't depend on any of that, so they're what the rule
 
 An app can choose its process name but not its app ID, and it can't open `/dev/tun` itself. The scan covers just the claimed app's processes: walking every descriptor on the phone hadn't finished after two minutes, while the whole probe takes about 1.4 s.
 
-The kernel can't enforce any of this, so the proof audits the rule and doesn't decide connectivity. `tunnel-on`, `tunnel-refresh` and `tunnel-status` say who holds tailnet addresses right now:
+Initial authorization uses that ownership proof. Later observations describe
+current ownership without revoking or expanding the pins. Status separates them:
 
-| Line | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `tailnet=VERIFIED iface=tun1` | Tailscale, proven by Android and the kernel. |
-| `tailnet=UNVERIFIED iface=tun9 owner=... proof=...` | A tun holds a tailnet address and isn't proven Tailscale's, so the rule reaches it too. That's coverage gap 2 below. A slow `dumpsys` can also cause this for Tailscale itself. |
-| `tailnet=DOWN` | No tun holds one. |
+| `tailnet_trust=PINNED_DESTINATIONS` | The installed exception grammar contains one exact node destination per family. |
+| `tailnet_pin4`, `tailnet_pin6` | The destinations actually retained in the live rules. |
+| `tailnet_ingress=ADDRESS_ONLY` | Packets are not authenticated by source or interface ownership. |
+| `tailnet=VERIFIED iface=...` | This interface currently holds a tailnet address and has verified Tailscale ownership; it does not authenticate other ingress paths. |
+| `tailnet=UNVERIFIED ...` | Another or unproven interface holds an address in a tailnet range; that alone does not grant it an exception. |
+| `tailnet=DOWN` | No observed `tun*` holds a tailnet address. Pins can still be installed. |
+| `tailnet_current=MATCH` | Current verified node addresses match the installed pins. |
+| `tailnet_current=REAUTHORIZE` | Verified node addresses differ; refresh will not change trust. |
+| `tailnet_current=UNVERIFIED` | Current authorization could not be verified; installed pins stay unchanged. |
+| `tailnet_wireguard=CONFLICT` | A kernel WireGuard currently has a `tun*` name. Live rules remain installed and may trust its packets; overall verification is DEGRADED. |
+| `tailnet_wireguard=NONE_OBSERVED` / `UNKNOWN` | No current conflict was observed, or interface kinds could not be read. Neither predicts future devices. |
 
-## Coverage gaps
+## Remaining trust limitations and WireGuard
 
-**For the independent audit before release: the tailnet rule trusts addresses, not Tailscale ownership.** Any `tun*` ingress can use the rule with a source in the selected range and a local destination in that range. The ingress interface itself does not need to hold that destination. The kernel can't enforce ownership, so `tailnet=VERIFIED` describes the moment it was read and doesn't guarantee anything afterwards. The test phone demonstrated this: tailnet-addressed packets written into an unrelated temporary tun reached the kernel, and `tunnel-status` reported `tailnet=UNVERIFIED`. The independent audit confirmed the gap; a release decision remains pending. `VERIFIED` describes address ownership at inspection, not the trustworthiness of all possible ingress paths.
+1. **Injection to a pinned local destination remains possible.** A different `tun*`
+   can inject a tailnet source addressed to a pin, even without holding that address
+   itself. A second Android VPN can exist in another user/work profile, or a tunnel
+   can be root-managed. Pins reduce accidental CGNAT trust; they do not authenticate
+   the sender. Real namespace tests deliberately retain this passing-packet proof.
+2. **Kernel WireGuard named `tun*` shares the wildcard.** Initial authorization and
+   installation refuse an observed conflict, even if Android claims it is Tailscale.
+   `verify`, `activity` and the app report DEGRADED if one appears or is renamed later.
+   This is detection on explicit inspection, not automatic blocking or cleanup. Its
+   decrypted packets can still use a pin if WireGuard permits that source. Rename
+   the conflicting WireGuard or turn the optional filter off, then recheck. A static
+   name exclusion could later block Tailscale when it reuses that name, so none is
+   installed. There is no persistent watcher or claim of protection between reads.
+3. **Source trust still covers the tailnet ranges.** Legitimate tailnet peers can
+   reach listeners at the pinned addresses subject to Tailscale's access rules.
+   Pinning is not per-peer or per-service authorization.
+4. **Earlier Android/OEM ACCEPT rules can bypass appended hooks.** They remain
+   untouched and the bounded rules report identifies direct ACCEPTs before relevant
+   hooks. Foreign chains are not recursively audited.
 
-Trusting the tailnet with no watcher costs these. The first two are pinned by a test that passes packets on purpose.
-
-1. **A second tun alongside Tailscale can claim tailnet addresses.** Its packets pass if they use a tailnet source and a local tailnet destination, because the kernel can't tell the two tuns apart. Android allows one VPN per user, so this needs a second user or work profile, or a root-run tunnel. A kernel WireGuard named `tun*` can also match the rule if its peer is permitted to send the source address.
-2. **Another VPN whose own address is in `100.64.0.0/10`** gets the rule for traffic from that range. Everything else on that VPN is still filtered, and `tunnel-status` reports it as `UNVERIFIED`. The Proton WireGuard configuration seen on the test phone uses `10.2.0.2`.
-3. **Trust is for the whole tailnet.** A compromised tailnet device can reach anything listening on the phone's tailnet address. Tailscale's ACLs are what limit that.
+Old whole-range rules are DEGRADED under this version. They are neither called
+pinned nor silently migrated: remove them with `tunnel-off`, then authorize anew.
+No read command revokes existing rules. Root controls the firewall and can alter
+pins or bypass this policy; verification is not an attestation against root.
 
 ## A reverse SSH tunnel
 
@@ -113,7 +155,7 @@ If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then 
 | Action | Tunnel rules |
 | --- | --- |
 | `enable` | Never installed. Refused if any remain. |
-| `tunnel-on` | Requires a verified firewall. Installs chains first and hooks last. Rolls back on any failure or failed read-back, and reports who holds tailnet addresses. |
+| `tunnel-on` | Requires a verified firewall and current dual-family Tailscale address authorization, with no observed `tun*` WireGuard conflict. Installs chains first and hooks last. Rolls back on any failure or failed read-back, and reports who holds tailnet addresses. |
 | `verify` | Off is fine. If on, the exact rules in both families, or `DEGRADED`, which also blocks refreshes and counter resets. |
 | `activity`, `verbose` | `tunnel_filter`, `tunnel_hooks`, and separate `ipv4_tunnel_*` and `ipv6_tunnel_*` counters, including `ipv4_tunnel_tailnet`. Physical counters mean what they always meant. |
 | `reset-counters` | Includes the tunnel chains when present. |
@@ -177,8 +219,8 @@ Run on a Pixel 9a from this branch's scripts, pushed over adb and deleted afterw
 
 ## Independent audit remediation — local, November 7, 2026
 
-These changes have not been deployed to a phone. The tunnel packet policy, including the
-existing tailnet exemption, is unchanged. Previous hardware results above apply
+These lifecycle changes were not deployed to a phone. This audit-fix series initially
+left the tailnet policy unchanged; the subsequent pinned policy is described above. Previous hardware results above apply
 to the earlier revision; they are not claims of hardware validation of these fixes.
 
 - `activity` and `verbose` now verify the same complete dual-family policy as
@@ -235,33 +277,21 @@ or rule removal. There is no background monitor or automatic repair. A reachable
 unrelated listener reusing that port is the meaningful exposure; an unbound port
 is not an exposed application service.
 
-### Tailnet policy proposal — not implemented
+### Pinned-policy follow-up — local, pending independent review
 
-The safest small static improvement that preserves ordinary automatic reconnects
-is **explicit address trust pinned to this node's verified IPv4 `/32` and IPv6
-`/128` destinations**, with the existing tailnet source ranges. Capture the node
-addresses only with verified Tailscale ownership, retain them while its interface
-is down or renumbered, and do not automatically widen them to a range. Enabling
-while Tailscale is down needs previously supplied trusted addresses or an explicit
-refusal; it must not silently install a policy that cuts off the next reconnect.
+The proposed destination pinning is now implemented, with explicit initial
+ownership verification and no automatic broadening. Its rules and limitations
+are described above. It adds no stored authorization, watcher, boot opt-in, UI
+switch or provider integration. The feature remains CLI-only and off by default.
 
-| Choice | Reconnection | Remaining tradeoff |
-| --- | --- | --- |
-| Current whole-range trust | Works before Tailscale starts and after renumbering | Unrelated CGNAT VPNs inherit trust; any `tun*` injector can target a local tailnet address |
-| Pin verified node destinations, with explicit opt-in | Ordinary disconnect/reconnect and renumbering keep working | Reduces accidental CGNAT trust, but a deliberate injector can still spoof traffic to those addresses; re-registration/address changes need re-authorization |
-| Bind trust to the currently verified interface | Requires a refresh if its name changes | Stronger at that inspection, but a name can be reused; static names are not lasting ownership proof and can break unattended reconnects |
-| Trusted provider lifecycle update | Could update ownership-bound rules without a watcher | Requires an authenticated, supported provider integration that this project does not have; do not assume Android broadcasts provide it |
+Validation includes authorization failures, changing interface identity, partial
+Android output, address changes requiring reauthorization, disconnect/renumber
+continuity, old-range rejection, and a later `tun*` WireGuard conflict. Existing
+lifecycle and rollback tests now authorize a node before installing the optional
+policy. Hardware validation of this revision remains outstanding by design.
 
-Pinning destinations is a risk reduction, not Tailscale ownership enforcement.
-`-m owner` is not an INPUT match. `addrtype` is unavailable on the tested phone
-and, even where available, interface/address association does not authenticate
-who supplies the packet. A kernel WireGuard named `tun*` also needs explicit
-consideration; classifying currently known devices cannot guarantee the type of
-a future device without an update mechanism.
-
-Recommendation: keep this experimental feature off by default and retain the
-current policy in this fix series. Before release, decide whether explicit,
-narrowed address trust and its residual injection risk are acceptable. If actual
-owner enforcement is required, defer release of automatic tailnet exemption
-until a trustworthy lifecycle mechanism exists. No watcher, allowlist UI or
-provider integration is being added in this series.
+Local results: the full Python suite completed 588 tests with one unrelated
+Pillow-dependent icon check skipped. All 28 final authorization/ownership tests
+passed, including the additional final-read regression, and all 204 Android unit
+tests passed offline. Real TUN and WireGuard packet tests ran in isolated host
+namespaces. No phone deployment, signing, push or merge was performed.

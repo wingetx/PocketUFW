@@ -290,4 +290,52 @@ Every probe was seen arriving at Wi-Fi. Other traffic also reached these rules d
 
 **Limits of this run:** the bridge was checked as far as SSH key exchange, because this test host had no login for it. WireGuard wasn't restarted while the filter was on, and no unsolicited packet was sent inside it, because that needs control of the far end.
 
-**Not tested here:** a real unsolicited packet dropped inside a tunnel, which is lab only because nothing else can be sent into these tunnels from outside. Also Proton, cellular, and a completed Taildrop.
+**Not tested here:** a real unsolicited packet dropped inside these tunnels, because nothing else can be sent into them from outside, and a completed Taildrop. Proton and cellular follow below.
+
+### Proton and cellular on the Pixel 9a (November 7, 2026)
+
+Same method as above: development branch scripts over adb, no app build, and the owner's approval first. Every run armed a rollback timer for the physical firewall and confirmed it before any tunnel rule went in. Normal-app checks ran as the `adb shell` identity, which uses Android's routing and DNS. No code changed for these tests.
+
+**Proton's Android VPN, with kernel WireGuard off.** Android allows one app VPN, so Proton replaced Tailscale.
+
+- `vpn-probe` showed Proton's `tun0` as `proof=verified`, and Android's VPN record agreed. Its IPv4 and IPv6 addresses are outside the tailnet range, so `tailnet=DOWN`. Android's rules routed UIDs 0 to 99999 into it.
+- Hostnames resolved, ping got 3 of 3 on both families, and TCP to port 443 by name connected. Fetches forced through the tun returned on both families from an exit different from Wi-Fi's.
+- With the filters on, LAN probes were dropped and none answered. IPv4 UDP and SYN counts and bytes were exact. IPv6 had 4 extra packets in some windows, 172 bytes each, on top of exact probe bytes. Those were other traffic, and the source wasn't captured.
+- Disconnecting and reconnecting Proton took about 12 s and gave a new interface index and network mark, still as `tun0`. Rules stayed byte-identical with nothing run on them, and every check passed again. Pages loaded normally in the owner's browser before and after.
+- Tunnel drops during 62 s of real browsing with no reconnect: **0**, while about 3.7 MB passed as established. After a reconnect: 4 IPv6 packets at startup (364 bytes, the same as Tailscale's) and 5 IPv4 packets of about 1.3 KB each, roughly 6 s apart, with traffic still flowing. That fits servers resending data for connections the phone abandoned, but the packets weren't captured, so it isn't proven. One IPv6 packet was dropped as `INVALID`.
+
+**Dropping real packets inside a tun, on this phone's kernel.** Nothing else can send unsolicited packets into Proton's tunnel, and a zero on that counter proves nothing either way. So a temporary test tun was created alongside Proton, and packets were written into it. With the firewall off, 20 of 20 reached the kernel in each family. With the filters on, 20 were sent per case:
+
+| Packets written into the test tun | Tunnel DROP | Tailnet rule | Reached the kernel |
+| --- | --- | --- | --- |
+| Outside source, IPv4 | +20, exact bytes | 0 | No |
+| Outside source, IPv6 | +20, exact bytes | 0 | No |
+| Outside source to a tailnet-range address, IPv4 | +20, exact bytes | 0 | No |
+| Tailnet-range source to another local address, IPv4 | +20, exact bytes | 0 | No |
+| Tailnet-range source and destination, IPv4 | 0 | +20 | **Yes** |
+| Tailnet-range source and destination, IPv6 | 0 | +20 | **Yes** |
+
+"No" means the kernel's closed-port counter didn't rise by the packets sent. It moved by 1 or 2 from unrelated traffic in some windows. The last two rows are the address-trust gap demonstrated on hardware: a tun that isn't Tailscale's received tailnet-addressed packets, and `tunnel-status` reported `tailnet=UNVERIFIED`.
+
+**This shows the rule enforces on this kernel, on a device `tun+` matches. It doesn't show a packet being dropped on Proton's own tunnel.**
+
+**Wi-Fi to cellular and back, with Tailscale and kernel WireGuard up and both filters on:**
+
+| Check | Wi-Fi off | Wi-Fi back on |
+| --- | --- | --- |
+| Default network switched | 1.6 s | 1.9 s |
+| Rules | Byte-identical, `verify` ACTIVE | Byte-identical, `verify` ACTIVE |
+| DNS, Tailnet, WireGuard, bridge, Syncthing | All back by about 16 s | All back by about 14 s |
+| IPv4 and IPv6 by name, as a normal identity | Passed | Passed |
+| Fetch out the carrier interface | Passed on both families | Not applicable |
+| Syncthing, both directions, hashes checked | Passed | Passed |
+
+The reconnect times are upper limits, because the checks ran one after another. Tailscale stayed on `tun1` and moved its direct path to the carrier's IPv6 address and back.
+
+- **Carrier hooks:** interface names didn't change. Traffic reached the `rmnet+` and `v4-rmnet+` hooks, about 250 and 60 packets. Of 10 unsolicited packets sent to the cellular IPv6 address, 9 were seen arriving on the carrier interface, the IPv6 DROP count rose by 9, and none were answered. The capture logged one more probe on another interface, which wasn't identified. The carrier didn't block them, so this hook is proven in real use.
+- **Not probed on cellular:** IPv4. The phone's IPv4 there is behind 464XLAT, so a LAN host can't address it.
+- **IMS and calling:** the IMS network was connected at every check, and no `ipsec` interface appeared. The owner placed a test call on cellular with both filters on, and it worked. `oem_in` was empty at every check in this run. IMS registration itself isn't visible to these scripts, and Wi-Fi calling wasn't active, so neither is tested.
+- **Tunnel drops:** 15 IPv4 packets of about 1.4 KB each over the run, at least 5 of them after the switch to cellular, and none on IPv6. The size matches what followed a Proton reconnect.
+- **One unexplained miss:** IPv6 ping by name got 0 of 3 once on Wi-Fi just after the filters went on. It then passed on cellular, back on Wi-Fi with the filters on, and three more times with them off.
+
+**Afterwards:** `residue` was clean, and the tables matched the saved original apart from Android's quota numbers and WireGuard's own port.

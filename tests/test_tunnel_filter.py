@@ -35,11 +35,12 @@ while read -r address; do
 done < "$PUFW_TEST_DIR/addr.$5"
 '''
 TAILNET = {'iptables': '100.64.0.0/10', 'ip6tables': 'fd7a:115c:a1e0::/48'}
+PINS = {'iptables': '100.64.0.1/32', 'ip6tables': 'fd7a:115c:a1e0::1/128'}
 HOOK_TUN = f'-i tun+ -m comment --comment {TAG} -j POCKETUFW_VPN'
 
 
 def tailnet_rule(fam):
-    return f'-s {TAILNET[fam]} -d {TAILNET[fam]} -i tun+ -j ACCEPT\n'
+    return f'-s {TAILNET[fam]} -d {PINS[fam]} -i tun+ -j ACCEPT\n'
 
 
 class Base(unittest.TestCase):
@@ -75,6 +76,7 @@ class Base(unittest.TestCase):
     def device(self, name, wireguard=False, tun_flags=None):
         path = self.sys / name
         path.mkdir()
+        (path / 'ifindex').write_text(str(50 + len(list(self.sys.iterdir()))) + '\n')
         (path / 'uevent').write_text(f'{"DEVTYPE=wireguard" + chr(10) if wireguard else ""}INTERFACE={name}\n')
         if tun_flags:
             (path / 'tun_flags').write_text(tun_flags + '\n')
@@ -143,6 +145,7 @@ class OptionalAndSeparate(Base):
         self.assertNotIn('POCKETUFW_VPN', self.ok('plan'))
 
     def test_the_physical_policy_is_byte_identical_with_the_filter_on_and_after_it_is_off(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable', '--tailscale-udp4', '46867', '--tailscale-udp6', '43504')
         before = {(fam, chain): self.read(fam, chain) for fam in ('iptables', 'ip6tables')
                   for chain in ('INPUT', 'POCKETUFW_IN', 'POCKETUFW_TS')}
@@ -159,6 +162,7 @@ class OptionalAndSeparate(Base):
         self.assertEqual(self.verify(), 'ACTIVE')
 
     def test_it_needs_a_verified_firewall_and_otherwise_changes_nothing(self):
+        self.proven_tailscale('tun-auth')
         result = self.run_cmd('tunnel-on')
         self.assertNotEqual(result.returncode, 0)
         self.tunnel_chains_absent()
@@ -168,6 +172,7 @@ class OptionalAndSeparate(Base):
         self.tunnel_chains_absent()
 
     def test_it_refuses_to_install_twice_or_alongside_afwall(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         self.assertNotEqual(self.run_cmd('tunnel-on').returncode, 0)
@@ -181,12 +186,13 @@ class OptionalAndSeparate(Base):
         before = sorted(path.name for path in self.base.iterdir())
         output = self.ok('tunnel-plan')
         self.assertIn('DRY RUN', output)
-        self.assertIn('iptables -w -A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.0/10 -i tun+ -j ACCEPT', output)
-        self.assertIn('ip6tables -w -A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::/48 -i tun+ -j ACCEPT', output)
+        self.assertIn('iptables -w -A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.1/32 -i tun+ -j ACCEPT', output)
+        self.assertIn('ip6tables -w -A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::1/128 -i tun+ -j ACCEPT', output)
         self.assertEqual(sorted(path.name for path in self.base.iterdir()), before)
         self.tunnel_chains_absent()
 
     def test_exact_rules_in_both_families(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         for fam in ('iptables', 'ip6tables'):
@@ -199,6 +205,7 @@ class OptionalAndSeparate(Base):
         self.assertEqual(self.verify(), 'ACTIVE')
 
     def test_a_failed_install_removes_only_tunnel_rules(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         physical = self.read('iptables', 'POCKETUFW_IN')
         result = self.run_cmd('tunnel-on', PUFW_TEST_FAIL=f'-A INPUT {HOOK_TUN}', PUFW_TEST_FAIL_FAMILY='ip6tables')
@@ -213,6 +220,7 @@ class WhatGetsHooked(Base):
         return [line.split()[1] for line in self.read(fam).splitlines() if TAG in line]
 
     def test_kernel_wireguard_is_found_by_kernel_type_never_by_name(self):
+        self.proven_tailscale('tun-auth')
         self.device('US-TEST-1', wireguard=True)
         self.device('wg0')
         self.device('wireguard0')
@@ -221,13 +229,15 @@ class WhatGetsHooked(Base):
         self.assertEqual(self.hooks(), ['tun+', 'US-TEST-1'])
         self.assertEqual(self.hooks('ip6tables'), ['tun+', 'US-TEST-1'])
 
-    def test_a_wireguard_named_like_a_tun_is_not_hooked_twice(self):
+    def test_a_wireguard_named_like_a_tun_refuses_initial_trust(self):
+        self.proven_tailscale('tun-auth')
         self.device('tun5', wireguard=True)
         self.ok('enable')
-        self.ok('tunnel-on')
-        self.assertEqual(self.hooks(), ['tun+'])
+        self.assertNotEqual(self.run_cmd('tunnel-on').returncode, 0)
+        self.tunnel_chains_absent()
 
     def test_other_tunnels_and_names_that_could_mislead_iptables_are_left_alone(self):
+        self.proven_tailscale('tun-auth')
         self.device('ipsec0')
         self.device('v4-rmnet16', tun_flags='0x1001')
         self.device('wlan9', wireguard=True)
@@ -240,6 +250,7 @@ class WhatGetsHooked(Base):
         self.assertEqual(self.hooks(), ['tun+'])
 
     def test_too_many_tunnels_refuses_rather_than_covering_some(self):
+        self.proven_tailscale('tun-auth')
         for number in range(8):
             self.device(f'wgx{number}', wireguard=True)
         self.ok('enable')
@@ -248,6 +259,7 @@ class WhatGetsHooked(Base):
         self.tunnel_chains_absent()
 
     def test_an_unfinished_inventory_decides_nothing(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.assertNotEqual(self.run_cmd('tunnel-on', POCKETUFW_SYS_NET=str(self.base / 'missing')).returncode, 0)
         self.tunnel_chains_absent()
@@ -341,19 +353,12 @@ class Tailnet(Base):
         for fam, text in rules.items():
             self.assertEqual(self.read(fam) + self.read(fam, 'POCKETUFW_VPN'), text)
 
-    def test_the_rules_do_not_depend_on_what_can_be_proven_at_install(self):
-        """Tailscale might be off, or dumpsys slow. Either way it mustn't lose its tailnet later."""
-        expected = None
-        for arrange in (lambda: self.proven_tailscale('tun1'),
-                        lambda: None,
-                        lambda: (self.device('tun3', tun_flags='0x1001'), self.holds('tun3', '100.64.0.1'))):
-            arrange()
-            self.ok('enable')
-            self.ok('tunnel-on')
-            rules = self.read('iptables', 'POCKETUFW_VPN') + self.read('ip6tables', 'POCKETUFW_VPN')
-            expected = expected or rules
-            self.assertEqual(rules, expected)
-            self.ok('disable')
+    def test_initial_authorization_cannot_be_deferred_until_tailscale_starts(self):
+        self.ok('enable')
+        self.assertNotEqual(self.run_cmd('tunnel-on').returncode, 0)
+        self.tunnel_chains_absent()
+        self.proven_tailscale()
+        self.ok('tunnel-on')
 
     def test_proven_tailscale_is_reported_verified(self):
         self.proven_tailscale('tun7')
@@ -426,6 +431,7 @@ class Verification(Base):
         self.assertEqual(self.verify(), 'DEGRADED')
 
     def test_any_change_to_the_tunnel_rules_is_degraded(self):
+        self.proven_tailscale('tun-auth')
         for fam in ('iptables', 'ip6tables'):
             rule = tailnet_rule(fam)
             tailnet = TAILNET[fam]
@@ -461,6 +467,7 @@ class Verification(Base):
                     self.fresh_tables()
 
     def test_a_chain_missing_from_one_family_is_degraded(self):
+        self.proven_tailscale('tun-auth')
         for fam in ('iptables', 'ip6tables'):
             with self.subTest(fam=fam):
                 self.ok('enable')
@@ -470,6 +477,7 @@ class Verification(Base):
                 self.ok('disable')
 
     def test_hooks_that_differ_between_families_are_degraded(self):
+        self.proven_tailscale('tun-auth')
         self.device('US-TEST-1', wireguard=True)
         self.ok('enable')
         self.ok('tunnel-on')
@@ -478,6 +486,7 @@ class Verification(Base):
         self.assertEqual(self.verify(), 'DEGRADED')
 
     def test_tunnel_rules_without_the_physical_policy_are_degraded_not_inactive(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         for fam in ('iptables', 'ip6tables'):
@@ -511,6 +520,7 @@ class Counters(Base):
         self.assertEqual(values['tunnel_filter'], 'ON')
 
     def test_a_listing_that_cannot_be_read_is_never_a_zero(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         for shape in ('no_header', 'no_established', 'no_invalid', 'no_final_drop', 'extra_drop', 'no_tailnet'):
@@ -520,6 +530,7 @@ class Counters(Base):
                 self.assertNotIn('ipv4_tunnel_blocked', result.stdout)
 
     def test_verbose_reports_the_filter(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.assertIn('Tunnel filter: OFF', self.ok('verbose'))
         self.ok('tunnel-on')
@@ -529,6 +540,7 @@ class Counters(Base):
         self.assertIn('Tunnel IPv4 blocked: 5 packets', output)
 
     def test_reset_zeroes_tunnel_chains_only_when_they_exist(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('reset-counters')
         events = (self.base / 'zero_events').read_text()
@@ -560,6 +572,7 @@ class Lifecycle(Base):
         self.assertEqual(self.verify(), 'INACTIVE')
 
     def test_tunnel_off_is_idempotent_and_leaves_the_firewall_on(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-off')
         self.ok('tunnel-on')
@@ -569,6 +582,7 @@ class Lifecycle(Base):
         self.assertEqual(self.verify(), 'ACTIVE')
 
     def test_a_failed_removal_says_so(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         result = self.run_cmd('tunnel-off', PUFW_TEST_FAIL='-X POCKETUFW_VPN')
@@ -577,6 +591,7 @@ class Lifecycle(Base):
         self.assertNotEqual(result.returncode, 0)
 
     def test_someone_elses_rule_naming_the_chain_is_never_deleted(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         foreign = '-i wlan0 -p tcp -j POCKETUFW_VPN\n'
@@ -585,6 +600,7 @@ class Lifecycle(Base):
         self.assertIn(foreign, self.read('iptables'))
 
     def test_enable_refuses_while_tunnel_rules_remain(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         result = self.run_cmd('enable')
@@ -594,6 +610,7 @@ class Lifecycle(Base):
 
 class Refresh(Base):
     def test_a_new_wireguard_is_hooked_and_a_gone_one_unhooked(self):
+        self.proven_tailscale('tun-auth')
         self.device('US-TEST-1', wireguard=True)
         self.ok('enable')
         self.ok('tunnel-on')
@@ -608,6 +625,7 @@ class Refresh(Base):
         self.assertEqual(self.verify(), 'ACTIVE')
 
     def test_refresh_refuses_too_many_tunnels_and_changes_nothing(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         before = self.read('iptables')
@@ -656,13 +674,14 @@ class Report(Base):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertIn(f'hook4_04=-A INPUT {HOOK_TUN}', lines)
-        self.assertIn('main4_09=-A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.0/10 -i tun+ -j ACCEPT', lines)
-        self.assertIn('main6_09=-A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::/48 -i tun+ -j ACCEPT', lines)
+        self.assertIn('main4_09=-A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.1/32 -i tun+ -j ACCEPT', lines)
+        self.assertIn('main6_09=-A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::1/128 -i tun+ -j ACCEPT', lines)
         self.assertIn('main4_10=-A POCKETUFW_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT', lines)
         self.assertIn('main4_12=-A POCKETUFW_VPN -j DROP', lines)
         self.assertEqual(lines[-1], 'rules_report=READY')
 
     def test_a_hooked_chain_that_cannot_be_read_voids_the_report(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         (self.base / 'ip6tables.POCKETUFW_VPN').unlink()
@@ -671,6 +690,7 @@ class Report(Base):
         self.assertNotIn('rules_report=READY', result.stdout)
 
     def test_an_accept_ahead_of_the_tunnel_hook_is_reported_as_a_bypass(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         text = self.read('iptables')
@@ -679,6 +699,7 @@ class Report(Base):
         self.assertIn('input_bypass4_01=-A INPUT -i tun+ -j ACCEPT', result.stdout)
 
     def test_an_accept_after_every_hook_is_not_a_bypass(self):
+        self.proven_tailscale('tun-auth')
         self.ok('enable')
         self.ok('tunnel-on')
         self.write('iptables', 'INPUT', self.read('iptables') + '-i tun+ -j ACCEPT\n')
@@ -688,6 +709,7 @@ class Report(Base):
 class Rollback(Base):
     def setUp(self):
         super().setUp()
+        self.proven_tailscale()
         self.ok('enable')
 
     def tool(self, *args, **extra):

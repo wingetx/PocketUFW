@@ -297,6 +297,15 @@ other_vpn() {
   peer ip route add 10.2.0.2/32 dev far0 src 10.2.0.1
   peer ip -6 route add fd00:2::2/128 dev far0 src fd00:2::1
 }
+# Verified node for tests whose packet path is a different VPN or kernel WG.
+# It remains separate from that path; packet-delivery assertions still use the latter.
+authorization_tun() {
+  near_tun tun-auth auth com.tailscale.ipn
+  ip addr add "$PHONE4/32" dev tun-auth
+  ip -6 addr add "$PHONE6/128" dev tun-auth nodad
+  ip link set tun-auth up
+  export TEST_VPN_OWNER=com.tailscale.ipn TEST_VPN_IFACE=tun-auth
+}
 # to_phone FAM SRC DST PORT COUNT: datagrams from the far side that reach a listener on the phone.
 to_phone() {
   local mark="$WORK/mark.$RANDOM$RANDOM"
@@ -383,6 +392,7 @@ class TunnelKernelTests(unittest.TestCase):
         values = self.namespace(r'''
         link wlan0 9
         other_vpn tun7
+        authorization_tun
         sh "$ENG" enable >/dev/null || exit 91
         say tcp_before "$(peer $T connect_from 4 10.2.0.1 10.2.0.2 47932 1)"
         say control "$(to_phone 4 10.2.0.1 10.2.0.2 47931 10)"
@@ -633,8 +643,8 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertEqual(values['hits_unchanged'], 'yes')
         self.assertEqual(values['its_own_inbound'], '0')
 
-    def test_the_documented_coverage_gaps_are_exactly_these(self):
-        '''These two pass packets on purpose. If either stops, the docs are wrong too.'''
+    def test_pins_close_cgnat_trust_but_not_injection_to_the_node(self):
+        '''A deliberate injector still reaches the pin; another VPN address is blocked.'''
         values = self.namespace(r'''
         tailscale tun1
         near_tun tun9 other ch.protonvpn.android
@@ -654,7 +664,7 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertEqual(values['second_tun'], '5')
         self.assertEqual(values['second_tun_off_tailnet'], '0')
         self.assertEqual(values['status'], 'VERIFIED iface=tun1;UNVERIFIED iface=tun9 owner=unknown proof=none;')
-        self.assertEqual(values['cgnat_peer'], '5')
+        self.assertEqual(values['cgnat_peer'], '0')
         self.assertEqual(values['cgnat_vpn_internet'], '0')
 
     @unittest.skipIf(NO_WIREGUARD, NO_WIREGUARD)
@@ -662,6 +672,7 @@ class TunnelKernelTests(unittest.TestCase):
         values = self.namespace(r'''
         link wlan0 9
         sh "$ENG" enable >/dev/null || exit 91
+        authorization_tun
         umask 077
         wg genkey > "$WORK/a.key"; wg genkey > "$WORK/b.key"
         a_pub=$(wg pubkey < "$WORK/a.key"); b_pub=$(wg pubkey < "$WORK/b.key")
@@ -697,7 +708,7 @@ class TunnelKernelTests(unittest.TestCase):
         peer $N echo 4 7777 "$WORK/echo4a" &
         wait_for "$WORK/echo4a"
         say replies_off "$($N ask 4 10.2.0.1 7777 3)"
-        say kernel_type "$(sh "$DEVICE/engine/vpn-probe" tunnels | grep '^tunnel=')"
+        say kernel_type "$(sh "$DEVICE/engine/vpn-probe" tunnels | grep '^tunnel=US-TEST-1 ')"
         say control4 "$(inner 4 10.2.0.2 47931 5)"
         say control6 "$(inner 6 fd00:2::2 47931 5)"
         sh "$ENG" tunnel-on >/dev/null || exit 92
@@ -714,6 +725,23 @@ class TunnelKernelTests(unittest.TestCase):
         peer ip route add 100.64.0.1/32 dev far-wg src 100.64.0.2
         say claims_tailnet "$(inner 4 100.64.0.1 47931 5)"
         say tailnet_hits "$(kv ipv4_tunnel_tailnet)"
+        # A later rename crosses the wildcard boundary. It cannot be authenticated
+        # by static rules: detect and disclose the conflict instead of claiming ACTIVE.
+        ip link set US-TEST-1 down
+        ip link set US-TEST-1 name tun5
+        ip link set tun5 up
+        ip route replace 10.2.0.1/32 dev tun5
+        peer $N echo 4 7779 "$WORK/echo-renamed" &
+        wait_for "$WORK/echo-renamed"
+        say renamed_replies "$($N ask 4 10.2.0.1 7779 3)"
+        say renamed_state "$(sh "$ENG" verify)"
+        say renamed_conflict "$(sh "$ENG" tunnel-status | sed -n 's/^tailnet_wireguard=//p')"
+        say renamed_pinned_injection "$(inner 4 100.64.0.1 47932 5)"
+        ip link set tun5 down
+        ip link set tun5 name US-TEST-1
+        ip link set US-TEST-1 up
+        ip route replace 10.2.0.1/32 dev US-TEST-1
+        ip -6 route replace fd00:2::1/128 dev US-TEST-1
         # Replies to what the phone started pass, so the encrypted path still runs too.
         sleep 1.6
         peer $N echo 4 7778 "$WORK/echo4b" &
@@ -737,6 +765,10 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertGreaterEqual(int(values['blocked6']), 5)
         self.assertEqual(values['claims_tailnet'], '0')
         self.assertEqual(values['tailnet_hits'], '0')
+        self.assertEqual(values['renamed_state'], 'DEGRADED')
+        self.assertEqual(values['renamed_conflict'], 'CONFLICT')
+        self.assertEqual(values['renamed_replies'], '3')
+        self.assertEqual(values['renamed_pinned_injection'], '5', values)
         self.assertEqual(values['replies_on'], '3')
         self.assertEqual(values['foreign_rule'], '1')
         self.assertEqual(values['foreign_rule_after'], '1')
@@ -805,6 +837,7 @@ class TunnelKernelTests(unittest.TestCase):
             self.skipTest(NO_WIREGUARD)
         values = self.namespace(r'''
         link wlan0 9
+        authorization_tun
         sh "$ENG" enable >/dev/null || exit 91
         sh "$ENG" tunnel-on >/dev/null || exit 92
         ip link add US-TEST-2 type wireguard
@@ -868,6 +901,7 @@ class TunnelKernelTests(unittest.TestCase):
         values = self.namespace(r'''
         link wlan0 9
         other_vpn tun0
+        authorization_tun
         sh "$ENG" enable >/dev/null || exit 91
         say armed "$(sh "$ROLLBACK" on 1 "$ENG" | sed -n 's/^rollback=\(ARMED\).*/\1/p')"
         say during "$(to_phone 4 10.2.0.1 10.2.0.2 47931 5)"
@@ -890,6 +924,7 @@ class TunnelKernelTests(unittest.TestCase):
     def test_confirm_keeps_the_filter_past_the_deadline(self):
         values = self.namespace(r'''
         other_vpn tun0
+        authorization_tun
         sh "$ENG" enable >/dev/null || exit 91
         sh "$ROLLBACK" on 1 "$ENG" >/dev/null || exit 92
         say confirm "$(sh "$ROLLBACK" confirm)"
@@ -905,6 +940,7 @@ class TunnelKernelTests(unittest.TestCase):
         values = self.namespace(r'''
         link wlan0 9
         other_vpn tun0
+        authorization_tun
         sh "$ENG" enable >/dev/null || exit 91
         # Real tables, with chosen commands failing for as long as a marker exists.
         for t in iptables ip6tables; do

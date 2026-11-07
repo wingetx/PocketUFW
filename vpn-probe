@@ -11,7 +11,7 @@ SYS_NET="${POCKETUFW_SYS_NET:-/sys/class/net}"
 
 usage() {
     cat <<'HELP'
-Usage: sh vpn-probe [--help | tunnels]
+Usage: sh vpn-probe [--help | tunnels | tailscale-addresses]
 
 Read-only Android Tailscale UDP listener discovery. Requires root.
 Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
@@ -24,11 +24,13 @@ tunnels prints one tunnel=NAME kind=tun|wireguard owner=PACKAGE|kernel|unknown
 proof=verified|android-only|kernel-type|none line per tunnel, then
 inventory=COMPLETE. An app's tun is verified only when Android's VPN record and the
 kernel agree: a process of that package holds /dev/tun for exactly that interface.
+tailscale-addresses requires one such Tailscale tun, with both node addresses.
+It authorizes exact /32 and /128 destinations only; it does not authenticate packets.
 HELP
 }
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
-    ''|tunnels) ;;
+    ''|tunnels|tailscale-addresses) ;;
     stale-ports) [ "$#" -eq 3 ] || exit 2 ;;
     *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
 esac
@@ -45,14 +47,18 @@ android_claims() {
     command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 || return 0
     # Streamed: Android's printf is an external command, and this output is too large
     # to pass to one. awk with index(): a two-part .* regex takes 18 s on these long lines.
-    timeout 5 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p' | awk '{
+    { timeout 5 dumpsys connectivity 2>/dev/null && echo 'POCKETUFW_DUMPSYS_COMPLETE'; } | awk '
+      $0 == "POCKETUFW_DUMPSYS_COMPLETE" { complete = 1; next }
+      /ni{VPN CONNECTED/ {
         from = index($0, "ni{VPN CONNECTED extra: VPN:")
         at = index($0, "InterfaceName: ")
         if (!from || !at) next
         package = substr($0, from + 28); package = substr(package, 1, index(package, "}") - 1)
         iface = substr($0, at + 15); sub(/[ }].*/, "", iface)
-        print iface, package
-    }' | sort -u
+        claims[iface " " package] = 1
+      }
+      END { if (!complete) exit 1; for (claim in claims) print claim }
+    ' | sort -u
 }
 
 # The kernel's answer, which an app can't influence: a process running under that
@@ -123,6 +129,51 @@ tunnel_inventory() {
 }
 if [ "${1:-}" = tunnels ]; then
     tunnel_inventory
+    exit 0
+fi
+
+# Initial authorization only. Never recover addresses from routes, another VPN,
+# previous output or a whole tailnet range. Recheck ownership and interface identity
+# around the address read; these are snapshots, not a lasting ingress guarantee.
+if [ "${1:-}" = tailscale-addresses ]; then
+    authorization_failure() { echo 'vpn-probe: one verified Tailscale tun with both node addresses is required' >&2; exit 4; }
+    inventory=$(tunnel_inventory) || authorization_failure
+    auth_iface=$(printf '%s\n' "$inventory" | sed -n 's/^tunnel=\([^ ]*\) kind=tun owner=com.tailscale.ipn proof=verified$/\1/p')
+    case "$auth_iface" in tun*) ;; *) authorization_failure ;; esac
+    case "$auth_iface" in *[!A-Za-z0-9_.-]*) authorization_failure ;; esac
+    [ "${#auth_iface}" -le 15 ] || authorization_failure
+    # A kernel WireGuard named tun* would share the wildcard exemption.
+    if printf '%s\n' "$inventory" | grep -q '^tunnel=tun[^ ]* kind=wireguard '; then authorization_failure; fi
+    auth_index=$(cat "$SYS_NET/$auth_iface/ifindex") || authorization_failure
+    case "$auth_index" in ''|*[!0-9]*) authorization_failure ;; esac
+    auth_addresses=$(ip -o addr show dev "$auth_iface" scope global) || authorization_failure
+    auth_pins=$(printf '%s\n' "$auth_addresses" | awk '
+      $3 == "inet" && $4 ~ /^100\./ {
+        n = split($4, a, /[.\/]/)
+        if (n != 5 || a[1] != "100" || a[5] != "32") exit 1
+        for (i = 1; i <= 4; i++) if (a[i] !~ /^[0-9]+$/ || a[i] > 255 || (length(a[i]) > 1 && a[i] ~ /^0/)) exit 1
+        if (a[2] < 64 || a[2] > 127 || / tentative | dadfailed /) exit 1
+        four = $4; count4++
+      }
+      $3 == "inet6" && tolower($4) ~ /^fd7a:115c:a1e0:/ {
+        if (tolower($4) !~ /^fd7a:115c:a1e0:[0-9a-f:]+\/128$/ || / tentative | dadfailed /) exit 1
+        six = tolower($4); count6++
+      }
+      END {
+        if (count4 != 1 || count6 != 1) exit 1
+        print "tailnet_pin4=" four; print "tailnet_pin6=" six
+      }
+    ') || authorization_failure
+    [ "$(cat "$SYS_NET/$auth_iface/ifindex")" = "$auth_index" ] || authorization_failure
+    [ -e "$SYS_NET/$auth_iface/tun_flags" ] || authorization_failure
+    grep -q '^DEVTYPE=wireguard$' "$SYS_NET/$auth_iface/uevent" && authorization_failure
+    package_holds_tun com.tailscale.ipn "$auth_iface" || authorization_failure
+    [ "$(android_claims | awk -v name="$auth_iface" '$1 == name { print $2 }')" = com.tailscale.ipn ] || authorization_failure
+    auth_recheck=$(ip -o addr show dev "$auth_iface" scope global) || authorization_failure
+    [ "$auth_recheck" = "$auth_addresses" ] || authorization_failure
+    auth_index_now=$(cat "$SYS_NET/$auth_iface/ifindex") || authorization_failure
+    [ "$auth_index_now" = "$auth_index" ] || authorization_failure
+    printf '%s\ntailnet_iface=%s\nauthorization=VERIFIED\n' "$auth_pins" "$auth_iface"
     exit 0
 fi
 command -v "$SS_BIN" >/dev/null 2>&1 || { echo "vpn-probe: ss utility unavailable" >&2; exit 4; }

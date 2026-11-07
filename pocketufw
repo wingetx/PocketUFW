@@ -48,13 +48,17 @@ Usage:
   pocketufw disable
   pocketufw residue    # read-only: does anything in either filter table still mention PocketUFW?
   pocketufw tunnel-plan     # print the optional tunnel rules; change nothing
-  pocketufw tunnel-on       # filter tun+ and verified kernel WireGuard; tailnet traffic stays trusted
-  pocketufw tunnel-refresh  # recheck for kernel WireGuard tunnels that came or went
+  pocketufw tunnel-on       # authorize verified Tailscale node destinations, then filter tunnels
+  pocketufw tunnel-refresh  # refresh WireGuard hooks; retain the originally authorized addresses
   pocketufw tunnel-status   # read-only: filter state, tunnel owners and their proof, who holds tailnet addresses
   pocketufw tunnel-off      # remove only the tunnel rules
 
 Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+.
 The tunnel filter is optional and lasts until disable, tunnel-off or the next restart.
+Initial tunnel authorization requires a verified Tailscale tun with IPv4 and IPv6.
+Trust is pinned to its /32 and /128, survives reconnects, and does not authenticate ingress.
+New node addresses require tunnel-off then tunnel-on while Tailscale is verified.
+Kernel WireGuard named tun* conflicts with the wildcard trust; rename it before enabling.
 No boot persistence. --auto-tailscale verifies ports on enable; refresh
 rechecks Tailscale's verified UDP listeners without restarting the firewall.
 Continuous monitoring of subsequent port changes is NOT implemented yet.
@@ -285,15 +289,69 @@ verify_all() {
 }
 
 # --- Optional tunnel filter ---------------------------------------------------
-# tun+ covers every Android VPN, whichever app holds it and whatever number the kernel
-# gave it, so nothing has to watch for a new one. Tailnet traffic passes on its addresses,
-# which stay the same when Tailscale comes back on another tun number. The kernel can't
-# match a tun by who holds it, so ownership is checked and reported, not enforced: see
-# tailnet_report and docs/tunnel-filtering.md.
+# tun+ survives Android interface renumbering. Only this node's initially verified
+# destinations are trusted; live rules hold the pins until off or reboot. No file,
+# watcher or refresh can widen that trust. Packet ingress ownership is not enforced.
 
 fwf() { family="$1"; shift; if [ "$family" = 4 ]; then fw4 "$@"; else fw6 "$@"; fi; }
 tunnel_present() { "$IPT4" -w -S "$VPNCHAIN" >/dev/null 2>&1 || "$IPT6" -w -S "$VPNCHAIN" >/dev/null 2>&1; }
 tailnet_range() { if [ "$1" = 4 ]; then echo "$TAILNET4"; else echo "$TAILNET6"; fi; }
+
+valid_pin() {
+  case "$2" in ''|*[!0-9a-f:./]*) return 1 ;; esac
+  case "$1" in
+    4) printf '%s\n' "$2" | awk -F '[./]' '
+      NF != 5 || $1 != "100" || $2 < 64 || $2 > 127 || $5 != "32" { exit 1 }
+      { for (i=1; i<=4; i++) if ($i !~ /^[0-9]+$/ || $i > 255 || (length($i)>1 && $i ~ /^0/)) exit 1 }
+    ' ;;
+    6) printf '%s\n' "$2" | grep -Eq '^fd7a:115c:a1e0:[0-9a-f:]+/128$' ;;
+    *) return 1 ;;
+  esac
+}
+# iptables -S may omit host masks. Never accept a range, hostname or extra rule.
+read_pin() {
+  pin_listing=$("$1" -w -S "$VPNCHAIN") || return 1
+  pin_value=$(printf '%s\n' "$pin_listing" | awk -v c="$VPNCHAIN" -v s="$(tailnet_range "$2")" '
+    NF == 10 && $1 == "-A" && $2 == c && $3 == "-s" && $4 == s && $5 == "-d" &&
+      $7 == "-i" && $8 == "tun+" && $9 == "-j" && $10 == "ACCEPT" { print $6 }
+  ')
+  case "$pin_value" in */*) ;; *) if [ "$2" = 4 ]; then pin_value="$pin_value/32"; else pin_value="$pin_value/128"; fi ;; esac
+  valid_pin "$2" "$pin_value" || return 1
+  printf '%s\n' "$pin_value"
+}
+authorize_tailnet() {
+  authorized=$(sh "$inventory_dir/vpn-probe" tailscale-addresses 9>&-) ||
+    fail 'Cannot authorize tailnet destinations; start Tailscale and verify both node addresses. Nothing changed.'
+  [ "$(printf '%s\n' "$authorized" | tail -n 1)" = authorization=VERIFIED ] || fail 'Incomplete tailnet authorization'
+  PIN4=$(printf '%s\n' "$authorized" | sed -n 's/^tailnet_pin4=//p')
+  PIN6=$(printf '%s\n' "$authorized" | sed -n 's/^tailnet_pin6=//p')
+  valid_pin 4 "$PIN4" && valid_pin 6 "$PIN6" || fail 'Invalid tailnet destinations; nothing changed'
+}
+# No known-name exception can protect against a FUTURE WireGuard named tun*.
+# Refuse present conflicts and stop reporting ACTIVE when one is later observed.
+# This check reports a conflict; it does not remove rules or revoke live trust.
+check_wireguard_names() {
+  wg_sys="${POCKETUFW_SYS_NET:-/sys/class/net}"
+  [ -d "$wg_sys" ] && [ -r "$wg_sys" ] || { WG_TRUST=UNKNOWN; return 1; }
+  WG_TRUST=NONE_OBSERVED
+  for wg_device in "$wg_sys"/tun*; do
+    [ -e "$wg_device" ] || continue
+    wg_event=$(cat "$wg_device/uevent" 2>/dev/null) || { WG_TRUST=UNKNOWN; return 1; }
+    if printf '%s\n' "$wg_event" | grep -qx 'DEVTYPE=wireguard'; then WG_TRUST=CONFLICT; return 1; fi
+  done
+}
+pin_report() {
+  say 'tailnet_ingress=ADDRESS_ONLY'
+  # Keep this consistent with the preceding verification result. A later scan
+  # could otherwise append CONFLICT after activity had already printed ACTIVE.
+  say "tailnet_wireguard=${WG_TRUST:-UNKNOWN}"
+  if verify_tunnel_family "$IPT4" 4 && verify_tunnel_family "$IPT6" 6; then
+    PIN4=$(read_pin "$IPT4" 4); PIN6=$(read_pin "$IPT6" 6)
+    say 'tailnet_trust=PINNED_DESTINATIONS'
+    say "tailnet_pin4=$PIN4"; say "tailnet_pin6=$PIN6"
+  elif tunnel_present; then say 'tailnet_trust=UNVERIFIED'
+  else say 'tailnet_trust=OFF'; fi
+}
 
 # Interface names reach iptables as arguments, so they must not read as options or
 # wildcards. Physical patterns already have their own policy and are never tunnels.
@@ -356,11 +414,22 @@ tailnet_report() {
 $(printf '%s\n' "$INVENTORY" | sed -n 's/^tunnel=\([^ ]*\) kind=[^ ]* owner=\([^ ]*\) proof=\([^ ]*\)$/\1 \2 \3/p')
 EOF
   [ "$tailnet_holders" -gt 0 ] || say 'tailnet=DOWN'
+  # Ownership now is distinct from the destinations already authorized. A new
+  # address is never silently substituted, even when the new owner is verified.
+  if tunnel_present; then
+    current_auth=$(sh "$inventory_dir/vpn-probe" tailscale-addresses 9>&- 2>/dev/null) || current_auth=''
+    if [ -z "$current_auth" ]; then say 'tailnet_current=UNVERIFIED'
+    elif [ "$(printf '%s\n' "$current_auth" | sed -n 's/^tailnet_pin4=//p')" = "$(read_pin "$IPT4" 4)" ] &&
+         [ "$(printf '%s\n' "$current_auth" | sed -n 's/^tailnet_pin6=//p')" = "$(read_pin "$IPT6" 6)" ]; then
+      say 'tailnet_current=MATCH'
+    else say 'tailnet_current=REAUTHORIZE'; fi
+  fi
 }
 
 # Fills TUNNEL_NAMES, or stops before anything has been changed.
 prepare_tunnel() {
   read_inventory || fail 'Could not read the current tunnels; nothing changed'
+  check_wireguard_names || fail 'Kernel WireGuard tun* conflict or unreadable interface types; rename conflicting WireGuard before enabling. Nothing changed.'
   TUNNEL_NAMES=$(wireguard_names)
   hook_total=1
   for name in $TUNNEL_NAMES; do hook_total=$((hook_total + 1)); done
@@ -369,10 +438,11 @@ prepare_tunnel() {
 install_tunnel_rules() {
   for family_now in 4 6; do
     range_now=$(tailnet_range "$family_now")
+    if [ "$family_now" = 4 ]; then pin_now="$PIN4"; else pin_now="$PIN6"; fi
     fwf "$family_now" -N "$VPNCHAIN"
     # First, so conntrack's view of a flow can't affect the tailnet. tun+ matches
     # names, not owners or kinds: a WireGuard named tun* can also use this trust.
-    fwf "$family_now" -A "$VPNCHAIN" -s "$range_now" -d "$range_now" -i tun+ -j ACCEPT
+    fwf "$family_now" -A "$VPNCHAIN" -s "$range_now" -d "$pin_now" -i tun+ -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     fwf "$family_now" -A "$VPNCHAIN" -m conntrack --ctstate INVALID -j DROP
     fwf "$family_now" -A "$VPNCHAIN" -j DROP
@@ -401,6 +471,7 @@ tunnel_hook_names() {
 verify_tunnel_family() {
   vbin="$1"
   vrange=$(tailnet_range "$2")
+  vpin=$(read_pin "$vbin" "$2") || return 1
   vrules=$("$vbin" -w -S "$VPNCHAIN") || return 1
   vcount=$(printf '%s\n' "$vrules" | grep -c -- "^-A $VPNCHAIN ") || return 1
   [ "$vcount" -eq 4 ] || return 1
@@ -412,7 +483,7 @@ verify_tunnel_family() {
   ') || return 1
   [ "$vtargets" = "ACCEPT ACCEPT DROP DROP " ] || return 1
   # With four rules and those targets, these two are the only things ever accepted.
-  "$vbin" -w -C "$VPNCHAIN" -s "$vrange" -d "$vrange" -i tun+ -j ACCEPT >/dev/null 2>&1 || return 1
+  "$vbin" -w -C "$VPNCHAIN" -s "$vrange" -d "$vpin" -i tun+ -j ACCEPT >/dev/null 2>&1 || return 1
   "$vbin" -w -C "$VPNCHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT >/dev/null 2>&1 || return 1
   "$vbin" -w -C "$VPNCHAIN" -m conntrack --ctstate INVALID -j DROP >/dev/null 2>&1 || return 1
   [ "$(printf '%s\n' "$vrules" | tail -n 1)" = "-A $VPNCHAIN -j DROP" ] || return 1
@@ -453,6 +524,7 @@ EOF
 # in both families, or the firewall as a whole is degraded.
 verify_tunnel() {
   tunnel_present || return 0
+  check_wireguard_names || return 1
   verify_tunnel_family "$IPT4" 4 && verify_tunnel_family "$IPT6" 6 || return 1
   [ "$(tunnel_hook_names "$IPT4" | sort)" = "$(tunnel_hook_names "$IPT6" | sort)" ]
 }
@@ -527,6 +599,7 @@ collect_counters() {
   fi
   if ! verify_all; then
     if [ "$CMD" = 'verbose' ]; then say 'Status: degraded (rules or hooks missing)'; else say 'state=DEGRADED'; fi
+    if tunnel_present && ! check_wireguard_names; then say "tailnet_wireguard=$WG_TRUST"; fi
     return 4
   fi
   count4=$(read_counters "$IPT4") || fail 'Cannot read IPv4 counters; not claiming a measurement'
@@ -775,6 +848,7 @@ case "$CMD" in
       say "hook_patterns=$IFACES"
       say "tunnel_filter=$TUNNEL_FILTER"
       if [ "$TUNNEL_FILTER" = ON ]; then
+        pin_report
         say "tunnel_hooks=$thooks"
         say "ipv4_tunnel_blocked=$tblocked4"
         say "ipv6_tunnel_blocked=$tblocked6"
@@ -798,6 +872,8 @@ case "$CMD" in
       say "Tunnel filter: $TUNNEL_FILTER"
       if [ "$TUNNEL_FILTER" = ON ]; then
         say "Tunnel hooks: $thooks"
+        say "Tailnet destinations: $(read_pin "$IPT4" 4), $(read_pin "$IPT6" 6)"
+        say 'Tailnet trust: pinned addresses on tun*, not authenticated packet sources or interface ownership'
         say "Tunnel IPv4 blocked: $tblocked4 packets ($tbytes4 bytes), established $treplies4, tailnet $ttailnet4"
         say "Tunnel IPv6 blocked: $tblocked6 packets ($tbytes6 bytes), established $treplies6, tailnet $ttailnet6"
       fi
@@ -918,6 +994,7 @@ case "$CMD" in
     root_needed
     prereqs
     prepare_tunnel
+    authorize_tailnet
     DRY_RUN=1
     say '# DRY RUN ONLY - NOTHING EXECUTED'
     install_tunnel_rules
@@ -930,6 +1007,7 @@ case "$CMD" in
     # A tunnel filter without the physical policy would be a false impression.
     verify_all || fail 'Firewall disabled or degraded; tunnel filter not installed'
     prepare_tunnel
+    authorize_tailnet
     committed=0
     trap 'if [ "$committed" -ne 1 ]; then say "pocketufw: tunnel-on failed, removing tunnel rules" >&2; remove_tunnel_family "$IPT4" || :; remove_tunnel_family "$IPT6" || :; fi' 0
     install_tunnel_rules
@@ -937,6 +1015,7 @@ case "$CMD" in
     committed=1
     trap - 0
     say 'tunnel_filter=ON'
+    pin_report
     tailnet_report
     say 'PocketUFW: tunnel filter on until disable, tunnel-off or the next restart.'
     ;;
@@ -983,11 +1062,13 @@ $refresh_removed"
     refresh_committed=1
     trap - 0 1 2 15
     say 'tunnel_filter=ON'
+    pin_report
     tailnet_report
     ;;
   tunnel-status)
     root_needed
     prereqs
+    check_wireguard_names || :
     if ! tunnel_present; then
       say 'tunnel_filter=OFF'
     elif verify_all; then
@@ -995,6 +1076,7 @@ $refresh_removed"
     else
       say 'tunnel_filter=DEGRADED'
     fi
+    pin_report
     if read_inventory; then
       printf '%s\n' "$INVENTORY" | grep '^tunnel=' || :
       tailnet_report

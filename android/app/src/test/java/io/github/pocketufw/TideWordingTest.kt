@@ -63,7 +63,7 @@ class TideWordingTest {
 
     @Test fun cliTunnelFilteringDisclosesSessionAndTrustLimits() {
         show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON)))
-        node("Tunnel rules are on for listed hooks, until restart. Tailnet addresses are trusted without owner enforcement.").assertExists()
+        node("Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.").assertExists()
         node("Settings").performClick()
         node("Restores physical filtering only; CLI tunnel filtering never restores.", substring = true).assertExists()
     }

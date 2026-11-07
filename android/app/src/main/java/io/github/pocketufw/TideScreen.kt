@@ -345,7 +345,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
     if (state.rootReady && !ui.verificationInDoubt) when (state.tunnelFilter) {
         FirewallClient.TunnelFilter.ON -> TideNotice(
-            "Tunnel rules are on for listed hooks, until restart. Tailnet addresses are trusted without owner enforcement.", true)
+            "Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.", true)
         FirewallClient.TunnelFilter.OFF -> Text("Tunnel filtering is off.",
             style = MaterialTheme.typography.bodySmall, color = Muted)
         FirewallClient.TunnelFilter.UNKNOWN -> Unit

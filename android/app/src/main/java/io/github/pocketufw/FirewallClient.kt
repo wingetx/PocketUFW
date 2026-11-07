@@ -335,7 +335,9 @@ internal class FirewallClient(
         ))
         val values = fields(text)
         val rootGranted = exitCode == 0 && values["root"] == "GRANTED"
-        val protection = if (!rootGranted) Protection.ROOT_REQUIRED else when (values["state"]) {
+        val protection = if (!rootGranted) Protection.ROOT_REQUIRED
+        else if (values["tailnet_wireguard"] == "CONFLICT") Protection.DEGRADED
+        else when (values["state"]) {
             "ACTIVE" -> Protection.ACTIVE
             "INACTIVE" -> Protection.INACTIVE
             "DEGRADED" -> Protection.DEGRADED
@@ -355,7 +357,9 @@ internal class FirewallClient(
             "DEGRADED" -> UdpConfigMode.DEGRADED
             else -> UdpConfigMode.UNKNOWN
         }
-        val details = protectionDetails(protection)
+        val details = if (rootGranted && values["tailnet_wireguard"] == "CONFLICT")
+            "A kernel WireGuard named tun* can use the pinned tailnet exemption. Rules remain installed; rename that interface or turn tunnel filtering off, then recheck."
+        else protectionDetails(protection)
 
         val activity = if (protection == Protection.ACTIVE) parseCounterActivity(values)
             else null
@@ -388,7 +392,8 @@ internal class FirewallClient(
             vpnInterface = if (rootGranted) values["vpn_iface"]?.takeIf { it.isNotEmpty() } else null,
             tunnelFilter = when {
                 !rootGranted -> TunnelFilter.UNKNOWN
-                values["tunnel_filter"] == "ON" && protection == Protection.ACTIVE -> TunnelFilter.ON
+                values["tunnel_filter"] == "ON" && protection == Protection.ACTIVE &&
+                    values["tailnet_trust"] == "PINNED_DESTINATIONS" -> TunnelFilter.ON
                 values["tunnel_filter"] == "OFF" -> TunnelFilter.OFF
                 else -> TunnelFilter.UNKNOWN
             }

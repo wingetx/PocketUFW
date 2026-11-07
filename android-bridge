@@ -562,6 +562,10 @@ echo "previous_boot=$previous_boot"
 echo "operation=$outcome"
 echo "message=$message"
 echo "state=$state"
+case "$(printf '%s\n' "$snapshot" | sed -n 's/^tailnet_wireguard=//p')" in
+  CONFLICT) echo 'tailnet_wireguard=CONFLICT' ;;
+  UNKNOWN) echo 'tailnet_wireguard=UNKNOWN' ;;
+esac
 case "$state:$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_filter=//p')" in
   ACTIVE:ON) echo 'tunnel_filter=ON' ;;
   ACTIVE:OFF|INACTIVE:*) echo 'tunnel_filter=OFF' ;;
@@ -579,6 +583,7 @@ if [ "$state" = ACTIVE ]; then
   # A degraded or incomplete response must never become a fabricated zero.
   if [ -n "$snapshot" ]; then
     printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_tailnet=[0-9]+)$' || :
+    printf '%s\n' "$snapshot" | grep -E '^(tailnet_trust=PINNED_DESTINATIONS|tailnet_ingress=ADDRESS_ONLY|tailnet_pin[46]=[0-9a-f:./]+)$' || :
   fi
 fi
 

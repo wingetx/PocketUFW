@@ -27,7 +27,7 @@ class FirewallClientParsingTest {
 
     @Test fun tunnelOnNeedsAnActiveVerifiedSnapshotAndNeverComesFromBootOptIn() {
         assertEquals(FirewallClient.TunnelFilter.ON,
-            parse(bridgeOutput() + "\ntunnel_filter=ON").snapshot.tunnelFilter)
+            parse(bridgeOutput() + "\ntunnel_filter=ON\ntailnet_trust=PINNED_DESTINATIONS").snapshot.tunnelFilter)
         assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
             parse(bridgeOutput(state = "DEGRADED") + "\ntunnel_filter=ON").snapshot.tunnelFilter)
         assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
@@ -36,6 +36,19 @@ class FirewallClientParsingTest {
             parse(bridgeOutput(boot = "ENABLED") + "\ntunnel_filter=OFF").snapshot.tunnelFilter)
         assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
             parse(bridgeOutput() + "\ntunnel_filter=ON", exitCode = 3).snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelFilter.UNKNOWN,
+            parse(bridgeOutput() + "\ntunnel_filter=ON").snapshot.tunnelFilter)
+    }
+
+    @Test fun wireguardWildcardConflictDoesNotClaimTunnelProtection() {
+        for (reported in listOf("ACTIVE", "DEGRADED")) {
+            val state = parse(bridgeOutput(state = reported) +
+                "\ntunnel_filter=ON\ntailnet_trust=PINNED_DESTINATIONS\ntailnet_wireguard=CONFLICT").snapshot
+            assertEquals(Protection.DEGRADED, state.protection)
+            assertEquals(FirewallClient.TunnelFilter.UNKNOWN, state.tunnelFilter)
+            assertTrue(state.details.contains("WireGuard named tun*"))
+            assertTrue(state.details.contains("Rules remain installed"))
+        }
     }
 
     @Test fun everyBridgeStateMapsToItsOwnProtection() {

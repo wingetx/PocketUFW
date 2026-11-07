@@ -15,6 +15,10 @@ import test_bootctl as boot
 
 
 class TunnelAudit(tunnel.Base):
+    def setUp(self):
+        super().setUp()
+        self.proven_tailscale()
+
     def test_termination_during_tunnel_install_cleans_partial_hooks(self):
         self.ok('enable')
         seen, gate = self.base / 'entered', self.base / 'release'
@@ -147,18 +151,48 @@ class BridgeAudit(integration.RealEngineTests):
         self.assertEqual(self.bridge('vpn-refresh')['operation'], 'FAILED')
         self.assertEqual(self.chain('iptables', 'POCKETUFW_TS'), ['-p udp --dport 46867 -j ACCEPT'])
 
-    def test_broken_tunnel_stays_uncovered_and_degraded_in_the_actual_bridge(self):
+    def authorized_tunnel(self):
         self.env['POCKETUFW_SYS_NET'] = str(self.root / 'sys')
-        (self.root / 'sys').mkdir()
+        dev = self.root / 'sys' / 'tun0'
+        dev.mkdir(parents=True)
+        (dev / 'ifindex').write_text('6\n')
+        (dev / 'uevent').write_text('INTERFACE=tun0\n')
+        (dev / 'tun_flags').write_text('0x1001\n')
+        proc = self.proc / '6283'
+        (proc / 'fd').mkdir()
+        (proc / 'fdinfo').mkdir()
+        (proc / 'fd' / '9').symlink_to('/dev/tun')
+        (proc / 'fdinfo' / '9').write_text('iff:\ttun0\n')
+        self.env.update(TEST_VPN_OWNER='com.tailscale.ipn', TEST_VPN_IFACE='tun0')
         self.device.add_command('ip', '#!/bin/sh\ncase "$*" in\n'
                                 '"-o link") echo "6: tun0: <POINTOPOINT,UP,LOWER_UP> mtu 1500";;\n'
-                                '"-o addr") echo "6: tun0 inet 10.2.0.2/32 scope global tun0";;\nesac\n')
+                                '"-o addr"|"-o addr show dev tun0 scope global")\n'
+                                'echo "6: tun0 inet 100.64.0.1/32 scope global tun0"\n'
+                                'echo "6: tun0 inet6 fd7a:115c:a1e0::1/128 scope global";;\nesac\n')
         self.bridge('enable')
-        self.assertEqual(self.script('pocketufw', 'tunnel-on').returncode, 0)
+        result = self.script('pocketufw', 'tunnel-on')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_broken_tunnel_stays_uncovered_and_degraded_in_the_actual_bridge(self):
+        self.authorized_tunnel()
         path = self.kernel / 'ip6tables.INPUT'
         path.write_text(path.read_text().replace(tunnel.HOOK_TUN + '\n', ''))
         values = self.bridge('inspect')
         self.assertEqual(values['state'], 'DEGRADED')
+        self.assertEqual(values['uncovered_ifaces'], 'tun0')
+
+    def test_bridge_reports_pins_and_later_wireguard_conflict(self):
+        self.authorized_tunnel()
+        values = self.bridge('inspect')
+        self.assertEqual(values['tailnet_trust'], 'PINNED_DESTINATIONS')
+        self.assertEqual(values['tailnet_pin4'], '100.64.0.1/32')
+        conflict = self.root / 'sys' / 'tun5'
+        conflict.mkdir()
+        (conflict / 'uevent').write_text('DEVTYPE=wireguard\n')
+        values = self.bridge('inspect')
+        self.assertEqual(values['state'], 'DEGRADED')
+        self.assertEqual(values['tailnet_wireguard'], 'CONFLICT')
+        self.assertEqual(values['tunnel_filter'], 'UNKNOWN')
         self.assertEqual(values['uncovered_ifaces'], 'tun0')
 
     def test_boot_enable_cannot_recreate_files_after_clean_removal(self):

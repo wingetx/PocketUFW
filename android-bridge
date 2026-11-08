@@ -15,8 +15,12 @@ case "$ACTION" in
     fi ;;
 esac
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial|prepare-uninstall|tunnel-off)
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial|prepare-uninstall|tunnel-off|tunnel-refresh)
     [ "$#" -eq 1 ] || exit 2 ;;
+  tunnel-on)
+    [ "$#" -eq 2 ] || exit 2
+    TUNNEL_REQUEST="$2"
+    case "$TUNNEL_REQUEST" in PINNED|DENY_ONLY) : ;; *) exit 2 ;; esac ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
     PORT4="$2"; PORT6="$3"; SCOPE="$4"
@@ -193,6 +197,23 @@ esac
 
 case "$ACTION" in
   inspect) ;;
+  tunnel-on|tunnel-refresh)
+    set -- "$ACTION"
+    if [ "$ACTION" = tunnel-on ] && [ "$TUNNEL_REQUEST" = DENY_ONLY ]; then
+      set -- "$@" --deny-only
+    fi
+    if sh "$ENGINE" "$@" >/dev/null 2>&1; then
+      outcome=SUCCESS
+      if [ "$ACTION" = tunnel-on ]; then
+        message='Tunnel protection enabled until restart. Physical rules and boot opt-in were kept.'
+      else
+        message='Tunnel hooks refreshed. Pinned addresses and physical rules were not changed.'
+      fi
+    else
+      outcome=FAILED
+      message='Tunnel operation failed. PINNED requires verified Tailscale ownership and both node addresses; there is no automatic fallback. Inspect status before retrying.'
+    fi
+    ;;
   tunnel-off)
     if sh "$ENGINE" tunnel-off >/dev/null 2>&1; then
       outcome=SUCCESS
@@ -518,6 +539,11 @@ if [ "$outcome" = 'SUCCESS' ]; then
     boot-disable) [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
     tunnel-off)
       [ "$state" = ACTIVE ] && printf '%s\n' "$trust_report" | grep -qx 'tunnel_filter=OFF' || outcome=FAILED ;;
+    tunnel-on|tunnel-refresh)
+      [ "$state" = ACTIVE ] && printf '%s\n' "$trust_report" | grep -qx 'tunnel_filter=ON' || outcome=FAILED
+      if [ "$ACTION" = tunnel-on ]; then
+        printf '%s\n' "$trust_report" | grep -qx "tunnel_mode=$TUNNEL_REQUEST" || outcome=FAILED
+      fi ;;
     vpn-refresh|set-ports|use-auto|reset-counters) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
   esac
   if [ "$outcome" = 'FAILED' ]; then
@@ -602,6 +628,7 @@ case "$(printf '%s\n' "$trust_report" | sed -n 's/^tailnet_wireguard=//p')" in
   CONFLICT) echo 'tailnet_wireguard=CONFLICT' ;;
   UNKNOWN) echo 'tailnet_wireguard=UNKNOWN' ;;
 esac
+printf '%s\n' "$snapshot" | grep -E '^physical_state=(ACTIVE|INACTIVE|DEGRADED|UNKNOWN)$' || :
 case "$state:$(printf '%s\n' "$trust_report" | sed -n 's/^tunnel_filter=//p')" in
   *:DEGRADED) echo 'tunnel_filter=DEGRADED' ;;
   ACTIVE:ON) echo 'tunnel_filter=ON' ;;

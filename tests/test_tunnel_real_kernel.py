@@ -802,6 +802,48 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertEqual(values['foreign_rule_after'], '1')
         self.assertEqual(values['residue'], '0')
 
+    def test_one_ui_reset_clears_physical_and_tunnel_counts_and_keeps_enforcement(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        other_vpn tun7
+        authorization_tun
+        sh "$BRIDGE" enable >/dev/null || exit 91
+        sh "$BRIDGE" tunnel-on PINNED >/dev/null || exit 92
+        say wifi4 "$(deliver 4 9 47931 5)"
+        say wifi6 "$(deliver 6 9 47931 5)"
+        say tun4 "$(to_phone 4 10.2.0.1 10.2.0.2 47931 5)"
+        say tun6 "$(to_phone 6 fd00:2::1 fd00:2::2 47931 5)"
+        peer $N echo 4 7777 "$WORK/echo" &
+        wait_for "$WORK/echo"
+        say replies "$($N ask 4 10.2.0.1 7777 3)"
+        for key in ipv4_blocked ipv6_blocked ipv4_tunnel_blocked ipv6_tunnel_blocked ipv4_tunnel_established_replies; do
+          say "before_$key" "$(kv "$key")"
+        done
+        before4=$(iptables -w -S); before6=$(ip6tables -w -S)
+        say reset "$(bridge_value reset-counters operation)"
+        [ "$(iptables -w -S)" = "$before4" ] && say same4 yes
+        [ "$(ip6tables -w -S)" = "$before6" ] && say same6 yes
+        snapshot=$(sh "$BRIDGE" counters)
+        say after "$(printf '%s\n' "$snapshot" | grep -E '^ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies|tailnet)=' | cut -d= -f2 | tr '\n' ' ')"
+        say wifi_after "$(deliver 4 9 47933 5)"
+        say tunnel_after "$(to_phone 6 fd00:2::1 fd00:2::2 47933 5)"
+        say physical_count_after "$(kv ipv4_blocked)"
+        say tunnel_count_after "$(kv ipv6_tunnel_blocked)"
+        say verified "$(sh "$ENG" verify)"
+        ''')
+        for path in ('wifi4', 'wifi6', 'tun4', 'tun6', 'wifi_after', 'tunnel_after'):
+            self.assertEqual(values[path], '0', path)
+        self.assertEqual(values['replies'], '3')
+        for key in ('ipv4_blocked', 'ipv6_blocked', 'ipv4_tunnel_blocked', 'ipv6_tunnel_blocked'):
+            self.assertGreaterEqual(int(values['before_' + key]), 5)
+        self.assertGreaterEqual(int(values['before_ipv4_tunnel_established_replies']), 3)
+        self.assertEqual(values['after'].split(), ['0'] * 14)
+        self.assertEqual(values['reset'], 'SUCCESS')
+        self.assertEqual((values['same4'], values['same6']), ('yes', 'yes'))
+        self.assertEqual(values['verified'], 'ACTIVE')
+        self.assertGreaterEqual(int(values['physical_count_after']), 5)
+        self.assertGreaterEqual(int(values['tunnel_count_after']), 5)
+
     def test_the_bridge_reports_what_is_filtered_and_removal_leaves_nothing(self):
         values = self.namespace(r'''
         link wlan0 9

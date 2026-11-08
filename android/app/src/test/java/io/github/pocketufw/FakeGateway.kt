@@ -124,6 +124,14 @@ internal class FakeGateway(
         calls += "tunnel-off"
         return operation()
     }
+    override fun enableTunnelProtection(mode: FirewallClient.TunnelMode): Operation {
+        calls += "tunnel-on:${mode.name}"
+        return operation()
+    }
+    override fun refreshTunnelHooks(): Operation {
+        calls += "tunnel-refresh"
+        return operation()
+    }
     override fun removePartialRules(): Operation {
         calls += "remove-partial"
         return operation()

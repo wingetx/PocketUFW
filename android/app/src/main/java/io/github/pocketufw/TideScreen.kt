@@ -56,6 +56,8 @@ internal data class TideActions(
     val refreshVpn: () -> Unit = {},
     val removePartialRules: () -> Unit = {},
     val removeTunnelRules: () -> Unit = {},
+    val enableTunnelProtection: (FirewallClient.TunnelMode) -> Unit = {},
+    val refreshTunnelHooks: () -> Unit = {},
     val prepareUninstall: () -> Unit = {},
     val openAppInfo: () -> Unit = {},
     val setUdpPorts: (String, String, Boolean) -> Unit = { _, _, _ -> },
@@ -201,7 +203,6 @@ internal fun TideScreen(
                     requestRemoval = { removeConfirmOpen = true },
                     requestTunnelRemoval = { tunnelRemoveConfirmOpen = true },
                     requestDisable = { offConfirmOpen = true },
-                    showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
                     showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
                     showSettings = { destination = TideDestination.SETTINGS })
                 destination == TideDestination.ACTIVITY -> {
@@ -238,7 +239,7 @@ internal fun TideScreen(
         containerColor = Background, tonalElevation = 0.dp,
         onDismissRequest = { tunnelRemoveConfirmOpen = false },
         title = { Text("Remove tunnel rules only?") },
-        text = { Text("This stops PocketUFW filtering inside VPN tunnels. The physical firewall and boot opt-in stay in place. Re-enabling tunnel filtering remains a CLI action.") },
+        text = { Text("This stops PocketUFW filtering inside VPN tunnels. The physical firewall and boot opt-in stay in place. You can enable tunnel protection again in Settings.") },
         confirmButton = { TextButton(onClick = {
             tunnelRemoveConfirmOpen = false
             if (!ui.busy && !ui.verificationInDoubt && ui.snapshot.rootReady &&
@@ -283,7 +284,6 @@ internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): Strin
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
                          requestRemoval: () -> Unit, requestDisable: () -> Unit,
                          requestTunnelRemoval: () -> Unit,
-                         showCounters: () -> Unit,
                          showRules: () -> Unit, showSettings: () -> Unit) {
     val state = ui.snapshot
     val active = state.protection == FirewallClient.Protection.ACTIVE
@@ -378,8 +378,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             style = MaterialTheme.typography.bodySmall, color = Muted)
         when (state.tailnetConnectivity) {
             FirewallClient.TailnetConnectivity.REAUTHORIZE -> TideNotice(
-                "Tailnet connectivity: REAUTHORIZE. Current verified addresses are ${state.tailnetObserved4 ?: "unknown"}, ${state.tailnetObserved6 ?: "unknown"}. Installed protection is unchanged. Use CLI tunnel-off, then tunnel-on with verified Tailscale ownership to authorize the new addresses.", true)
-            FirewallClient.TailnetConnectivity.MATCH -> Text("Tailnet pins match verified addresses; reachability has not been tested.",
+                "Tailnet connectivity: REAUTHORIZE. Last verified addresses are ${state.tailnetObserved4 ?: "unknown"}, ${state.tailnetObserved6 ?: "unknown"}. Installed protection is unchanged. In Settings, turn tunnel protection off, then enable PINNED to verify and authorize the new addresses.", true)
+            FirewallClient.TailnetConnectivity.MATCH -> Text("At the last full inspection, tailnet pins matched verified addresses; reachability has not been tested.",
                 style = MaterialTheme.typography.bodySmall, color = Muted)
             else -> TideNotice("Tailnet connectivity could not be verified. Existing pinned destinations were kept; this does not change the enforcement verdict.", true)
         }
@@ -416,6 +416,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        TidePolicyRow(R.drawable.tide_down, "Physical protection", physicalStatus(ui))
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {
             verified && coverageGap -> "Partly filtered¹"
             verified -> "Matched deny policy¹"
@@ -424,20 +425,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         })
         TidePolicyRow(R.drawable.tide_up, "Outgoing", "Unchanged")
     }
+    TideStatistics(ui, actions)
     if (active) {
-        Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "View counters", onClick = showCounters)) {
-            TideDivider()
-            Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (ui.counters?.measured == true) count(ui.counters.totalBlocked) else "—",
-                        fontSize = 44.sp, lineHeight = 50.sp, letterSpacing = (-2).sp)
-                    Text(if (ui.counters?.measured == true) "Dropped packets · kernel counters" else
-                        "Counter verification unavailable", style = MaterialTheme.typography.bodySmall, color = Muted)
-                }
-                TideIcon(R.drawable.tide_arrow_out)
-            }
-            TideDivider()
-        }
         TideSettingLink("Restore after reboot", bootLabel(state.bootRestore) + " · Magisk", showSettings)
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -448,6 +437,6 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             else -> "Root access not confirmed · $appVersion"
         }, style = MaterialTheme.typography.bodySmall, color = Muted)
     }
-    Text("¹ Supported physical interfaces only. Earlier Android/OEM rules may accept traffic before PocketUFW’s hooks.",
+    Text("¹ Physical filtering covers supported interfaces. Tunnel filtering is separate and optional. Earlier Android/OEM rules may accept traffic before PocketUFW’s hooks.",
         style = MaterialTheme.typography.bodySmall, color = Muted)
 }

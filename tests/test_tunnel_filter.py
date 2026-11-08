@@ -942,11 +942,6 @@ class Limits(unittest.TestCase):
         for name in ('boot-service', 'bootctl'):
             self.assertNotIn('tunnel', self.source(name))
 
-    def test_the_app_has_no_way_to_turn_it_on(self):
-        for name in ('android-bridge',):
-            source = self.source(name)
-            self.assertNotIn('tunnel-on', source)
-
     def test_no_dns_rules_and_no_output_or_forward_hook(self):
         source = self.source('pocketufw')
         self.assertIsNone(re.search(r'--[ds]port 53\b', source))

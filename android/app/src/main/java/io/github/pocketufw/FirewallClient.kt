@@ -72,6 +72,7 @@ internal class FirewallClient(
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
     enum class TunnelFilter { ON, OFF, DEGRADED, UNKNOWN }
     enum class TunnelMode { PINNED, DENY_ONLY, OFF, UNKNOWN }
+    enum class PhysicalFilter { ACTIVE, INACTIVE, DEGRADED, UNKNOWN }
     enum class TailnetConnectivity { MATCH, REAUTHORIZE, DENY_ONLY, OFF, UNVERIFIED }
 
     data class Snapshot(
@@ -89,14 +90,22 @@ internal class FirewallClient(
         val uncoveredInterfaces: List<String> = emptyList(),
         /** The interface Android's own record gives the active VPN, when it says. */
         val vpnInterface: String? = null,
-        /** Session-only CLI feature. ON verifies installed hooks, not all interfaces or ownership. */
+        /** Session-only. ON verifies installed hooks, not all interfaces or ownership. */
         val tunnelFilter: TunnelFilter = TunnelFilter.UNKNOWN,
         val tunnelMode: TunnelMode = TunnelMode.UNKNOWN,
         val tailnetConnectivity: TailnetConnectivity = TailnetConnectivity.UNVERIFIED,
         val tailnetPin4: String? = null,
         val tailnetPin6: String? = null,
         val tailnetObserved4: String? = null,
-        val tailnetObserved6: String? = null
+        val tailnetObserved6: String? = null,
+        /** Independently audited physical rules, even when tunnel rules are degraded. */
+        val physicalFilter: PhysicalFilter = PhysicalFilter.UNKNOWN
+    )
+    data class TunnelCounters(
+        val ipv4Blocked: Long, val ipv6Blocked: Long,
+        val ipv4Bytes: Long, val ipv6Bytes: Long,
+        val ipv4Replies: Long, val ipv6Replies: Long,
+        val ipv4Tailnet: Long, val ipv6Tailnet: Long
     )
     /**
      * Kernel rule counters are read-only measurements, not a universal proof
@@ -111,17 +120,22 @@ internal class FirewallClient(
         val ipv6Replies: Long? = null,
         val checkedAt: Long = 0L,
         val error: String? = null,
-        val lastManualResetAt: Long = 0L
+        val lastManualResetAt: Long = 0L,
+        val tunnel: TunnelCounters? = null,
+        val tunnelFilter: TunnelFilter = TunnelFilter.UNKNOWN,
+        val tunnelMode: TunnelMode = TunnelMode.UNKNOWN,
+        val tailnetPin4: String? = null,
+        val tailnetPin6: String? = null
     ) {
         val measured: Boolean
             get() = error == null && ipv4Blocked != null && ipv6Blocked != null &&
                 ipv4Replies != null && ipv6Replies != null
 
         val totalBlocked: Long?
-            get() = if (measured) (ipv4Blocked ?: 0L) + (ipv6Blocked ?: 0L) else null
+            get() = if (measured) counterSum(ipv4Blocked, ipv6Blocked) else null
 
         val totalReplies: Long?
-            get() = if (measured) (ipv4Replies ?: 0L) + (ipv6Replies ?: 0L) else null
+            get() = if (measured) counterSum(ipv4Replies, ipv6Replies) else null
     }
     /** Unmodified rules reported by Android's live iptables and ip6tables. */
     data class RuleFamily(
@@ -227,9 +241,11 @@ internal class FirewallClient(
         check(action in setOf("inspect", "enable", "disable",
             "enable-restore", "toggle", "toggle-restore",
             "boot-enable", "boot-disable", "vpn-refresh", "reset-counters",
-            "counters", "set-ports", "use-auto", "remove-partial", "prepare-uninstall", "tunnel-off"))
+            "counters", "set-ports", "use-auto", "remove-partial", "prepare-uninstall", "tunnel-off",
+            "tunnel-on", "tunnel-refresh"))
         check(when (action) {
             "set-ports" -> args.size == 3
+            "tunnel-on" -> args.size == 1 && args[0] in setOf("PINNED", "DENY_ONLY")
             "toggle", "toggle-restore" -> args.isEmpty() ||
                 (args.size == 1 && args[0] in setOf("ACTIVE", "INACTIVE"))
             else -> args.isEmpty()
@@ -298,12 +314,42 @@ internal class FirewallClient(
         if (counts.any { it == null }) {
             return RuleActivity(error = "Kernel counters are unavailable or malformed.")
         }
+        val tunnelFilter = when (values["tunnel_filter"]) {
+            "ON" -> TunnelFilter.ON
+            "OFF" -> TunnelFilter.OFF
+            "DEGRADED" -> TunnelFilter.DEGRADED
+            else -> TunnelFilter.UNKNOWN
+        }
+        val tunnelMode = if (tunnelFilter == TunnelFilter.OFF) TunnelMode.OFF else when (values["tailnet_trust"]) {
+            "PINNED_DESTINATIONS" -> TunnelMode.PINNED
+            "DENY_ONLY" -> TunnelMode.DENY_ONLY
+            "OFF" -> TunnelMode.OFF
+            else -> TunnelMode.UNKNOWN
+        }
+        val tunnel = if (tunnelFilter == TunnelFilter.ON) {
+            val tunnelKeys = listOf("ipv4_tunnel_blocked", "ipv6_tunnel_blocked",
+                "ipv4_tunnel_blocked_bytes", "ipv6_tunnel_blocked_bytes",
+                "ipv4_tunnel_established_replies", "ipv6_tunnel_established_replies",
+                "ipv4_tunnel_tailnet", "ipv6_tunnel_tailnet")
+            val t = tunnelKeys.map { values[it]?.toLongOrNull()?.takeIf { n -> n >= 0L } }
+            if (t.any { it == null } || tunnelMode !in setOf(TunnelMode.PINNED, TunnelMode.DENY_ONLY) ||
+                values["tailnet_wireguard"] == "CONFLICT") {
+                return RuleActivity(error = "Tunnel counters are unavailable or malformed; previous counts kept.")
+            }
+            TunnelCounters(t[0]!!, t[1]!!, t[2]!!, t[3]!!, t[4]!!, t[5]!!, t[6]!!, t[7]!!)
+        } else null
+        if (tunnelFilter == TunnelFilter.DEGRADED) {
+            return RuleActivity(error = "Tunnel protection is degraded; recheck before reading counters.")
+        }
         return RuleActivity(
             ipv4Blocked = counts[0], ipv6Blocked = counts[1],
             ipv4Bytes = counts[2], ipv6Bytes = counts[3],
             ipv4Replies = counts[4], ipv6Replies = counts[5],
             checkedAt = System.currentTimeMillis(),
-            lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L)
+            lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L),
+            tunnel = tunnel, tunnelFilter = tunnelFilter, tunnelMode = tunnelMode,
+            tailnetPin4 = values["tailnet_pin4"].takeIf { tunnelMode == TunnelMode.PINNED },
+            tailnetPin6 = values["tailnet_pin6"].takeIf { tunnelMode == TunnelMode.PINNED }
         )
     }
 
@@ -422,7 +468,13 @@ internal class FirewallClient(
             tailnetPin4 = if (rootGranted) values["tailnet_pin4"] else null,
             tailnetPin6 = if (rootGranted) values["tailnet_pin6"] else null,
             tailnetObserved4 = if (rootGranted) values["tailnet_observed4"] else null,
-            tailnetObserved6 = if (rootGranted) values["tailnet_observed6"] else null
+            tailnetObserved6 = if (rootGranted) values["tailnet_observed6"] else null,
+            physicalFilter = if (!rootGranted) PhysicalFilter.UNKNOWN else when (values["physical_state"]) {
+                "ACTIVE" -> PhysicalFilter.ACTIVE
+                "INACTIVE" -> PhysicalFilter.INACTIVE
+                "DEGRADED" -> PhysicalFilter.DEGRADED
+                else -> PhysicalFilter.UNKNOWN
+            }
         ), activity, policyReport)
     }
 
@@ -522,6 +574,14 @@ internal class FirewallClient(
 
     /** Removes only the optional tunnel chains, preserving physical policy and boot opt-in. */
     override fun removeTunnelRules(): Operation = performAction("tunnel-off")
+
+    override fun enableTunnelProtection(mode: TunnelMode): Operation {
+        require(mode in setOf(TunnelMode.PINNED, TunnelMode.DENY_ONLY))
+        return performAction("tunnel-on", listOf(mode.name))
+    }
+
+    /** Refreshes interface hooks only; does not replace pinned authorization. */
+    override fun refreshTunnelHooks(): Operation = performAction("tunnel-refresh")
 
     /** Refused by the bridge unless the live state is still DEGRADED. */
     override fun removePartialRules(): Operation = performAction("remove-partial")

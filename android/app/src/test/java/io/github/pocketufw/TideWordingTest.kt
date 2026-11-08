@@ -61,11 +61,11 @@ class TideWordingTest {
 
     // ---- Firewall tab headline ----
 
-    @Test fun cliTunnelFilteringDisclosesSessionAndTrustLimits() {
+    @Test fun tunnelFilteringDisclosesSessionAndTrustLimits() {
         show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON)))
         node("Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.").assertExists()
         node("Settings").performClick()
-        node("Restores physical filtering only; CLI tunnel filtering never restores.", substring = true).assertExists()
+        node("Restores physical filtering only; tunnel filtering never restores.", substring = true).assertExists()
     }
 
     @Test fun stalePinsShowReauthorizationWithoutWithdrawingEnforcement() {
@@ -170,7 +170,7 @@ class TideWordingTest {
 
     @Test fun policyRowIsHonestWhenUnverified() {
         show(ui(Snapshot(Protection.DEGRADED, rootReady = true)))
-        node("Not verified").assertExists()
+        compose.onAllNodesWithText("Not verified").assertCountEquals(2)
         node("Matched deny policy¹").assertDoesNotExist()
     }
 
@@ -351,7 +351,7 @@ class TideWordingTest {
     @Test fun nothingIsStrandedUnderTheBannerAtFullScroll() {
         show(ui(active).copy(message = BridgeMessages.VPN_COMMITTED), qualifiers = "w360dp-h640dp-xxhdpi")
         scrollToEnd()
-        val footnote = node("Supported physical interfaces only", substring = true).fetchSemanticsNode().boundsInRoot
+        val footnote = node("Physical filtering covers supported interfaces", substring = true).fetchSemanticsNode().boundsInRoot
         val banner = compose.onNodeWithTag("banner").fetchSemanticsNode().boundsInRoot
         assertTrue("footnote ${footnote.bottom} runs under banner ${banner.top}", footnote.bottom <= banner.top)
     }

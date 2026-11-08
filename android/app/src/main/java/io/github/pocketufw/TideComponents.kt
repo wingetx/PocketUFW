@@ -27,6 +27,10 @@ import java.util.Locale
 internal val TideActionMinHeight = 48.dp
 internal val TideActionShape = RoundedCornerShape(12.dp)
 
+/** A total is unavailable if either measurement is missing or their sum overflows. */
+internal fun counterSum(a: Long?, b: Long?): Long? =
+    if (a != null && b != null && a >= 0 && b >= 0 && a <= Long.MAX_VALUE - b) a + b else null
+
 internal fun count(value: Long?): String = value?.let { NumberFormat.getIntegerInstance().format(it) } ?: "—"
 internal fun byteCount(value: Long?): String = when {
     value == null -> "—"

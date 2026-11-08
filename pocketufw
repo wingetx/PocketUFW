@@ -299,7 +299,10 @@ verify_family() {
 
 verify_all() {
   TUNNEL_CHECKED=0
-  verify_family "$IPT4" 4 && verify_family "$IPT6" 6 && verify_tunnel
+  PHYSICAL_STATE=DEGRADED
+  verify_family "$IPT4" 4 && verify_family "$IPT6" 6 || return 1
+  PHYSICAL_STATE=ACTIVE
+  verify_tunnel
 }
 
 # --- Optional tunnel filter ---------------------------------------------------
@@ -656,6 +659,7 @@ collect_counters() {
   if ! chain_exists4 && ! chain_exists6 && ! ts_exists4 && ! ts_exists6 && ! tunnel_present; then
     if [ "$CMD" = 'verbose' ]; then say 'Status: inactive'; return 3; fi
     COLLECT_STATE=INACTIVE
+    PHYSICAL_STATE=INACTIVE
     [ "$CMD" = inspect ] || say 'state=INACTIVE'
     return 3
   fi
@@ -967,6 +971,7 @@ case "$CMD" in
     fi
     if [ "$COLLECT_STATE" = ACTIVE ]; then emit_activity
     else say "state=$COLLECT_STATE"; fi
+    say "physical_state=${PHYSICAL_STATE:-UNKNOWN}"
     if [ "$TUNNEL_HAS_RULES" -eq 0 ]; then
       [ "$COLLECT_STATE" = ACTIVE ] || say 'tunnel_filter=OFF'
     elif [ "$COLLECT_STATE" != ACTIVE ]; then say 'tunnel_filter=DEGRADED'; fi

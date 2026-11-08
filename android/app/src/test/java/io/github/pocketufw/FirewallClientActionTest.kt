@@ -57,6 +57,20 @@ class FirewallClientActionTest {
         assertEquals(listOf("tunnel-off"), shell.actions.toList())
     }
 
+    @Test fun tunnelModeAndHookRefreshUseOnlyTheirExplicitActions() {
+        client.enableTunnelProtection(FirewallClient.TunnelMode.PINNED)
+        client.enableTunnelProtection(FirewallClient.TunnelMode.DENY_ONLY)
+        client.refreshTunnelHooks()
+        assertEquals(listOf("tunnel-on PINNED", "tunnel-on DENY_ONLY", "tunnel-refresh"), shell.actions.toList())
+    }
+
+    @Test fun invalidTunnelModesNeverReachTheRootBoundary() {
+        for (mode in listOf(FirewallClient.TunnelMode.OFF, FirewallClient.TunnelMode.UNKNOWN)) {
+            assertThrows(IllegalArgumentException::class.java) { client.enableTunnelProtection(mode) }
+        }
+        assertTrue(shell.actions.isEmpty())
+    }
+
     @Test fun removingPartialRulesHasItsOwnAction() {
         client.removePartialRules()
         assertEquals(listOf("remove-partial"), shell.actions.toList())

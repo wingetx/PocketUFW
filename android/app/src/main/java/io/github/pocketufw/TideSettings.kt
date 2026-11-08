@@ -22,7 +22,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Restore after reboot", style = MaterialTheme.typography.titleMedium)
-                Text("Uses Magisk at startup. No background app. Restores physical filtering only; CLI tunnel filtering never restores.",
+                Text("Uses Magisk at startup. No background app. Restores physical filtering only; tunnel filtering never restores.",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
             }
             if (bootProblemText(state.bootRestore) == null) {
@@ -48,6 +48,7 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
         }, onExceptions)
         TidePolicyRow(R.drawable.tide_up, "VPN connection",
             if (state.vpnActive) state.vpnProvider ?: "Unrecognized VPN" else "Not detected")
+        TideTunnelSettings(ui, actions)
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)

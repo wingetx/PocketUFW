@@ -9,6 +9,8 @@ internal interface FirewallGateway {
     fun inspectDashboard(): FirewallClient.Dashboard
     fun refreshCounterActivity(): FirewallClient.RuleActivity
     fun changeProtection(activate: Boolean): FirewallClient.Operation
+    fun enableTunnelProtection(mode: FirewallClient.TunnelMode): FirewallClient.Operation
+    fun refreshTunnelHooks(): FirewallClient.Operation
     fun removeTunnelRules(): FirewallClient.Operation
     fun removePartialRules(): FirewallClient.Operation
     fun prepareUninstall(): FirewallClient.Operation

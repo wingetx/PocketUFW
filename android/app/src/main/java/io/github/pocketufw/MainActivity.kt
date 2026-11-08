@@ -262,11 +262,17 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                 if (fresh.measured) {
                     counters = fresh
                     checkedAt = fresh.checkedAt
-                    verificationInDoubt = false
-                    counterRefreshError = false
+                    // Counter reads verify enforcement but do not probe ownership. A mode
+                    // or pin change must not inherit the previous full inspection's proof.
+                    val tunnelChanged = fresh.tunnelFilter != state.tunnelFilter ||
+                        fresh.tunnelMode != state.tunnelMode || fresh.tailnetPin4 != state.tailnetPin4 ||
+                        fresh.tailnetPin6 != state.tailnetPin6
+                    verificationInDoubt = tunnelChanged
+                    counterRefreshError = tunnelChanged
                     val whenChecked = DateFormat.getTimeInstance(DateFormat.MEDIUM)
                         .format(Date(fresh.checkedAt))
-                    counterRefreshNote = "Counters refreshed at $whenChecked"
+                    counterRefreshNote = if (tunnelChanged) "Counters read, but tunnel policy changed. Recheck status to verify current authorization."
+                        else "Counters refreshed at $whenChecked"
                 } else {
                     counterRefreshError = true
                     verificationInDoubt = true
@@ -323,8 +329,20 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             },
             removeTunnelRules = {
                 if (!busy && !verificationInDoubt && state.rootReady &&
-                    state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED) {
+                    state.tunnelFilter in setOf(FirewallClient.TunnelFilter.ON, FirewallClient.TunnelFilter.DEGRADED)) {
                     perform { client.removeTunnelRules() }
+                }
+            },
+            enableTunnelProtection = { mode ->
+                if (!busy && verifiedActive && state.rootReady &&
+                    state.tunnelFilter == FirewallClient.TunnelFilter.OFF &&
+                    mode in setOf(FirewallClient.TunnelMode.PINNED, FirewallClient.TunnelMode.DENY_ONLY)) {
+                    perform { client.enableTunnelProtection(mode) }
+                }
+            },
+            refreshTunnelHooks = {
+                if (!busy && verifiedActive && state.rootReady && state.tunnelFilter == FirewallClient.TunnelFilter.ON) {
+                    perform { client.refreshTunnelHooks() }
                 }
             },
             removePartialRules = {

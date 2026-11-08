@@ -192,7 +192,7 @@ class BridgeAudit(integration.RealEngineTests):
         values = self.bridge('inspect')
         self.assertEqual(values['state'], 'DEGRADED')
         self.assertEqual(values['tailnet_wireguard'], 'CONFLICT')
-        self.assertEqual(values['tunnel_filter'], 'UNKNOWN')
+        self.assertEqual(values['tunnel_filter'], 'DEGRADED')
         self.assertEqual(values['uncovered_ifaces'], 'tun0')
 
     def test_boot_enable_cannot_recreate_files_after_clean_removal(self):

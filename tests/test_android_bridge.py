@@ -494,7 +494,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["operation"], "FAILED")
         self.assertEqual(values["state"], "INACTIVE")
         self.assertEqual(self.log_lines(), [
-            "engine:enable", "engine:activity", "boot:status",
+            "engine:enable", "engine:activity", "engine:tunnel-status", "boot:status",
             "engine:disable", "engine:verify"
         ])
 

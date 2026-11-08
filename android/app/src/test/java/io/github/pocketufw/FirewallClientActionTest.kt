@@ -52,6 +52,11 @@ class FirewallClientActionTest {
         assertEquals(listOf("boot-enable", "boot-disable"), shell.actions.toList())
     }
 
+    @Test fun tunnelRecoveryDoesNotRequestPhysicalOrBootRemoval() {
+        client.removeTunnelRules()
+        assertEquals(listOf("tunnel-off"), shell.actions.toList())
+    }
+
     @Test fun removingPartialRulesHasItsOwnAction() {
         client.removePartialRules()
         assertEquals(listOf("remove-partial"), shell.actions.toList())

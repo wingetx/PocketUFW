@@ -55,6 +55,7 @@ internal data class TideActions(
     val resetCounters: () -> Unit = {},
     val refreshVpn: () -> Unit = {},
     val removePartialRules: () -> Unit = {},
+    val removeTunnelRules: () -> Unit = {},
     val prepareUninstall: () -> Unit = {},
     val openAppInfo: () -> Unit = {},
     val setUdpPorts: (String, String, Boolean) -> Unit = { _, _, _ -> },
@@ -81,6 +82,7 @@ internal fun TideScreen(
     var inspection by rememberSaveable { mutableStateOf(initialInspection) }
     var exceptions by rememberSaveable { mutableStateOf(false) }
     var removeConfirmOpen by rememberSaveable { mutableStateOf(false) }
+    var tunnelRemoveConfirmOpen by rememberSaveable { mutableStateOf(false) }
     var offConfirmOpen by rememberSaveable { mutableStateOf(false) }
     // Never let a pending OFF confirmation outlive the verified ACTIVE state.
     LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt, ui.busy) {
@@ -90,6 +92,10 @@ internal fun TideScreen(
     LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt) {
         if (ui.snapshot.protection != FirewallClient.Protection.DEGRADED ||
             !ui.snapshot.rootReady || ui.verificationInDoubt) removeConfirmOpen = false
+    }
+    LaunchedEffect(ui.snapshot.tunnelFilter, ui.snapshot.rootReady, ui.verificationInDoubt, ui.busy) {
+        if (ui.snapshot.tunnelFilter != FirewallClient.TunnelFilter.DEGRADED ||
+            !ui.snapshot.rootReady || ui.verificationInDoubt || ui.busy) tunnelRemoveConfirmOpen = false
     }
     val scroll = rememberScrollState()
     LaunchedEffect(destination, inspection, exceptions) { scroll.scrollTo(0) }
@@ -193,6 +199,7 @@ internal fun TideScreen(
                 }
                 destination == TideDestination.FIREWALL -> TideFirewall(ui, actions, appVersion,
                     requestRemoval = { removeConfirmOpen = true },
+                    requestTunnelRemoval = { tunnelRemoveConfirmOpen = true },
                     requestDisable = { offConfirmOpen = true },
                     showCounters = { destination = TideDestination.ACTIVITY; inspection = TideInspection.COUNTERS },
                     showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
@@ -226,6 +233,18 @@ internal fun TideScreen(
                 modifier = Modifier.testTag("confirm-turn-firewall-off")) { Text("Turn off") }
         },
         dismissButton = { TextButton(onClick = { offConfirmOpen = false }) { Text("Cancel") } }
+    )
+    if (tunnelRemoveConfirmOpen) AlertDialog(
+        containerColor = Background, tonalElevation = 0.dp,
+        onDismissRequest = { tunnelRemoveConfirmOpen = false },
+        title = { Text("Remove tunnel rules only?") },
+        text = { Text("This stops PocketUFW filtering inside VPN tunnels. The physical firewall and boot opt-in stay in place. Re-enabling tunnel filtering remains a CLI action.") },
+        confirmButton = { TextButton(onClick = {
+            tunnelRemoveConfirmOpen = false
+            if (!ui.busy && !ui.verificationInDoubt && ui.snapshot.rootReady &&
+                ui.snapshot.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED) actions.removeTunnelRules()
+        }, modifier = Modifier.testTag("confirm-remove-tunnel")) { Text("Remove tunnel rules") } },
+        dismissButton = { TextButton(onClick = { tunnelRemoveConfirmOpen = false }) { Text("Cancel") } }
     )
     if (removeConfirmOpen) AlertDialog(
         containerColor = Background, tonalElevation = 0.dp,
@@ -263,6 +282,7 @@ internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): Strin
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
                          requestRemoval: () -> Unit, requestDisable: () -> Unit,
+                         requestTunnelRemoval: () -> Unit,
                          showCounters: () -> Unit,
                          showRules: () -> Unit, showSettings: () -> Unit) {
     val state = ui.snapshot
@@ -345,10 +365,24 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
     if (state.rootReady && !ui.verificationInDoubt) when (state.tunnelFilter) {
         FirewallClient.TunnelFilter.ON -> TideNotice(
-            "Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.", true)
+            if (state.tunnelMode == FirewallClient.TunnelMode.DENY_ONLY)
+                "Tunnel rules are on for listed hooks, until restart. Deny-only has no tailnet exemption: unsolicited peer connections remain filtered if Tailscale starts later."
+            else "Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.", true)
+        FirewallClient.TunnelFilter.DEGRADED -> TideNotice("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.", true)
         FirewallClient.TunnelFilter.OFF -> Text("Tunnel filtering is off.",
             style = MaterialTheme.typography.bodySmall, color = Muted)
         FirewallClient.TunnelFilter.UNKNOWN -> Unit
+    }
+    if (state.rootReady && !ui.verificationInDoubt && state.tunnelMode == FirewallClient.TunnelMode.PINNED) {
+        Text("Pinned tailnet destinations: ${state.tailnetPin4 ?: "unknown"}, ${state.tailnetPin6 ?: "unknown"}.",
+            style = MaterialTheme.typography.bodySmall, color = Muted)
+        when (state.tailnetConnectivity) {
+            FirewallClient.TailnetConnectivity.REAUTHORIZE -> TideNotice(
+                "Tailnet connectivity: REAUTHORIZE. Current verified addresses are ${state.tailnetObserved4 ?: "unknown"}, ${state.tailnetObserved6 ?: "unknown"}. Installed protection is unchanged. Use CLI tunnel-off, then tunnel-on with verified Tailscale ownership to authorize the new addresses.", true)
+            FirewallClient.TailnetConnectivity.MATCH -> Text("Tailnet pins match verified addresses; reachability has not been tested.",
+                style = MaterialTheme.typography.bodySmall, color = Muted)
+            else -> TideNotice("Tailnet connectivity could not be verified. Existing pinned destinations were kept; this does not change the enforcement verdict.", true)
+        }
     }
     restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
 
@@ -373,9 +407,13 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     )
     if (state.protection == FirewallClient.Protection.DEGRADED) {
         TideLink("Inspect kernel rules", onClick = showRules)
-        if (state.rootReady && !ui.verificationInDoubt)
-            OutlinedButton(onClick = requestRemoval, enabled = !ui.busy,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove partial PocketUFW rules") }
+        if (state.rootReady && !ui.verificationInDoubt) {
+            if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
+                OutlinedButton(onClick = requestTunnelRemoval, enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove tunnel rules only") }
+            else OutlinedButton(onClick = requestRemoval, enabled = !ui.busy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove partial PocketUFW rules") }
+        }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {

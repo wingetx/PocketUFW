@@ -51,6 +51,31 @@ class FirewallClientParsingTest {
         }
     }
 
+    @Test fun stalePinsAreSeparateFromInstalledProtection() {
+        val snapshot = parse(bridgeOutput() + "\ntunnel_filter=ON\ntailnet_trust=PINNED_DESTINATIONS" +
+            "\ntailnet_current=REAUTHORIZE\ntailnet_pin4=100.64.0.1/32" +
+            "\ntailnet_pin6=fd7a:115c:a1e0::1/128\ntailnet_observed4=100.64.0.9/32").snapshot
+        assertEquals(Protection.ACTIVE, snapshot.protection)
+        assertEquals(FirewallClient.TunnelFilter.ON, snapshot.tunnelFilter)
+        assertEquals(FirewallClient.TunnelMode.PINNED, snapshot.tunnelMode)
+        assertEquals(FirewallClient.TailnetConnectivity.REAUTHORIZE, snapshot.tailnetConnectivity)
+        assertEquals("100.64.0.1/32", snapshot.tailnetPin4)
+        assertEquals("100.64.0.9/32", snapshot.tailnetObserved4)
+        val unknown = parse(bridgeOutput() + "\ntunnel_filter=ON\ntailnet_trust=PINNED_DESTINATIONS").snapshot
+        assertEquals(Protection.ACTIVE, unknown.protection)
+        assertEquals(FirewallClient.TailnetConnectivity.UNVERIFIED, unknown.tailnetConnectivity)
+    }
+
+    @Test fun denyOnlyAndDegradedTunnelStatesReachTheScreen() {
+        val deny = parse(bridgeOutput() + "\ntunnel_filter=ON\ntailnet_trust=DENY_ONLY\ntailnet_current=DENY_ONLY").snapshot
+        assertEquals(Protection.ACTIVE, deny.protection)
+        assertEquals(FirewallClient.TunnelMode.DENY_ONLY, deny.tunnelMode)
+        assertEquals(FirewallClient.TunnelFilter.ON, deny.tunnelFilter)
+        assertEquals(FirewallClient.TailnetConnectivity.DENY_ONLY, deny.tailnetConnectivity)
+        assertEquals(FirewallClient.TunnelFilter.DEGRADED,
+            parse(bridgeOutput(state = "DEGRADED") + "\ntunnel_filter=DEGRADED").snapshot.tunnelFilter)
+    }
+
     @Test fun everyBridgeStateMapsToItsOwnProtection() {
         val expected = mapOf(
             "ACTIVE" to Protection.ACTIVE,

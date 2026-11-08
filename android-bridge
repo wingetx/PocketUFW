@@ -15,7 +15,7 @@ case "$ACTION" in
     fi ;;
 esac
 case "$ACTION" in
-  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial|prepare-uninstall)
+  inspect|enable|disable|enable-restore|toggle|toggle-restore|boot-enable|boot-disable|vpn-refresh|reset-counters|counters|remove-partial|prepare-uninstall|tunnel-off)
     [ "$#" -eq 1 ] || exit 2 ;;
   set-ports)
     [ "$#" -eq 4 ] || exit 2
@@ -45,7 +45,7 @@ CONFIG="$BASE/udp-config"
 
 # Serialize the whole lifecycle, including boot files and final removal readback.
 # FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
-# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+# Share FD inheritance with pocketufw; boot-service uses a longer bounded retry window.
 operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
 command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
 if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
@@ -169,6 +169,15 @@ esac
 
 case "$ACTION" in
   inspect) ;;
+  tunnel-off)
+    if sh "$ENGINE" tunnel-off >/dev/null 2>&1; then
+      outcome=SUCCESS
+      message='Tunnel rules removed. Physical firewall and boot opt-in were kept.'
+    else
+      outcome=FAILED
+      message='Tunnel cleanup could not be verified. Physical firewall was not removed; inspect status.'
+    fi
+    ;;
   enable|enable-restore)
     # The firewall must never depend on Tailscale or saved ports: those problems
     # can only withhold the UDP exceptions, and the user is told so.
@@ -379,6 +388,20 @@ case "$state" in
     snapshot=''
     ;;
 esac
+# Connectivity is a separate, bounded observation. A stale pin does not mean
+# the deny policy stopped enforcing. Counter-only reads never run this probe.
+trust_report="$snapshot"
+case "$state:$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_filter=//p')" in
+  ACTIVE:ON|DEGRADED:*)
+    tunnel_details=$(sh "$ENGINE" tunnel-status 2>/dev/null) || tunnel_details=''
+    if [ "$(printf '%s\n' "$tunnel_details" | tail -n 1)" = tunnel_status=READY ]; then
+      trust_report="$tunnel_details"
+      if printf '%s\n' "$tunnel_details" | grep -qx 'tunnel_filter=DEGRADED'; then
+        state=DEGRADED
+        snapshot=''
+      fi
+    fi ;;
+esac
 boot=$(sh "$BOOT" status 2>/dev/null) || :
 if [ "$boot" = boot=STALE ]; then
   if [ "$state" != ACTIVE ] || [ "$ACTION" = prepare-uninstall ]; then
@@ -464,6 +487,8 @@ if [ "$outcome" = 'SUCCESS' ]; then
       fi ;;
     boot-enable) [ "$boot" = boot=ENABLED ] || outcome='FAILED' ;;
     boot-disable) [ "$boot" = boot=DISABLED ] || outcome='FAILED' ;;
+    tunnel-off)
+      [ "$state" = ACTIVE ] && printf '%s\n' "$trust_report" | grep -qx 'tunnel_filter=OFF' || outcome=FAILED ;;
     vpn-refresh|set-ports|use-auto|reset-counters) [ "$state" = ACTIVE ] || outcome='FAILED' ;;
   esac
   if [ "$outcome" = 'FAILED' ]; then
@@ -492,7 +517,7 @@ fi
 VPN_OWNER=''
 VPN_IFACE=''
 if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-  vpn_lines=$(timeout 2 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p') || vpn_lines=''
+  vpn_lines=$(timeout -k 1 2 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p') || vpn_lines=''
   vpn_matches=$(printf '%s\n' "$vpn_lines" |
     sed -n 's/.*ni{VPN CONNECTED extra: VPN:\([A-Za-z0-9_.-]*\)}.*/\1/p' |
     sort -u) || vpn_matches=''
@@ -562,15 +587,20 @@ echo "previous_boot=$previous_boot"
 echo "operation=$outcome"
 echo "message=$message"
 echo "state=$state"
-case "$(printf '%s\n' "$snapshot" | sed -n 's/^tailnet_wireguard=//p')" in
+case "$(printf '%s\n' "$trust_report" | sed -n 's/^tailnet_wireguard=//p')" in
   CONFLICT) echo 'tailnet_wireguard=CONFLICT' ;;
   UNKNOWN) echo 'tailnet_wireguard=UNKNOWN' ;;
 esac
-case "$state:$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_filter=//p')" in
+case "$state:$(printf '%s\n' "$trust_report" | sed -n 's/^tunnel_filter=//p')" in
+  *:DEGRADED) echo 'tunnel_filter=DEGRADED' ;;
   ACTIVE:ON) echo 'tunnel_filter=ON' ;;
-  ACTIVE:OFF|INACTIVE:*) echo 'tunnel_filter=OFF' ;;
+  *:OFF|INACTIVE:*) echo 'tunnel_filter=OFF' ;;
   *) echo 'tunnel_filter=UNKNOWN' ;;
 esac
+printf '%s\n' "$trust_report" | grep -E '^(tunnel_mode=(PINNED|DENY_ONLY|OFF|UNKNOWN)|tailnet_trust=(PINNED_DESTINATIONS|DENY_ONLY|OFF|UNVERIFIED)|tailnet_ingress=(ADDRESS_ONLY|NO_EXEMPTION)|tailnet_(pin|observed)[46]=[0-9a-f:./]+)$' || :
+current_tailnet=$(printf '%s\n' "$trust_report" | sed -n 's/^tailnet_current=//p')
+case "$current_tailnet" in MATCH|REAUTHORIZE|DENY_ONLY|OFF) ;; *) current_tailnet=UNVERIFIED ;; esac
+echo "tailnet_current=$current_tailnet"
 echo "$boot"
 if [ "$ACTION" = prepare-uninstall ]; then
   echo "removal=$removal"
@@ -583,7 +613,6 @@ if [ "$state" = ACTIVE ]; then
   # A degraded or incomplete response must never become a fabricated zero.
   if [ -n "$snapshot" ]; then
     printf '%s\n' "$snapshot" | grep -E '^(ipv[46]_(tunnel_)?(blocked|blocked_bytes|established_replies)=[0-9]+|ipv[46]_tunnel_tailnet=[0-9]+)$' || :
-    printf '%s\n' "$snapshot" | grep -E '^(tailnet_trust=PINNED_DESTINATIONS|tailnet_ingress=ADDRESS_ONLY|tailnet_pin[46]=[0-9a-f:./]+)$' || :
   fi
 fi
 

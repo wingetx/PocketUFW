@@ -68,6 +68,27 @@ class TideWordingTest {
         node("Restores physical filtering only; CLI tunnel filtering never restores.", substring = true).assertExists()
     }
 
+    @Test fun stalePinsShowReauthorizationWithoutWithdrawingEnforcement() {
+        show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
+            tunnelMode = FirewallClient.TunnelMode.PINNED,
+            tailnetConnectivity = FirewallClient.TailnetConnectivity.REAUTHORIZE,
+            tailnetPin4 = "100.64.0.1/32", tailnetPin6 = "fd7a:115c:a1e0::1/128",
+            tailnetObserved4 = "100.64.0.9/32", tailnetObserved6 = "fd7a:115c:a1e0::9/128")))
+        node("Active.").assertExists()
+        node("Pinned tailnet destinations: 100.64.0.1/32, fd7a:115c:a1e0::1/128.").assertExists()
+        node("Tailnet connectivity: REAUTHORIZE.", substring = true).assertExists()
+        node("100.64.0.9/32", substring = true).assertExists()
+        node("Installed protection is unchanged.", substring = true).assertExists()
+    }
+
+    @Test fun denyOnlyWarnsAboutTailscaleStartingLater() {
+        show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
+            tunnelMode = FirewallClient.TunnelMode.DENY_ONLY)))
+        node("Deny-only has no tailnet exemption", substring = true).assertExists()
+        node("unsolicited peer connections remain filtered if Tailscale starts later", substring = true).assertExists()
+        node("Only pinned Tailscale destinations", substring = true).assertDoesNotExist()
+    }
+
     private data class Headline(val title: String, val label: String, val body: String, val button: String)
 
     private val headlines = listOf(

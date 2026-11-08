@@ -11,7 +11,7 @@ SYS_NET="${POCKETUFW_SYS_NET:-/sys/class/net}"
 
 usage() {
     cat <<'HELP'
-Usage: sh vpn-probe [--help | tunnels | tailscale-addresses]
+Usage: sh vpn-probe [--help | tunnels | tailscale-addresses | tunnel-details]
 
 Read-only Android Tailscale UDP listener discovery. Requires root.
 Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
@@ -26,11 +26,13 @@ inventory=COMPLETE. An app's tun is verified only when Android's VPN record and 
 kernel agree: a process of that package holds /dev/tun for exactly that interface.
 tailscale-addresses requires one such Tailscale tun, with both node addresses.
 It authorizes exact /32 and /128 destinations only; it does not authenticate packets.
+tunnel-details combines inventory and address proof in one observation for callers;
+unavailable proof is authorization=UNVERIFIED, followed by tunnel_details=COMPLETE.
 HELP
 }
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
-    ''|tunnels|tailscale-addresses) ;;
+    ''|tunnels|tailscale-addresses|tunnel-details) ;;
     stale-ports) [ "$#" -eq 3 ] || exit 2 ;;
     *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
 esac
@@ -47,7 +49,8 @@ android_claims() {
     command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 || return 0
     # Streamed: Android's printf is an external command, and this output is too large
     # to pass to one. awk with index(): a two-part .* regex takes 18 s on these long lines.
-    { timeout 5 dumpsys connectivity 2>/dev/null && echo 'POCKETUFW_DUMPSYS_COMPLETE'; } | awk '
+    # Stay in the enclosing probe deadline's process group, including the second scan.
+    { timeout --foreground -k 1 5 dumpsys connectivity 2>/dev/null && echo 'POCKETUFW_DUMPSYS_COMPLETE'; } | awk '
       $0 == "POCKETUFW_DUMPSYS_COMPLETE" { complete = 1; next }
       /ni{VPN CONNECTED/ {
         from = index($0, "ni{VPN CONNECTED extra: VPN:")
@@ -135,9 +138,8 @@ fi
 # Initial authorization only. Never recover addresses from routes, another VPN,
 # previous output or a whole tailnet range. Recheck ownership and interface identity
 # around the address read; these are snapshots, not a lasting ingress guarantee.
-if [ "${1:-}" = tailscale-addresses ]; then
+authorize_addresses() {
     authorization_failure() { echo 'vpn-probe: one verified Tailscale tun with both node addresses is required' >&2; exit 4; }
-    inventory=$(tunnel_inventory) || authorization_failure
     auth_iface=$(printf '%s\n' "$inventory" | sed -n 's/^tunnel=\([^ ]*\) kind=tun owner=com.tailscale.ipn proof=verified$/\1/p')
     case "$auth_iface" in tun*) ;; *) authorization_failure ;; esac
     case "$auth_iface" in *[!A-Za-z0-9_.-]*) authorization_failure ;; esac
@@ -174,8 +176,17 @@ if [ "${1:-}" = tailscale-addresses ]; then
     auth_index_now=$(cat "$SYS_NET/$auth_iface/ifindex") || authorization_failure
     [ "$auth_index_now" = "$auth_index" ] || authorization_failure
     printf '%s\ntailnet_iface=%s\nauthorization=VERIFIED\n' "$auth_pins" "$auth_iface"
-    exit 0
-fi
+}
+case "${1:-}" in
+    tailscale-addresses|tunnel-details)
+        inventory=$(tunnel_inventory) || exit 4
+        if [ "$1" = tailscale-addresses ]; then authorize_addresses; exit $?; fi
+        printf '%s\n' "$inventory"
+        if address_proof=$(authorize_addresses); then printf '%s\n' "$address_proof"
+        else echo 'authorization=UNVERIFIED'; fi
+        echo 'tunnel_details=COMPLETE'
+        exit 0 ;;
+esac
 command -v "$SS_BIN" >/dev/null 2>&1 || { echo "vpn-probe: ss utility unavailable" >&2; exit 4; }
 [ -d "$PROC_ROOT" ] || { echo "vpn-probe: /proc unavailable" >&2; exit 4; }
 

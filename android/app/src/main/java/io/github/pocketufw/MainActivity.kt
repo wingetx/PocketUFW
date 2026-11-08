@@ -321,6 +321,12 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                     perform(vpn = true) { client.refreshVerifiedPorts() }
                 }
             },
+            removeTunnelRules = {
+                if (!busy && !verificationInDoubt && state.rootReady &&
+                    state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED) {
+                    perform { client.removeTunnelRules() }
+                }
+            },
             removePartialRules = {
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.protection == FirewallClient.Protection.DEGRADED) {

@@ -388,6 +388,27 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertEqual(values['tun6'], '10')
         self.assertEqual(values['wifi4'], '0')
 
+    def test_deny_only_filters_proton_without_authorizing_tailscale_then_stays_closed(self):
+        values = self.namespace(r'''
+        other_vpn tun7
+        sh "$ENG" enable >/dev/null || exit 91
+        say before "$(to_phone 4 10.2.0.1 10.2.0.2 47931 5)"
+        sh "$ENG" tunnel-on --deny-only >/dev/null || exit 92
+        say verify "$(sh "$ENG" verify)"
+        say ordinary4 "$(to_phone 4 10.2.0.1 10.2.0.2 47931 5)"
+        say ordinary6 "$(to_phone 6 fd00:2::1 fd00:2::2 47931 5)"
+        authorization_tun
+        sh "$ENG" tunnel-refresh >/dev/null || exit 93
+        say trust "$(kv tailnet_trust)"
+        say tailnet4 "$(written 4 ts 100.64.0.20 "$PHONE4" 47932 5)"
+        say tailnet6 "$(written 6 ts fd7a:115c:a1e0::20 "$PHONE6" 47932 5)"
+        ''')
+        self.assertEqual(values['before'], '5')
+        self.assertEqual(values['verify'], 'ACTIVE')
+        self.assertEqual(values['trust'], 'DENY_ONLY')
+        for name in ('ordinary4', 'ordinary6', 'tailnet4', 'tailnet6'):
+            self.assertEqual(values[name], '0', name)
+
     def test_another_vpn_delivers_nothing_unsolicited_and_it_is_counted_separately(self):
         values = self.namespace(r'''
         link wlan0 9
@@ -737,11 +758,16 @@ class TunnelKernelTests(unittest.TestCase):
         say renamed_state "$(sh "$ENG" verify)"
         say renamed_conflict "$(sh "$ENG" tunnel-status | sed -n 's/^tailnet_wireguard=//p')"
         say renamed_pinned_injection "$(inner 4 100.64.0.1 47932 5)"
+        sh "$ENG" tunnel-off >/dev/null || exit 94
+        sh "$ENG" tunnel-on --deny-only >/dev/null || exit 95
+        say deny_wg_state "$(sh "$ENG" verify)"
+        say deny_wg_pin "$(inner 4 100.64.0.1 47932 5)"
         ip link set tun5 down
         ip link set tun5 name US-TEST-1
         ip link set US-TEST-1 up
         ip route replace 10.2.0.1/32 dev US-TEST-1
         ip -6 route replace fd00:2::1/128 dev US-TEST-1
+        sh "$ENG" tunnel-refresh >/dev/null || exit 96
         # Replies to what the phone started pass, so the encrypted path still runs too.
         sleep 1.6
         peer $N echo 4 7778 "$WORK/echo4b" &
@@ -769,6 +795,8 @@ class TunnelKernelTests(unittest.TestCase):
         self.assertEqual(values['renamed_conflict'], 'CONFLICT')
         self.assertEqual(values['renamed_replies'], '3')
         self.assertEqual(values['renamed_pinned_injection'], '5', values)
+        self.assertEqual(values['deny_wg_state'], 'ACTIVE')
+        self.assertEqual(values['deny_wg_pin'], '0')
         self.assertEqual(values['replies_on'], '3')
         self.assertEqual(values['foreign_rule'], '1')
         self.assertEqual(values['foreign_rule_after'], '1')

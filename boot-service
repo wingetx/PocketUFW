@@ -34,7 +34,7 @@ while [ "$(getprop sys.boot_completed)" != '1' ]; do
 done
 # Serialize the whole lifecycle, including boot files and final removal readback.
 # FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
-# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+# Boot gets a bounded 120-second retry window; interactive commands wait 15 seconds.
 operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
 command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
 if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
@@ -43,12 +43,13 @@ if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
   exec 8>>"$operation_lock"
 fi
 operation_polls=0
-while [ "$operation_polls" -le 150 ]; do
+while [ "$operation_polls" -le 1200 ]; do
   operation_error=$(flock -n -x 8 8>&8 2>&1) && break
-  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
+  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 1200 ]; then
     echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
     exit 75
   fi
+  [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
   operation_polls=$((operation_polls + 1))
   sleep 0.1
 done

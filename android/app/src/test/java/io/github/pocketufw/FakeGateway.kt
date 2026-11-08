@@ -120,6 +120,10 @@ internal class FakeGateway(
         waitAtGate()
         return operation()
     }
+    override fun removeTunnelRules(): Operation {
+        calls += "tunnel-off"
+        return operation()
+    }
     override fun removePartialRules(): Operation {
         calls += "remove-partial"
         return operation()

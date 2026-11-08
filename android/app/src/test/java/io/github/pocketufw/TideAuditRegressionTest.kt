@@ -85,6 +85,39 @@ class TideAuditRegressionTest {
         assertEquals(0, calls)
     }
 
+    @Test fun degradedTunnelRecoveryUsesOnlyTunnelRemoval() {
+        val initial = stateDashboard(Protection.DEGRADED, true, "Incomplete tunnel rules.")
+        val fake = FakeGateway(initial.copy(snapshot = initial.snapshot.copy(
+            tunnelFilter = FirewallClient.TunnelFilter.DEGRADED)))
+        open(fake, expect = "Needs")
+        node("Remove partial PocketUFW rules").assertDoesNotExist()
+        scrollClick("Remove tunnel rules only")
+        node("The physical firewall and boot opt-in stay in place.", substring = true).assertExists()
+        assertEquals(0, fake.count("tunnel-off"))
+        node("Cancel").performClick()
+        assertEquals(0, fake.count("tunnel-off"))
+        scrollClick("Remove tunnel rules only")
+        compose.onNodeWithTag("confirm-remove-tunnel").performClick()
+        compose.settle { fake.count("tunnel-off") == 1 }
+        assertEquals(0, fake.count("remove-partial"))
+        assertEquals(0, fake.count("disable"))
+        assertEquals(0, fake.count("boot-disable"))
+    }
+
+    @Test fun tunnelRecoveryConfirmationClosesAfterUncertainRead() {
+        val model = mutableStateOf(TideUiState(snapshot = Snapshot(Protection.DEGRADED,
+            rootReady = true, tunnelFilter = FirewallClient.TunnelFilter.DEGRADED), checkedAt = READ_AT))
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        var calls = 0
+        controller.get().setContent {
+            TideTheme { TideScreen(model.value, TideActions(removeTunnelRules = { calls++ })) }
+        }
+        scrollClick("Remove tunnel rules only")
+        compose.runOnIdle { model.value = model.value.copy(verificationInDoubt = true) }
+        compose.onNodeWithTag("confirm-remove-tunnel").assertDoesNotExist()
+        assertEquals(0, calls)
+    }
+
     @Test fun removalOfPartialRulesRequiresConfirmationAndExplainsBootHook() {
         val fake = FakeGateway(stateDashboard(Protection.DEGRADED, true, "Incomplete firewall."))
         open(fake, expect = "Needs")

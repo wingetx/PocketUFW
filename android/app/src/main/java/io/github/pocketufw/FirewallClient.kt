@@ -70,7 +70,9 @@ internal class FirewallClient(
     enum class Protection { CHECKING, ACTIVE, INACTIVE, DEGRADED, ROOT_REQUIRED }
     enum class BootRestore { ENABLED, DISABLED, UNSUPPORTED, DEGRADED, CONFLICT, UNKNOWN }
     enum class UdpConfigMode { AUTOMATIC, COMMITTED, DEGRADED, UNKNOWN }
-    enum class TunnelFilter { ON, OFF, UNKNOWN }
+    enum class TunnelFilter { ON, OFF, DEGRADED, UNKNOWN }
+    enum class TunnelMode { PINNED, DENY_ONLY, OFF, UNKNOWN }
+    enum class TailnetConnectivity { MATCH, REAUTHORIZE, DENY_ONLY, OFF, UNVERIFIED }
 
     data class Snapshot(
         val protection: Protection = Protection.CHECKING,
@@ -88,7 +90,13 @@ internal class FirewallClient(
         /** The interface Android's own record gives the active VPN, when it says. */
         val vpnInterface: String? = null,
         /** Session-only CLI feature. ON verifies installed hooks, not all interfaces or ownership. */
-        val tunnelFilter: TunnelFilter = TunnelFilter.UNKNOWN
+        val tunnelFilter: TunnelFilter = TunnelFilter.UNKNOWN,
+        val tunnelMode: TunnelMode = TunnelMode.UNKNOWN,
+        val tailnetConnectivity: TailnetConnectivity = TailnetConnectivity.UNVERIFIED,
+        val tailnetPin4: String? = null,
+        val tailnetPin6: String? = null,
+        val tailnetObserved4: String? = null,
+        val tailnetObserved6: String? = null
     )
     /**
      * Kernel rule counters are read-only measurements, not a universal proof
@@ -219,7 +227,7 @@ internal class FirewallClient(
         check(action in setOf("inspect", "enable", "disable",
             "enable-restore", "toggle", "toggle-restore",
             "boot-enable", "boot-disable", "vpn-refresh", "reset-counters",
-            "counters", "set-ports", "use-auto", "remove-partial", "prepare-uninstall"))
+            "counters", "set-ports", "use-auto", "remove-partial", "prepare-uninstall", "tunnel-off"))
         check(when (action) {
             "set-ports" -> args.size == 3
             "toggle", "toggle-restore" -> args.isEmpty() ||
@@ -393,10 +401,28 @@ internal class FirewallClient(
             tunnelFilter = when {
                 !rootGranted -> TunnelFilter.UNKNOWN
                 values["tunnel_filter"] == "ON" && protection == Protection.ACTIVE &&
-                    values["tailnet_trust"] == "PINNED_DESTINATIONS" -> TunnelFilter.ON
+                    values["tailnet_trust"] in setOf("PINNED_DESTINATIONS", "DENY_ONLY") -> TunnelFilter.ON
+                values["tunnel_filter"] == "DEGRADED" -> TunnelFilter.DEGRADED
                 values["tunnel_filter"] == "OFF" -> TunnelFilter.OFF
                 else -> TunnelFilter.UNKNOWN
-            }
+            },
+            tunnelMode = if (!rootGranted) TunnelMode.UNKNOWN else when (values["tailnet_trust"]) {
+                "PINNED_DESTINATIONS" -> TunnelMode.PINNED
+                "DENY_ONLY" -> TunnelMode.DENY_ONLY
+                "OFF" -> TunnelMode.OFF
+                else -> TunnelMode.UNKNOWN
+            },
+            tailnetConnectivity = if (!rootGranted) TailnetConnectivity.UNVERIFIED else when (values["tailnet_current"]) {
+                "MATCH" -> TailnetConnectivity.MATCH
+                "REAUTHORIZE" -> TailnetConnectivity.REAUTHORIZE
+                "DENY_ONLY" -> TailnetConnectivity.DENY_ONLY
+                "OFF" -> TailnetConnectivity.OFF
+                else -> TailnetConnectivity.UNVERIFIED
+            },
+            tailnetPin4 = if (rootGranted) values["tailnet_pin4"] else null,
+            tailnetPin6 = if (rootGranted) values["tailnet_pin6"] else null,
+            tailnetObserved4 = if (rootGranted) values["tailnet_observed4"] else null,
+            tailnetObserved6 = if (rootGranted) values["tailnet_observed6"] else null
         ), activity, policyReport)
     }
 
@@ -493,6 +519,9 @@ internal class FirewallClient(
         }
         return performAction(if (bootOptedIn()) "toggle-restore" else "toggle", listOf(expected.name))
     }
+
+    /** Removes only the optional tunnel chains, preserving physical policy and boot opt-in. */
+    override fun removeTunnelRules(): Operation = performAction("tunnel-off")
 
     /** Refused by the bridge unless the live state is still DEGRADED. */
     override fun removePartialRules(): Operation = performAction("remove-partial")

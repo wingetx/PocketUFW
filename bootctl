@@ -21,7 +21,7 @@ case "$CMD" in status|enable|disable|purge|residue) : ;; *) fail 'use status, en
 case "$CMD" in enable|disable|purge)
 # Serialize the whole lifecycle, including boot files and final removal readback.
 # FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
-# Keep this small block identical in pocketufw, android-bridge, bootctl and boot-service.
+# Share FD inheritance with pocketufw; boot-service uses a longer bounded retry window.
 operation_lock="${POCKETUFW_LOCK:-/dev/.pocketufw.lock}.operation"
 command -v flock >/dev/null 2>&1 || { echo 'pocketufw: lifecycle locking unavailable' >&2; exit 75; }
 if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then

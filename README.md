@@ -16,7 +16,14 @@ Think UFW's *deny incoming, allow outgoing* philosophy, adapted for rooted Andro
 
 **What you get:** one protection switch, readable rules, live kernel packet counters, optional one-shot Magisk boot restoration, and manual verified Tailscale listener refresh. No accounts, advertising, analytics, or continuously running background app.
 
-> **Beta, not a security guarantee.** Version `0.1.0-beta5` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Coverage is limited to supported physical interfaces, and earlier Android/OEM `INPUT` rules can bypass PocketUFW. It does not directly filter traffic inside VPN tunnels or forwarded/tethered traffic. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
+**This development branch:** Tide Settings also offers optional **PINNED** and
+**DENY-ONLY** tunnel protection, off by default and never restored after reboot.
+The expandable **Statistics** pill separates physical and tunnel kernel counters;
+one confirmed reset clears all owned counters without rebuilding rules. See
+[tunnel filtering](docs/tunnel-filtering.md) for authorization, recovery and the
+remaining address-trust limitations. The UI integration has not been deployed.
+
+> **Beta, not a security guarantee.** Version `0.1.0-beta5` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Default coverage is limited to supported physical interfaces; tunnel filtering requires a separate opt-in. Earlier Android/OEM `INPUT` rules can bypass PocketUFW. Forwarded/tethered traffic is outside its scope. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
 
 **Permanent Android app identity:** Starting with `0.1.0-beta2`,
 the app ID is `io.github.pocketufw`. The earlier beta1 used the
@@ -159,7 +166,7 @@ sh pocketufw disable
 
 ## Verifying what it owns
 
-PocketUFW has two read-only evidence commands. `activity` returns structured IPv4/IPv6 DROP and accepted established-reply counters; `verbose` presents a human-readable, UFW-style summary. The Android alpha displays those same kernel counters in an expandable **Firewall activity** section. These counters reset when the firewall is disabled or rules are reinstalled. Nonzero DROP counts prove that packets matched PocketUFW's own rules, **not** that all possible incoming paths are protected. The Android Alpha12 **Status** tab also reads and displays the actual IPv4/IPv6 INPUT hooks, inbound chains, and verified VPN listener exceptions, with a raw-rule view. It uses the existing root check rather than requesting privileges again when switching tabs.
+`activity` returns structured IPv4/IPv6 DROP and established/related rule counters; `verbose` presents a human-readable summary. Tide shows these measurements in the expandable **Statistics** pill and the existing **Activity → Counters** view, with physical and optional tunnel measurements kept separate. Counters reset on request or when rules are reinstalled. Nonzero DROP counts prove that packets matched PocketUFW’s rules, not that every incoming path is protected. **Activity → Kernel rules** shows the actual INPUT hooks, inbound chains and VPN listener exceptions, including a raw-rule view. Opening these views uses the last inspection; manual counter refresh is a separate lightweight root read.
 
 
 ```sh

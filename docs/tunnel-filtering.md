@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch, optional and off by default.** Enabling remains CLI-only; Android exposes status and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, with inspection performance still blocking UI integration. The subsequent local timing changes below await a focused Android retest. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
+**Status: development branch, optional and off by default.** Tide Settings now exposes PINNED and DENY-ONLY modes, status, hook refresh and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, and that the subsequent timing retest passed with full inspections averaging about 9.7 seconds. The new UI awaits device validation. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -182,15 +182,39 @@ If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then 
 | Restart | Gone, and never restored. Boot restoration only runs `enable`. |
 | Ordinary uninstall | Stays until the next restart, like the rest. The README's manual commands cover it. |
 
-In the app: the Status screen lists the extra hooks and rules. A tunnel leaves the "Not filtered" list only after the complete policy and hooks verify in both families. The app names the session-only tunnel state and address-trust limitation; boot settings explicitly restore physical filtering only. There is still no tunnel enable switch or tunnel counter display. The Firewall
+In the app: Activity → Kernel rules lists the extra hooks and rules. A tunnel leaves the "Not filtered" list only after the complete policy and hooks verify in both families. The app names the session-only tunnel state and address-trust limitation; boot settings explicitly restore physical filtering only. Settings → Tunnel protection enables either explicit mode. The Firewall
 screen shows the installed pins and a separate connectivity observation:
 `MATCH` means current verified addresses match (not a reachability test),
 `REAUTHORIZE` shows verified replacement addresses while protection may remain
 ACTIVE, and `UNVERIFIED` means the current ownership/address proof was unavailable.
 No observation changes trust. A DEGRADED tunnel offers **Remove tunnel rules only**
 with confirmation. This invokes `tunnel-off`, keeps physical rules and boot opt-in,
-and verifies the result. If physical rules are also broken, recovery still reports
+and verifies the result. The physical rule audit is reported separately, without
+another rule scan, so degraded tunnel rules do not imply physical rules were
+removed. If physical rules are also broken, recovery still reports
 failure/DEGRADED and the existing partial-rule recovery remains available afterward.
+
+Switching modes or replacing stale authorization requires **Turn tunnel protection
+off**, followed by **Enable PINNED** or **Enable DENY-ONLY**, each confirmed. Filtering
+inside tunnels stops between those actions; physical rules stay installed. PINNED
+performs fresh ownership/address proof. A failed enable does not choose another
+mode. **Refresh tunnel hooks** reconciles WireGuard interfaces without changing
+pins, so it cannot dismiss REAUTHORIZE. Off/unknown/degraded states never become
+enabled merely because a remembered setting or boot opt-in exists.
+
+The Firewall screen's small **Statistics** pill expands the current measured
+physical and tunnel counters; the existing Activity counters remain available.
+Both display IPv4/IPv6 drops, bytes and established/related rule matches separately.
+PINNED also shows tailnet-exemption matches, which precede the established rule.
+These are rule matches, not unique connections or attack detections. Missing,
+malformed and overflowing measurements remain unavailable. Opening the pill
+requests no root; **Refresh counters** uses the existing lightweight read with no
+VPN ownership scan. A changed mode or pin invalidates the old authorization
+display until a full recheck. Failed refreshes retain the prior measurements as
+last-known readings. **Reset counters** confirms once, then zeroes all owned
+physical/UDP-exception/tunnel chains in both families with the existing engine
+action. It does not rebuild rules or interrupt enforcement; partial reset failure
+is reported rather than presented as success.
 
 ## Rollback for hardware tests
 
@@ -309,7 +333,7 @@ is not an exposed application service.
 The proposed destination pinning is now implemented, with explicit initial
 ownership verification and no automatic broadening. Its rules and limitations
 are described above. It adds no stored authorization, watcher, boot opt-in, UI
-switch or provider integration. Enabling remains CLI-only and off by default; status and recovery are now exposed in Android.
+switch or provider integration at that revision. Enabling was CLI-only; the later Tide integration described above adds explicit Settings controls while keeping filtering off by default.
 
 Validation includes authorization failures, changing interface identity, partial
 Android output, address changes requiring reauthorization, disconnect/renumber
@@ -450,3 +474,40 @@ No device was accessed, APK signed/deployed, or branch pushed/merged for this wo
 The pinned-destination injection limitation described above is unchanged: an
 unrelated tunnel can inject tailnet-source packets into a still-local pinned
 destination. Faster observation does not authenticate packet ingress.
+
+### Tide Settings and Statistics — local UI integration
+
+The owner subsequently confirmed the Android timing retest: full inspections
+average about 9.7 seconds on Frankenpixel with accurate verification and counters.
+This cleared the timing gate; it is not hardware validation of the new controls.
+
+Tide keeps its existing navigation, fonts, colors and mascot. Settings expands
+the tunnel controls; the Firewall screen replaces its large counter shortcut
+with one small expandable Statistics pill. The existing Activity view shares
+the same counter component. No capture, history store, DNS filtering, telemetry
+or background refresh was added. Physical-rule status reuses the existing audit;
+rule construction, ownership proof, lock deadlines and reset operations are
+unchanged.
+
+Focused tests exercise explicit mode selection, failed ownership without fallback,
+stale-pin removal/re-enable, degraded tunnel recovery, root/verification guards,
+reboot-off presentation, malformed/overflowed counters, lightweight refresh,
+changed-pin invalidation, large text and reset confirmation. The 230 Android JVM
+tests and Android lint pass. Native host renders (test fixtures only) are written
+to `android/app/build/reports/tide-ui/`. The real-kernel reset check populates both
+physical and tunnel counters, resets all 14 reported measurements in one action,
+compares both rule tables unchanged, then proves both paths still drop traffic.
+The focused bridge/performance/mksh suites passed 170 checks; the engine/security
+run passed the 282 applicable checks after replacing the obsolete CLI-only
+restriction with explicit-mode integration tests. The added reset proof also
+passed, bringing the real-kernel coverage in these runs to 39 checks. No device
+or host firewall was used for those isolated namespace tests.
+
+Device validation still needed: walk through both Settings confirmations and
+failure feedback, inspect stale/degraded status and tunnel-only recovery, compare
+the Statistics breakdowns with `pocketufw activity`, and exercise the single reset
+while protection remains on. Check tap targets, scrolling, TalkBack and large text
+in both appearances. Time the new enable/refresh actions and confirm counter-only
+refresh remains responsive. The previously passed packet/security behaviors do
+not need wholesale repetition for this UI handoff. No phone access, APK signing,
+deployment, push or merge was performed for the UI work.

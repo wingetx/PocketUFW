@@ -5,15 +5,25 @@ uninstall lifecycle changes. The follow-up to Claude's independent review at
 `ebe9019` added explicit deny-only tunnel filtering, separate stale-pin/connectivity
 status in Android, tunnel-only recovery, and bounded boot lock retries. The owner
 reports that Claude's hardware validation at `d7baeb2` passed all five security
-behaviors. Full dashboard inspection still took 34–35 seconds, above the app's
-32-second timeout. Local timing fixes now consolidate rule/probe work, remove the
-extra Android scan and expensive parsing, and use elapsed lock deadlines. A
-focused Android timing retest remains required before UI integration. See
+behaviors. After the timing fixes, the owner reports that the Frankenpixel retest
+passed: full inspections average about 9.7 seconds with accurate verification and
+counters, within the unchanged 32-second timeout. Tide now exposes optional
+PINNED and DENY-ONLY tunnel modes in Settings, with explicit confirmation,
+tunnel-only recovery, and separate physical/tunnel status. A compact expandable
+Statistics pill shows the existing physical and tunnel counters. See
 [tunnel filtering](tunnel-filtering.md) for the policy, regression checks and
-remaining injection risk. Optional tunnel filtering is off by default, enabled
-only by CLI, and never restored after reboot. No signing, deployment, push or merge
-has been performed for this timing follow-up. The injected host cost model fell
-from 22.43 to 9.43 seconds; that is not a new device timing result.
+remaining injection risk. Optional tunnel filtering is off by default and never
+restored after reboot. Changing modes or reauthorizing addresses requires an
+explicit tunnel-only removal followed by a fresh enable; failed proof never
+selects a fallback. Hook refresh does not change pins. Counter refresh remains
+one lightweight root request; opening Statistics makes none. Reset uses the
+existing single action for all owned counters, without rebuilding rules.
+
+The UI work is local and awaits device interaction/accessibility validation.
+No APK was signed or deployed; nothing was pushed or merged. The 230 Android JVM
+tests and Android lint pass. Host-rendered examples are generated in
+`android/app/build/reports/tide-ui/` by the focused UI tests; their numbers are
+test fixtures, not device measurements.
 
 ## Historical handoff (November 5; superseded by the status above)
 
@@ -38,7 +48,7 @@ The home screen now also lists a `tun` VPN as not filtered, named from Android's
 
 ## Update: optional tunnel filter on `feature/tunnel-inbound-filter`
 
-Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, never restored at boot, and initially used whole-range tailnet trust. That policy has since been replaced by verified destination pins or explicit deny-only mode. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard, and on the Pixel 9a with Tailscale and kernel WireGuard together, with Proton, and across Wi-Fi and cellular. **A real unsolicited packet on a real VPN's own tunnel remains unproven on hardware.** See [hardware validation](hardware-validation.md).
+Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels, initially command line only, off by default, never restored at boot, and initially using whole-range tailnet trust. Tide Settings now exposes explicit mode controls. That policy has since been replaced by verified destination pins or explicit deny-only mode. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard, and on the Pixel 9a with Tailscale and kernel WireGuard together, with Proton, and across Wi-Fi and cellular. **A real unsolicited packet on a real VPN's own tunnel remains unproven on hardware.** See [hardware validation](hardware-validation.md).
 
 **Historical audit input (whole-range policy):** the filter's tailnet rule trusted addresses in `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, not Tailscale ownership. This is a known security gap to assess before release. See [coverage gaps](tunnel-filtering.md#remaining-trust-limitations-and-wireguard).
 

@@ -140,7 +140,7 @@ class TideAuditRegressionTest {
         open(fake); activity()
         scrollClick("Refresh counters")
         compose.settle { fake.count("counters") == 1 && compose.hasText(error, true) }
-        node("1,204", substring = true).assertExists()
+        compose.onNodeWithContentDescription("Physical IPv4: 1,204 dropped packets, 98,664 bytes").assertExists()
         node("Last known reading only.", substring = true).assertExists()
         compose.onNodeWithTag("reset-counters").assertIsNotEnabled()
         node("Firewall").performClick()

@@ -281,8 +281,10 @@ case "$ACTION" in
       outcome='SUCCESS'
       if [ "$previous_boot" = CONFLICT ]; then
         message='Firewall disabled. Another module owns the boot hook path, so it was left alone.'
-      else
+      elif [ "$previous_boot" = ENABLED ]; then
         message='Firewall disabled; boot restoration removed.'
+      else
+        message='Firewall disabled.'
       fi
     else
       outcome='FAILED'

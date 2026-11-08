@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
@@ -26,7 +27,7 @@ internal fun TideStatistics(ui: TideUiState, actions: TideActions) {
             Spacer(Modifier.width(8.dp))
             Text("Statistics")
             Spacer(Modifier.width(8.dp))
-            TideIcon(if (expanded) R.drawable.tide_up else R.drawable.tide_down, tint = Muted)
+            TideDisclosureIcon(expanded)
         }
         // Opening the pill uses the last measured snapshot; no root request or polling.
         if (expanded) TideCounters(ui, actions, compact = true)
@@ -39,6 +40,8 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
     var repliesExpanded by rememberSaveable { mutableStateOf(false) }
     val active = ui.snapshot.protection == FirewallClient.Protection.ACTIVE
     val verified = active && !ui.verificationInDoubt
+    val verifiedOff = ui.snapshot.protection == FirewallClient.Protection.INACTIVE &&
+        ui.snapshot.rootReady && !ui.verificationInDoubt
     val canReset = verified && ui.snapshot.rootReady && !ui.busy
     // A pending dialog must not outlive a verified, actionable state.
     LaunchedEffect(verified, ui.snapshot.rootReady) {
@@ -59,57 +62,59 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
                 val bytes = counterSum(activity.ipv4Bytes, activity.ipv6Bytes)?.let { byteCount(it) }
                     ?: "Bytes unavailable"
                 if (large) {
-                    Text(count(activity.totalBlocked), color = Mint, fontSize = if (compact) 28.sp else 48.sp,
+                    Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
+                        fontSize = if (compact) 28.sp else 48.sp,
                         lineHeight = if (compact) 36.sp else 54.sp)
                     Text(bytes, style = MaterialTheme.typography.bodySmall, fontFamily = TideMono, color = Muted)
                 } else Row(verticalAlignment = Alignment.Bottom) {
-                    Text(count(activity.totalBlocked), color = Mint, fontSize = if (compact) 28.sp else 56.sp,
+                    Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
+                        fontSize = if (compact) 28.sp else 56.sp,
                         lineHeight = if (compact) 36.sp else 64.sp,
                         letterSpacing = if (compact) 0.sp else (-2).sp, modifier = Modifier.weight(1f))
                     Text(bytes, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall,
                         fontFamily = TideMono, color = Muted)
                 }
             }
-            if (!large) Row(Modifier.fillMaxWidth()) {
-                Text("Family", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Muted)
-                Text("Dropped", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Muted, textAlign = TextAlign.End)
-                Text("Bytes", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Muted, textAlign = TextAlign.End)
-            }
-            CounterFamily("IPv4", activity.ipv4Blocked, activity.ipv4Bytes, large)
-            CounterFamily("IPv6", activity.ipv6Blocked, activity.ipv6Bytes, large)
+            if (!large) CounterHeader()
+            CounterFamily("Physical", "IPv4", activity.ipv4Blocked, activity.ipv4Bytes, large)
+            CounterFamily("Physical", "IPv6", activity.ipv6Blocked, activity.ipv6Bytes, large)
             TideDivider()
             if (large) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Return traffic", style = MaterialTheme.typography.titleMedium)
                 Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
-                Text(count(activity.totalReplies), fontSize = 30.sp, lineHeight = 36.sp)
+                Text(count(activity.totalReplies), fontFamily = TideMono, fontSize = 30.sp, lineHeight = 36.sp)
             } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("Return traffic", style = MaterialTheme.typography.titleMedium)
                     Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
-                Text(count(activity.totalReplies), fontSize = 28.sp, lineHeight = 34.sp)
+                Text(count(activity.totalReplies), fontFamily = TideMono, fontSize = 28.sp, lineHeight = 34.sp)
             }
-            TextButton(onClick = { repliesExpanded = !repliesExpanded }, Modifier.heightIn(min = 48.dp)) {
+            TextButton(onClick = { repliesExpanded = !repliesExpanded },
+                modifier = Modifier.heightIn(min = 48.dp)
+                    .semantics { stateDescription = if (repliesExpanded) "Expanded" else "Collapsed" },
+                contentPadding = PaddingValues(vertical = 8.dp), shape = RectangleShape) {
                 Text(if (repliesExpanded) "Hide reply counts by family" else "Reply counts by address family")
             }
             if (repliesExpanded) {
-                TidePolicyRow(R.drawable.tide_up, "IPv4 replies", count(activity.ipv4Replies))
-                TidePolicyRow(R.drawable.tide_up, "IPv6 replies", count(activity.ipv6Replies))
+                TidePolicyRow(R.drawable.tide_reply, "IPv4 replies", count(activity.ipv4Replies), TideMono)
+                TidePolicyRow(R.drawable.tide_reply, "IPv6 replies", count(activity.ipv6Replies), TideMono)
             }
             TideDivider()
             Text("Tunnel interfaces", style = MaterialTheme.typography.titleMedium)
             val tunnel = activity.tunnel
             if (activity.tunnelFilter == FirewallClient.TunnelFilter.ON && tunnel != null) {
                 Text("Drop-rule matches: ${count(counterSum(tunnel.ipv4Blocked, tunnel.ipv6Blocked))}",
-                    style = MaterialTheme.typography.bodyLarge, color = Mint)
-                CounterFamily("IPv4", tunnel.ipv4Blocked, tunnel.ipv4Bytes, large)
-                CounterFamily("IPv6", tunnel.ipv6Blocked, tunnel.ipv6Bytes, large)
+                    style = MaterialTheme.typography.bodyLarge, color = Foreground, fontFamily = TideMono)
+                if (!large) CounterHeader()
+                CounterFamily("Tunnel", "IPv4", tunnel.ipv4Blocked, tunnel.ipv4Bytes, large)
+                CounterFamily("Tunnel", "IPv6", tunnel.ipv6Blocked, tunnel.ipv6Bytes, large)
                 Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
-                TidePolicyRow(R.drawable.tide_up, "IPv4 tunnel replies", count(tunnel.ipv4Replies))
-                TidePolicyRow(R.drawable.tide_up, "IPv6 tunnel replies", count(tunnel.ipv6Replies))
+                TidePolicyRow(R.drawable.tide_reply, "IPv4 tunnel replies", count(tunnel.ipv4Replies), TideMono)
+                TidePolicyRow(R.drawable.tide_reply, "IPv6 tunnel replies", count(tunnel.ipv6Replies), TideMono)
                 if (activity.tunnelMode == FirewallClient.TunnelMode.PINNED) {
-                    TidePolicyRow(R.drawable.tide_check, "IPv4 tailnet matches", count(tunnel.ipv4Tailnet))
-                    TidePolicyRow(R.drawable.tide_check, "IPv6 tailnet matches", count(tunnel.ipv6Tailnet))
+                    TidePolicyRow(R.drawable.tide_check, "IPv4 tailnet matches", count(tunnel.ipv4Tailnet), TideMono)
+                    TidePolicyRow(R.drawable.tide_check, "IPv6 tailnet matches", count(tunnel.ipv6Tailnet), TideMono)
                     Text("Tailnet-exempt packets match before the established-reply rule.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
@@ -119,24 +124,27 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
             Text("Last checked: " + readTime(activity.checkedAt), style = MaterialTheme.typography.bodySmall,
                 color = Muted, fontFamily = TideMono)
             if (activity.lastManualResetAt > 0L) Text("Last manual counter reset: " + readTime(activity.lastManualResetAt),
-                style = MaterialTheme.typography.bodySmall, color = Muted)
+                style = MaterialTheme.typography.bodySmall, color = Muted, fontFamily = TideMono)
         } else {
-            TideNotice(if (!active) "Counters unavailable while protection is not verified."
+            TideNotice(if (verifiedOff) "No counters exist because PocketUFW’s rules aren’t installed."
+                else if (!active) "Counters unavailable while protection is not verified."
                 else activity?.error ?: "Waiting for the kernel counter read.", error = active && activity?.error != null)
         }
-        val refresh: @Composable (Modifier) -> Unit = { modifier ->
-            TidePrimaryButton(if (ui.counterRefreshing) "Refreshing…" else "Refresh counters",
-                actions.refreshCounters, modifier, enabled = verified && ui.snapshot.rootReady && !ui.busy)
-        }
-        val reset: @Composable (Modifier) -> Unit = { modifier ->
-            OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
-                shape = TideActionShape, modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
-                    .testTag("reset-counters")) { Text("Reset counters") }
-        }
-        if (large) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            refresh(Modifier); reset(Modifier)
-        } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            refresh(Modifier.weight(1f)); reset(Modifier.weight(1f))
+        if (!verifiedOff) {
+            val refresh: @Composable (Modifier) -> Unit = { modifier ->
+                TidePrimaryButton(if (ui.counterRefreshing) "Refreshing…" else "Refresh counters",
+                    actions.refreshCounters, modifier, enabled = verified && ui.snapshot.rootReady && !ui.busy)
+            }
+            val reset: @Composable (Modifier) -> Unit = { modifier ->
+                OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
+                    shape = TideActionShape, modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
+                        .testTag("reset-counters")) { Text("Reset counters") }
+            }
+            if (large) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                refresh(Modifier); reset(Modifier)
+            } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                refresh(Modifier.weight(1f)); reset(Modifier.weight(1f))
+            }
         }
         Text("Rule matches, not attack detections. Counts reset on request or when rules are reinstalled.",
             style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -162,13 +170,28 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
 }
 
 @Composable
-private fun CounterFamily(name: String, packets: Long?, bytes: Long?, large: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.semantics(mergeDescendants = true) {}) {
+private fun CounterHeader() {
+    Row(Modifier.fillMaxWidth()) {
+        Text("Family", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text("Dropped", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            color = Muted, textAlign = TextAlign.End)
+        Text("Bytes", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            color = Muted, textAlign = TextAlign.End)
+    }
+}
+
+@Composable
+private fun CounterFamily(scope: String, name: String, packets: Long?, bytes: Long?, large: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.clearAndSetSemantics {
+        contentDescription = "$scope $name: " +
+            (packets?.let { "${count(it)} dropped packets" } ?: "dropped packets unavailable") + ", " +
+            (bytes?.let { "${count(it)} bytes" } ?: "bytes unavailable")
+    }) {
         TideDivider()
         if (large) {
             Text(name, style = MaterialTheme.typography.titleMedium)
-            Text("Dropped: ${count(packets)} packets", style = MaterialTheme.typography.bodyMedium)
-            Text("Bytes: ${byteCount(bytes)}", style = MaterialTheme.typography.bodyMedium)
+            Text("Dropped: ${count(packets)} packets", style = MaterialTheme.typography.bodyMedium, fontFamily = TideMono)
+            Text("Bytes: ${byteCount(bytes)}", style = MaterialTheme.typography.bodyMedium, fontFamily = TideMono)
         } else Row(Modifier.fillMaxWidth()) {
             Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Text(count(packets), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,

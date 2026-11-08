@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch, optional and off by default.** Tide Settings now exposes PINNED and DENY-ONLY modes, status, hook refresh and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, and that the subsequent timing retest passed with full inspections averaging about 9.7 seconds. The new UI awaits device validation. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
+**Status: development branch, optional and off by default.** Tide Settings exposes PINNED and DENY-ONLY modes, status, hook refresh and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, the timing retest averaged about 9.7 seconds for full inspections, and basic UI acceptance at `2c83438` passed all exercised functions. The local UI acceptance corrections below still need a focused device check, including actual TalkBack, light mode, large text and safety states. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -503,7 +503,7 @@ restriction with explicit-mode integration tests. The added reset proof also
 passed, bringing the real-kernel coverage in these runs to 39 checks. No device
 or host firewall was used for those isolated namespace tests.
 
-Device validation still needed: walk through both Settings confirmations and
+The original device validation handoff requested: walk through both Settings confirmations and
 failure feedback, inspect stale/degraded status and tunnel-only recovery, compare
 the Statistics breakdowns with `pocketufw activity`, and exercise the single reset
 while protection remains on. Check tap targets, scrolling, TalkBack and large text
@@ -511,3 +511,56 @@ in both appearances. Time the new enable/refresh actions and confirm counter-onl
 refresh remains responsive. The previously passed packet/security behaviors do
 not need wholesale repetition for this UI handoff. No phone access, APK signing,
 deployment, push or merge was performed for the UI work.
+
+### Tide UI acceptance follow-up — November 8
+
+The owner supplied basic acceptance evidence for `2c83438` from Frankenpixel:
+all exercised functions passed. Measured times were enable 7.7 s, PINNED enable
+16.7 s, counters 4.0–4.2 s, reset 12.0 s, inspect 8.5 s (1.3 s off), and disable
+3.6 s. These are the owner's phone measurements, not host test timings. The
+git-ignored screenshots and accessibility dumps in
+`android/build/ui-acceptance/shots/` remain intact.
+
+The follow-up corrects the five reported defects and six presentation preferences:
+
+- Kernel reports retain separate `POCKETUFW_IN`, `POCKETUFW_TS` and `POCKETUFW_VPN`
+  lists. Readable sections number each chain independently, name exact known
+  tunnel rules, and explain their separate INPUT entry points. Raw rules remain
+  available; unexpected conditions and broad destinations are not given a pinned
+  authorization label.
+- Verified Off says no counters exist because PocketUFW's rules are absent, with
+  no Refresh/Reset controls. Unverified states keep their verification warning.
+  Disable only reports removing boot restoration if it was enabled beforehand;
+  foreign boot-hook ownership still gets its explicit notice.
+- Physical and tunnel counter tables share headings and self-contained accessible
+  descriptions with packet counts and exact bytes. Disclosures have up/down
+  chevrons and expanded/collapsed semantics. Values use neutral colors, numeric
+  fonts and return-traffic arrows; timestamps share the same font. Text actions
+  align without clipping their wrapped labels.
+- Successful manual rechecks, counter reads and resets expire after six seconds,
+  adjusted by Android's recommended accessibility timeout for text and a Dismiss
+  control. Failed/unverified reads, changed-pin warnings and non-routine operation
+  notices remain until dismissed or superseded by another action. Expiry makes
+  no root request and does not change protection or counter measurements.
+
+Focused regressions first reproduced the five defects. Local validation covers
+chain separation in both families and raw/readable views, broad/unknown rule
+fallback, verified-Off versus unverified counters, accessible descriptions and
+disclosure state, message expiry, longer accessibility timeouts, retained warnings,
+and unchanged gateway call counts. Host renders cover both appearances and 200%
+text at 320 dp; these do not prove real TalkBack output. All 243 Android JVM tests,
+125 bridge tests and 23 UI/tile contracts pass; Android lint completes with no
+errors (three warnings and two informational notices).
+
+Next supervised session: check these presentation fixes on the phone, listen to
+TalkBack's counter descriptions and expanded/collapsed announcements, verify
+routine banner expiry versus retained failure notices, and inspect light mode and
+large text. Complete the remaining stale-pin, DEGRADED/tunnel-only recovery,
+verification-failure and reboot-off UI walkthrough. The passed packet/security
+tests need not be repeated wholesale. This follow-up did not access the phone,
+sign an APK, deploy, push or merge.
+
+The policy limitation is unchanged: another tunnel, including kernel WireGuard
+named `tun*`, can inject tailnet-source packets into a still-local pinned
+destination. Address pins are not packet authentication; the Settings disclosure
+remains explicit.

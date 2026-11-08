@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -25,6 +26,7 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 /** Presentation inputs only. Root operations remain in MainActivity / FirewallClient. */
 internal data class TideUiState(
@@ -41,7 +43,9 @@ internal data class TideUiState(
     val checkedAt: Long = 0L,
     val vpnRefreshing: Boolean = false,
     val removal: TideRemoval = TideRemoval.NONE,
-    val removalDetail: String = ""
+    val removalDetail: String = "",
+    /** Only routine successful reads/resets expire. Warnings and operation notices stay. */
+    val transientMessage: Boolean = false
 )
 
 /** How the last Remove PocketUFW attempt ended. CLEAN means the read-back found nothing left. */
@@ -114,11 +118,21 @@ internal fun TideScreen(
     }
     val density = LocalDensity.current
     var bannerHeight by remember { mutableStateOf(0.dp) }
+    val problem = ui.failed || ui.counterRefreshError
+    val dismissMessage by rememberUpdatedState(actions.dismissMessage)
+    val timeout = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
+        originalTimeoutMillis = 6_000L, containsIcons = false, containsText = true, containsControls = true
+    ) ?: 6_000L
+    LaunchedEffect(note, ui.transientMessage, ui.busy, problem, ui.verificationInDoubt, timeout) {
+        if (note.isNotEmpty() && ui.transientMessage && !ui.busy && !problem && !ui.verificationInDoubt) {
+            delay(timeout)
+            dismissMessage()
+        }
+    }
 
     Scaffold(
         snackbarHost = {
             if (note.isNotEmpty()) {
-                val problem = ui.failed || ui.counterRefreshError
                 Surface(color = if (problem) MaterialTheme.colorScheme.secondaryContainer else Panel,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.onSizeChanged { bannerHeight = with(density) { it.height.toDp() } }

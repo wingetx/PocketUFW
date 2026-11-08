@@ -308,9 +308,20 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["state"], "INACTIVE")
         self.assertEqual(values["boot"], "DISABLED")
         self.assertEqual(values["previous_boot"], "ENABLED")
+        self.assertEqual(values['message'], 'Firewall disabled; boot restoration removed.')
         self.assertEqual(self.log_lines(), [
             "boot:status", "boot:disable", "engine:disable", "engine:inspect", "boot:status"
         ])
+
+    def test_disable_does_not_claim_to_remove_boot_restoration_that_was_not_enabled(self):
+        for boot in ('DISABLED', 'UNSUPPORTED'):
+            with self.subTest(boot=boot):
+                self.state.write_text('ACTIVE\n')
+                self.boot_state.write_text(boot + '\n')
+                result, values = self.run_bridge('disable')
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(values['operation'], 'SUCCESS')
+                self.assertEqual(values['message'], 'Firewall disabled.')
 
     def test_failed_disarm_never_disables_live_rules(self):
         result, values = self.run_bridge(

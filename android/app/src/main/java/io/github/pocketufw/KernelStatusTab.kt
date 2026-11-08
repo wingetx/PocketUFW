@@ -77,6 +77,10 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                             Text("POCKETUFW_TS", color = Mint, style = MaterialTheme.typography.labelMedium)
                             if (family.vpnExceptions.isEmpty()) Text("(no exceptions)", color = Muted)
                             else family.vpnExceptions.forEach { RawKernelRule(it) }
+                            if (family.tunnel.isNotEmpty()) {
+                                Text("POCKETUFW_VPN", color = Mint, style = MaterialTheme.typography.labelMedium)
+                                family.tunnel.forEach { RawKernelRule(it) }
+                            }
                         }
                     }
                 }
@@ -88,7 +92,7 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                     TideDivider()
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("POCKETUFW · KERNEL ORDER", style = MaterialTheme.typography.labelSmall,
+                    Text("PHYSICAL INBOUND · KERNEL ORDER", style = MaterialTheme.typography.labelSmall,
                         letterSpacing = 1.sp, color = Muted)
                     // The report is already ordered by the kernel. Never sort or group by action.
                     family.inbound.forEachIndexed { index, rule -> KernelRuleRow(index, rule) }
@@ -99,6 +103,13 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                     if (family.vpnExceptions.isEmpty()) Text("None installed", style = MaterialTheme.typography.bodyMedium, color = Muted)
                     else family.vpnExceptions.forEachIndexed { index, rule -> KernelRuleRow(index, rule, "vpn") }
                 }
+                if (family.tunnel.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TideDivider()
+                    Text("Tunnel protection · separate chain", style = MaterialTheme.typography.titleSmall)
+                    Text("POCKETUFW_VPN is entered from its own tun+ and WireGuard INPUT hooks, not after the physical DROP.",
+                        style = MaterialTheme.typography.bodySmall, color = Muted)
+                    family.tunnel.forEachIndexed { index, rule -> KernelRuleRow(index, rule, "tunnel") }
+                }
             }
         }
         OutlinedButton(onClick = recheck, enabled = !busy && state.protection != FirewallClient.Protection.CHECKING,
@@ -106,8 +117,9 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
             TideIcon(R.drawable.tide_refresh, tint = LocalContentColor.current)
             Spacer(Modifier.width(8.dp)); Text("Recheck kernel rules")
         }
-        Text("Read-only snapshot, not a continuous monitor. PocketUFW hooks supported physical interfaces after " +
-            "Android’s existing INPUT rules. Earlier Android/OEM ACCEPT rules may bypass these hooks. " +
+        Text("Read-only snapshot, not a continuous monitor. Physical hooks enter POCKETUFW_IN; " +
+            "optional tun+ and WireGuard hooks enter POCKETUFW_VPN separately. " +
+            "Earlier Android/OEM ACCEPT rules may bypass these INPUT hooks. " +
             "Android owns the INPUT chain policies. Outgoing traffic is unchanged. Packet logging: counters only.",
             color = Muted, style = MaterialTheme.typography.bodySmall)
     }
@@ -159,14 +171,28 @@ private val KNOWN_RULES = mapOf(
     "-A POCKETUFW_IN -p esp -j ACCEPT" to ("ALLOW" to "ESP / IPsec"),
     "-A POCKETUFW_IN -j POCKETUFW_TS" to ("CHECK" to "VPN listener exceptions"),
     "-A POCKETUFW_IN -j DROP" to ("DROP" to "Other incoming packets"),
+    "-A POCKETUFW_VPN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" to ("ALLOW" to "Established / related replies"),
+    "-A POCKETUFW_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT" to ("ALLOW" to "Established / related replies"),
+    "-A POCKETUFW_VPN -m conntrack --ctstate INVALID -j DROP" to ("DROP" to "Invalid packets"),
+    "-A POCKETUFW_VPN -j DROP" to ("DROP" to "Other incoming packets"),
 )
 private val UDP_EXCEPTION = Regex("-A POCKETUFW_TS -p udp --dport ([1-9][0-9]{0,4}) -j ACCEPT")
+private val PINNED4 = Regex("-A POCKETUFW_VPN -s 100\\.64\\.0\\.0/10 -d (100\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(?:/32)?) -i tun\\+ -j ACCEPT")
+private val PINNED6 = Regex("-A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d (fd7a:115c:a1e0:[0-9a-f:]+(?:/128)?) -i tun\\+ -j ACCEPT")
 
 internal fun describeRule(rule: String): Pair<String, String> {
     val form = rule.replace(" -p udp -m udp ", " -p udp ")
     KNOWN_RULES[form]?.let { return it }
     UDP_EXCEPTION.matchEntire(form)?.let {
         return "ALLOW" to ("VPN UDP exception, port " + it.groupValues[1])
+    }
+    PINNED4.matchEntire(form)?.groupValues?.get(1)?.let { pin ->
+        val octets = pin.substringBefore('/').split('.').map { it.toInt() }
+        if (octets[1] in 64..127 && octets.all { it in 0..255 })
+            return "ALLOW" to "Pinned tailnet destination: $pin"
+    }
+    PINNED6.matchEntire(form)?.groupValues?.get(1)?.let { pin ->
+        return "ALLOW" to "Pinned tailnet destination: $pin"
     }
     // iptables lists matches, comments included, before the target.
     return when (val target = rule.substringAfterLast(" -j ", "").substringBefore(' ')) {

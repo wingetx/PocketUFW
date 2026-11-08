@@ -9,11 +9,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.text.NumberFormat
@@ -99,6 +101,11 @@ internal fun TideIcon(id: Int, modifier: Modifier = Modifier, description: Strin
 }
 
 @Composable
+internal fun TideDisclosureIcon(expanded: Boolean) {
+    TideIcon(R.drawable.tide_chevron, Modifier.rotate(if (expanded) -90f else 90f), tint = Muted)
+}
+
+@Composable
 internal fun TideDivider() { HorizontalDivider(color = Border) }
 
 @Composable
@@ -143,15 +150,26 @@ internal fun TideLink(label: String, onClick: () -> Unit) {
 
 @Composable
 internal fun TideSettingLink(label: String, detail: String, onClick: () -> Unit) {
+    TideSettingRow(label, detail, null, onClick)
+}
+
+@Composable
+internal fun TideSettingExpander(label: String, detail: String, expanded: Boolean, onClick: () -> Unit) {
+    TideSettingRow(label, detail, expanded, onClick)
+}
+
+@Composable
+private fun TideSettingRow(label: String, detail: String, expanded: Boolean?, onClick: () -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+            .semantics { if (expanded != null) stateDescription = if (expanded) "Expanded" else "Collapsed" }
             .padding(vertical = 16.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(label, style = MaterialTheme.typography.bodyLarge)
                 Text(detail, style = MaterialTheme.typography.bodySmall, color = Muted)
             }
             Spacer(Modifier.width(12.dp))
-            TideIcon(R.drawable.tide_chevron)
+            if (expanded == null) TideIcon(R.drawable.tide_chevron) else TideDisclosureIcon(expanded)
         }
         TideDivider()
     }
@@ -176,18 +194,19 @@ internal fun TideTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Un
 }
 
 @Composable
-internal fun TidePolicyRow(icon: Int, label: String, value: String) {
+internal fun TidePolicyRow(icon: Int, label: String, value: String, valueFontFamily: FontFamily? = null) {
     if (LocalDensity.current.fontScale > 1.2f) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 TideIcon(icon, tint = Mint); Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             }
-            Text(value, Modifier.padding(start = 32.dp), style = MaterialTheme.typography.bodyMedium, color = Muted)
+            Text(value, Modifier.padding(start = 32.dp), style = MaterialTheme.typography.bodyMedium, color = Muted,
+                fontFamily = valueFontFamily)
         }
     } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         TideIcon(icon, tint = Mint)
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        Text(value, style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text(value, style = MaterialTheme.typography.bodySmall, color = Muted, fontFamily = valueFontFamily)
     }
 }

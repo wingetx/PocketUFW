@@ -1,4 +1,4 @@
-# PocketUFW current handoff (2026-11-07)
+# PocketUFW current handoff (2026-11-08)
 
 Current local work is on `feature/tunnel-inbound-filter`, including the unmerged
 uninstall lifecycle changes. The follow-up to Claude's independent review at
@@ -19,11 +19,34 @@ selects a fallback. Hook refresh does not change pins. Counter refresh remains
 one lightweight root request; opening Statistics makes none. Reset uses the
 existing single action for all owned counters, without rebuilding rules.
 
-The UI work is local and awaits device interaction/accessibility validation.
-No APK was signed or deployed; nothing was pushed or merged. The 230 Android JVM
-tests and Android lint pass. Host-rendered examples are generated in
-`android/app/build/reports/tide-ui/` by the focused UI tests; their numbers are
-test fixtures, not device measurements.
+The owner reports basic UI acceptance at `2c83438` on Frankenpixel: all exercised
+functions passed. Enable took 7.7 s, PINNED enable 16.7 s, counters 4.0–4.2 s,
+reset 12.0 s, inspect 8.5 s (1.3 s off), and disable 3.6 s. The screenshots and
+accessibility dumps in `android/build/ui-acceptance/shots/` are git-ignored device
+evidence and have been retained. These results do not cover TalkBack announcements,
+large text, light mode or the remaining supervised safety-state walkthrough.
+
+The local acceptance follow-up separates physical and tunnel kernel chains and
+their numbering, corrects verified-Off counter and boot-removal messages, labels
+both counter tables, and gives disclosures chevrons and accessibility state.
+Counter values use neutral colors and consistent numeric fonts; reply rows use a
+return arrow. Routine status/counter confirmations expire after six seconds or
+Android's longer accessibility timeout. Failures and non-routine notices remain
+dismissible. Text actions align with their content column and wrap at large text.
+No firewall algorithm, root-request count, verification or counter reset changed.
+
+The follow-up remains local and awaits the focused device check below; no APK was
+signed or deployed, and nothing was pushed or merged for it. Host-rendered examples
+are generated in `android/app/build/reports/tide-acceptance/` and `tide-ui/` by the
+focused UI tests; their numbers are fixtures, not device measurements. See the
+[acceptance follow-up](tunnel-filtering.md#tide-ui-acceptance-follow-up--november-8)
+for validation and the next supervised checks.
+
+Local results: **243 Android JVM tests**, **125 bridge tests** and **23 UI/tile
+contract checks** pass. Android lint completes with no errors (three warnings
+and two informational notices). The full JVM suite includes the focused new
+acceptance and banner tests; no packet/hardware tests were repeated for these
+presentation changes.
 
 ## Historical handoff (November 5; superseded by the status above)
 

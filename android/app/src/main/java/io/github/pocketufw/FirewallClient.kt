@@ -144,7 +144,9 @@ internal class FirewallClient(
         val inbound: List<String>,
         val vpnExceptions: List<String>,
         /** Earlier INPUT rules that accept traffic before PocketUFW's hooks see it. */
-        val bypass: List<String> = emptyList()
+        val bypass: List<String> = emptyList(),
+        /** Separate INPUT-hook target, never a continuation after the physical final DROP. */
+        val tunnel: List<String> = emptyList()
     )
     data class KernelReport(
         val ipv4: RuleFamily,
@@ -300,7 +302,8 @@ internal class FirewallClient(
             bypass.any { !it.startsWith("-A INPUT ") } ||
             inbound.any { rule -> INBOUND_CHAINS.none { rule.startsWith("-A $it ") } } ||
             vpn.any { !it.startsWith("-A POCKETUFW_TS ") }) return null
-        return RuleFamily(policy, hooks, inbound, vpn, bypass)
+        return RuleFamily(policy, hooks, inbound.filter { it.startsWith("-A POCKETUFW_IN ") },
+            vpn, bypass, inbound.filter { it.startsWith("-A POCKETUFW_VPN ") })
     }
 
     /** Parse only complete, nonnegative counters. Never invent zeroes on failure. */

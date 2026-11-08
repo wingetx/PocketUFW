@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
@@ -48,7 +49,7 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
         else -> "Not verified"
     }
     TidePolicyRow(R.drawable.tide_down, "Physical protection", physicalStatus(ui))
-    TideSettingLink("Tunnel protection", status) { expanded = !expanded }
+    TideSettingExpander("Tunnel protection", status, expanded) { expanded = !expanded }
     if (expanded) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Filters unsolicited incoming traffic at tunnel hooks. Off by default; never restored after reboot. Outgoing traffic is unchanged.",
             style = MaterialTheme.typography.bodySmall, color = Muted)
@@ -92,7 +93,9 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
                     Text(if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED) "Remove tunnel rules only" else "Turn tunnel protection off")
                 }
                 if (state.tunnelFilter == FirewallClient.TunnelFilter.ON) {
-                    TextButton(onClick = actions.refreshTunnelHooks, enabled = !ui.busy && !ui.verificationInDoubt &&
+                    TextButton(onClick = actions.refreshTunnelHooks, contentPadding = PaddingValues(vertical = 8.dp),
+                        shape = RectangleShape,
+                        enabled = !ui.busy && !ui.verificationInDoubt &&
                         state.rootReady && state.protection == FirewallClient.Protection.ACTIVE) { Text("Refresh tunnel hooks") }
                     Text("For added or removed WireGuard interfaces. Does not change pinned addresses. Earlier Android/OEM ACCEPT rules may bypass tunnel hooks.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)

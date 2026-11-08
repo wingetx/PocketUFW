@@ -57,6 +57,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     var state by remember { mutableStateOf(FirewallClient.Snapshot()) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
+    var transientMessage by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var counters by remember { mutableStateOf<FirewallClient.RuleActivity?>(null) }
     var counterRefreshing by remember { mutableStateOf(false) }
@@ -114,7 +115,10 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     fun recheck(showFeedback: Boolean = false, keepResult: Boolean = false) {
         if (busy) return
         busy = true
-        if (!keepResult) message = ""
+        if (!keepResult) {
+            message = ""
+            transientMessage = false
+        }
         counterRefreshNote = ""
         scope.launch {
             var finished: FirewallClient.Dashboard? = null
@@ -141,6 +145,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                 val verifiedState = snapshot.protection in listOf(
                     FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)
                 failed = !verifiedState || (keepResult && failed)
+                if (showFeedback) transientMessage = verifiedState && snapshot.rootReady
             } catch (_: Exception) {
                 verificationInDoubt = true
                 failed = true
@@ -160,11 +165,13 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
         }
     }
 
-    fun perform(vpn: Boolean = false, onResult: (FirewallClient.Operation?) -> Unit = {},
+    fun perform(vpn: Boolean = false, transientSuccess: Boolean = false,
+                onResult: (FirewallClient.Operation?) -> Unit = {},
                 work: () -> FirewallClient.Operation) {
         if (busy) return
         busy = true
         message = ""
+        transientMessage = false
         counterRefreshNote = ""
         vpnRefreshing = vpn
         // Any new operation makes an earlier removal result out of date.
@@ -178,6 +185,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                 adopt(outcome.dashboard)
                 failed = !outcome.success
                 message = outcome.explanation
+                transientMessage = transientSuccess && outcome.success
                 onResult(outcome)
             } catch (_: Exception) {
                 verificationInDoubt = true
@@ -254,6 +262,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
         counterRefreshing = true
         // Clear the last result, or it would hide this one and lend it its color.
         message = ""
+        transientMessage = false
         failed = false
         counterRefreshNote = ""
         scope.launch {
@@ -269,6 +278,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                         fresh.tailnetPin6 != state.tailnetPin6
                     verificationInDoubt = tunnelChanged
                     counterRefreshError = tunnelChanged
+                    transientMessage = !tunnelChanged
                     val whenChecked = DateFormat.getTimeInstance(DateFormat.MEDIUM)
                         .format(Date(fresh.checkedAt))
                     counterRefreshNote = if (tunnelChanged) "Counters read, but tunnel policy changed. Recheck status to verify current authorization."
@@ -295,7 +305,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     TideScreen(
         ui = TideUiState(
             snapshot = state, counters = counters, report = kernelReport,
-            busy = busy, message = message, failed = failed,
+            busy = busy, message = message, failed = failed, transientMessage = transientMessage,
             counterRefreshing = counterRefreshing, counterRefreshNote = counterRefreshNote,
             counterRefreshError = counterRefreshError, verificationInDoubt = verificationInDoubt,
             checkedAt = checkedAt, vpnRefreshing = vpnRefreshing,
@@ -318,7 +328,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             refreshCounters = { refreshCounters() },
             resetCounters = {
                 if (!busy && verifiedActive && state.rootReady) {
-                    perform { client.resetCounters() }
+                    perform(transientSuccess = true) { client.resetCounters() }
                 }
             },
             refreshVpn = {
@@ -379,6 +389,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             },
             dismissMessage = {
                 message = ""
+                transientMessage = false
                 failed = false
                 counterRefreshNote = ""
                 counterRefreshError = false

@@ -1,5 +1,14 @@
 # PocketUFW Android beta
 
+**Local tunnel review follow-up (November 7, 2026):** optional tunnel filtering
+remains off by default and enabled only from CLI. The Firewall screen now reports
+pinned or deny-only policy, installed and changed verified tailnet addresses, and
+REAUTHORIZE separately from enforcement. It offers confirmed tunnel-only removal
+when tunnel protection is DEGRADED; physical rules and boot opt-in stay in place.
+No tunnel enable switch or counter display was added. No build from this follow-up
+has been signed or deployed. See [policy and limits](../docs/tunnel-filtering.md).
+
+
 **0.1.0-beta5 (versionCode 26)** is a testing release of the one-switch
 Android root firewall, not a production security guarantee. Pixel 9a and
 Moto G 5G (2024) have been hardware tested; other Android variants may

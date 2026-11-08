@@ -1,4 +1,16 @@
-# PocketUFW current handoff (2026-11-05, Beta 5 pre-release)
+# PocketUFW current handoff (2026-11-07)
+
+Current local work is on `feature/tunnel-inbound-filter`, including the unmerged
+uninstall lifecycle changes. The follow-up to Claude's independent review at
+`ebe9019` adds explicit deny-only tunnel filtering, separate stale-pin/connectivity
+status in Android, tunnel-only recovery, and bounded boot lock retries. See
+[tunnel filtering](tunnel-filtering.md) for the policy, regression checks and
+remaining injection risk. Optional tunnel filtering is off by default, enabled
+only by CLI, and never restored after reboot. No signing, deployment, push or merge
+has been performed for this follow-up. Fresh independent review and Android
+hardware validation remain outstanding.
+
+## Historical handoff (November 5; superseded by the status above)
 
 **Canonical project:** `~/toolbox/projects/PocketUFW`
 **Active branch:** `fix/integration-audit` (local head `16dc742` when this handoff was prepared; check Git for later commits).
@@ -21,17 +33,17 @@ The home screen now also lists a `tun` VPN as not filtered, named from Android's
 
 ## Update: optional tunnel filter on `feature/tunnel-inbound-filter`
 
-Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, never restored at boot, and with tailnet traffic trusted by default. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard, and on the Pixel 9a with Tailscale and kernel WireGuard together, with Proton, and across Wi-Fi and cellular. **A real unsolicited packet on a real VPN's own tunnel remains unproven on hardware.** See [hardware validation](hardware-validation.md).
+Local branch built on `fix/uninstall-lifecycle`, not merged, pushed or signed. Adds optional inbound filtering inside VPN tunnels: command line only, off by default, never restored at boot, and initially used whole-range tailnet trust. That policy has since been replaced by verified destination pins or explicit deny-only mode. See [tunnel filtering](tunnel-filtering.md) for the findings, design and hardware test plan. Tested in isolated namespaces on real netfilter, tun and kernel WireGuard, and on the Pixel 9a with Tailscale and kernel WireGuard together, with Proton, and across Wi-Fi and cellular. **A real unsolicited packet on a real VPN's own tunnel remains unproven on hardware.** See [hardware validation](hardware-validation.md).
 
-**For the independent audit:** the filter's tailnet rule trusts addresses in `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, not Tailscale ownership. This is a known security gap to assess before release. See [coverage gaps](tunnel-filtering.md#coverage-gaps).
+**Historical audit input (whole-range policy):** the filter's tailnet rule trusted addresses in `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, not Tailscale ownership. This is a known security gap to assess before release. See [coverage gaps](tunnel-filtering.md#remaining-trust-limitations-and-wireguard).
 
-## Release blocker: uninstall leaves an active firewall
+## Historical uninstall finding (addressed by the lifecycle work above)
 
 **Observed on Pixel 9a:** After the PocketUFW app had been uninstalled, root-owned `/data/adb/service.d/pocketufw.sh`, `/data/adb/pocketufw/boot.enabled`, and `/data/adb/pocketufw/pocketufw` still existed, and both IPv4 and IPv6 `POCKETUFW_IN` chains with physical-interface INPUT hooks remained installed in the running kernel. Reinstalling signed Beta 5 found the firewall active and retained its counters. This is a real usability/security ownership problem: without the app, there is no normal UI to turn it off.
 
 **Existing behavior:** `boot-service` checks on **next boot** whether the app is gone and its device-protected data absent, and then removes *its own boot hook and root-owned copies*, but this does not remove kernel rules during the same running session. An ordinary Android uninstall does not reliably call app cleanup code. Do not claim that a broadcast receiver inside the uninstalled app will run, or that removing the boot hook alone immediately removes live rules.
 
-**Requested next work:** Ask Claude to independently investigate Android uninstall semantics and propose the least invasive, reliable lifecycle solution, then implement and test after design review. Candidate: explicit in-app **Remove PocketUFW** flow that shows what will happen, removes only verified PocketUFW-owned rules and boot files, confirms the resulting kernel state, and only then opens Android's uninstall UI. Keep standard uninstall and next-boot outcomes honest, including cleanup failures, partial rules, interrupted operations and uninstall without use of the in-app flow. No persistent watcher unless clearly justified. Avoid changing unrelated Android/OEM, Tailscale, WireGuard or VPN rules.
+**Original requested work (now implemented locally):** Ask Claude to independently investigate Android uninstall semantics and propose the least invasive, reliable lifecycle solution, then implement and test after design review. Candidate: explicit in-app **Remove PocketUFW** flow that shows what will happen, removes only verified PocketUFW-owned rules and boot files, confirms the resulting kernel state, and only then opens Android's uninstall UI. Keep standard uninstall and next-boot outcomes honest, including cleanup failures, partial rules, interrupted operations and uninstall without use of the in-app flow. No persistent watcher unless clearly justified. Avoid changing unrelated Android/OEM, Tailscale, WireGuard or VPN rules.
 
 **Testing gate:** Use isolated kernel/bridge/UI tests and a disposable rooted test device for uninstall/reboot scenarios before considering a release. Do **not** uninstall, reboot, reset, or alter Frankenpixel's live firewall/VPN/root state without explicit approval. Have an independent audit of this new root/uninstall boundary. Do not publish Beta 5 until resolved or the remaining limitation is explicitly accepted and clearly documented.
 

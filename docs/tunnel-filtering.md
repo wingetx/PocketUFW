@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch, optional and off by default, with no switch in the app.** The pinned-destination policy is local and awaits independent review. The phone measurements below are historical results from the earlier whole-range policy, not hardware validation of these changes. No watcher, deployment or boot restoration is added.
+**Status: development branch, optional and off by default.** Enabling remains CLI-only; Android exposes status and tunnel-only recovery. The review follow-up to `ebe9019` is local and awaits another independent review. The phone measurements below are historical results from the earlier whole-range policy, not hardware validation of these changes. No watcher or tunnel boot restoration is added.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -63,9 +63,24 @@ POCKETUFW_VPN   -s TAILNET -d NODE_HOST -i tun+ ACCEPT · ESTABLISHED,RELATED AC
 
 Other tunnels, such as carrier `ipsec`, aren't touched and stay listed as not filtered. Outside the tailnet there's no ICMP allowance, unlike the physical chain: errors for existing connections pass as `RELATED`, and pings to a VPN's address are dropped.
 
+## Explicit deny-only mode
+
+For Proton-only or WireGuard-only use, run `pocketufw tunnel-on --deny-only`
+(or `tunnel-plan --deny-only` to inspect first). A verified physical firewall is
+still required. This mode installs only established/related acceptance, invalid
+drops and the final drop; it has **no tailnet exemption** and requires no Tailscale
+authorization. Kernel WireGuard interfaces named `tun*` are supported through the
+wildcard hook. Other kernel WireGuard names require discovery/refresh as before.
+
+This choice filters unsolicited tailnet peer connections if Tailscale starts later.
+Existing established flows may still pass. Neither a Tailscale connection nor
+`tunnel-refresh` changes the mode. To opt into pinned trust, explicitly run
+`tunnel-off`, then `tunnel-on` while ownership can be verified. Failed default
+authorization never falls back to deny-only. Both modes remain session-only.
+
 ## Explicit authorization of node destinations
 
-`tunnel-plan` and `tunnel-on` require one currently verified Tailscale tun and one
+Without `--deny-only`, `tunnel-plan` and `tunnel-on` require one currently verified Tailscale tun and one
 node address in each family. Android's package/interface record must agree with
 an open tun descriptor held by a process with Tailscale's app ID. The probe checks
 interface identity and ownership around the address read and refuses incomplete
@@ -107,7 +122,9 @@ current ownership without revoking or expanding the pins. Status separates them:
 
 | Field | Meaning |
 | --- | --- |
+| `tailnet_trust=DENY_ONLY`, `tailnet_current=DENY_ONLY` | No tailnet exemption; starting Tailscale does not change policy. |
 | `tailnet_trust=PINNED_DESTINATIONS` | The installed exception grammar contains one exact node destination per family. |
+| `tailnet_observed4`, `tailnet_observed6` | Currently verified addresses; never implicitly installed. |
 | `tailnet_pin4`, `tailnet_pin6` | The destinations actually retained in the live rules. |
 | `tailnet_ingress=ADDRESS_ONLY` | Packets are not authenticated by source or interface ownership. |
 | `tailnet=VERIFIED iface=...` | This interface currently holds a tailnet address and has verified Tailscale ownership; it does not authenticate other ingress paths. |
@@ -126,7 +143,7 @@ current ownership without revoking or expanding the pins. Status separates them:
    itself. A second Android VPN can exist in another user/work profile, or a tunnel
    can be root-managed. Pins reduce accidental CGNAT trust; they do not authenticate
    the sender. Real namespace tests deliberately retain this passing-packet proof.
-2. **Kernel WireGuard named `tun*` shares the wildcard.** Initial authorization and
+2. **Kernel WireGuard named `tun*` shares the wildcard.** In pinned mode, initial authorization and
    installation refuse an observed conflict, even if Android claims it is Tailscale.
    `verify`, `activity` and the app report DEGRADED if one appears or is renamed later.
    This is detection on explicit inspection, not automatic blocking or cleanup. Its
@@ -156,6 +173,7 @@ If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then 
 | --- | --- |
 | `enable` | Never installed. Refused if any remain. |
 | `tunnel-on` | Requires a verified firewall and current dual-family Tailscale address authorization, with no observed `tun*` WireGuard conflict. Installs chains first and hooks last. Rolls back on any failure or failed read-back, and reports who holds tailnet addresses. |
+| `tunnel-on --deny-only` | Explicitly installs no tailnet exemption; no Tailscale proof required. Later Tailscale connections remain subject to the deny policy. |
 | `verify` | Off is fine. If on, the exact rules in both families, or `DEGRADED`, which also blocks refreshes and counter resets. |
 | `activity`, `verbose` | `tunnel_filter`, `tunnel_hooks`, and separate `ipv4_tunnel_*` and `ipv6_tunnel_*` counters, including `ipv4_tunnel_tailnet`. Physical counters mean what they always meant. |
 | `reset-counters` | Includes the tunnel chains when present. |
@@ -164,14 +182,23 @@ If the phone runs `ssh -R` to another host, with `sshd` bound to loopback, then 
 | Restart | Gone, and never restored. Boot restoration only runs `enable`. |
 | Ordinary uninstall | Stays until the next restart, like the rest. The README's manual commands cover it. |
 
-In the app: the Status screen lists the extra hooks and rules. A tunnel leaves the "Not filtered" list only after the complete policy and hooks verify in both families. The app names the session-only tunnel state and address-trust limitation; boot settings explicitly restore physical filtering only. There is still no tunnel switch or tunnel counter display.
+In the app: the Status screen lists the extra hooks and rules. A tunnel leaves the "Not filtered" list only after the complete policy and hooks verify in both families. The app names the session-only tunnel state and address-trust limitation; boot settings explicitly restore physical filtering only. There is still no tunnel enable switch or tunnel counter display. The Firewall
+screen shows the installed pins and a separate connectivity observation:
+`MATCH` means current verified addresses match (not a reachability test),
+`REAUTHORIZE` shows verified replacement addresses while protection may remain
+ACTIVE, and `UNVERIFIED` means the current ownership/address proof was unavailable.
+No observation changes trust. A DEGRADED tunnel offers **Remove tunnel rules only**
+with confirmation. This invokes `tunnel-off`, keeps physical rules and boot opt-in,
+and verifies the result. If physical rules are also broken, recovery still reports
+failure/DEGRADED and the existing partial-rule recovery remains available afterward.
 
 ## Rollback for hardware tests
 
 `tools/tunnel-rollback` is a dead-man switch, not packaged in the app, because the shipped scripts promise nothing stays running.
 
 ```sh
-sh tunnel-rollback on 120 "$ENGINE"        # arm, then tunnel-on. Unconfirmed, tunnel-off runs at 120 s.
+sh tunnel-rollback on 120 "$ENGINE"        # arm, then pinned tunnel-on; Tailscale proof required
+sh tunnel-rollback on 120 "$ENGINE" --deny-only  # no tailnet exemption; explicit Proton/WG-only choice
 sh tunnel-rollback physical 120 "$ENGINE"  # arm, then enable. Unconfirmed, disable runs at 120 s.
 sh tunnel-rollback confirm                 # keep the rules; run this over the path being tested
 sh tunnel-rollback status   # ARMED, UNCLEAN, CONFIRMED, FIRED, FAILED, CANCELLED, LOST or NONE
@@ -277,12 +304,12 @@ or rule removal. There is no background monitor or automatic repair. A reachable
 unrelated listener reusing that port is the meaningful exposure; an unbound port
 is not an exposed application service.
 
-### Pinned-policy follow-up — local, pending independent review
+### Pinned-policy implementation reviewed at `ebe9019`
 
 The proposed destination pinning is now implemented, with explicit initial
 ownership verification and no automatic broadening. Its rules and limitations
 are described above. It adds no stored authorization, watcher, boot opt-in, UI
-switch or provider integration. The feature remains CLI-only and off by default.
+switch or provider integration. Enabling remains CLI-only and off by default; status and recovery are now exposed in Android.
 
 Validation includes authorization failures, changing interface identity, partial
 Android output, address changes requiring reauthorization, disconnect/renumber
@@ -295,3 +322,56 @@ Pillow-dependent icon check skipped. All 28 final authorization/ownership tests
 passed, including the additional final-read regression, and all 204 Android unit
 tests passed offline. Real TUN and WireGuard packet tests ran in isolated host
 namespaces. No phone deployment, signing, push or merge was performed.
+
+### Independent review follow-up — local, November 7, 2026
+
+- Added the explicit deny-only mode and Android status/recovery described above.
+- The one-shot boot hook retries silent lifecycle-lock contention for up to 1,200
+  sleeps of 0.1 s (about 120 seconds, plus command overhead), instead of the
+  interactive 15-second window. Removing the armed marker cancels the wait; it
+  rechecks the marker inside the acquired lock. Permanent contention still exits
+  75 without restoration; the app's existing off-but-armed notice remains relevant.
+  There is no deferred job or persistent retry service.
+- Tunnel status combines inventory and authorization, with at most two Android
+  ownership scans and an eight-second hard deadline for the read-only probe
+  process group. Incomplete or timed-out proof is UNVERIFIED, never new authorization.
+  Nested Android `dumpsys` deadlines also have a one-second kill grace, so a
+  child ignoring SIGTERM is killed. Inner scans keep the outer process group, so
+  a second scan cannot escape the overall deadline. This bounds the probe, not
+  every iptables/OS command in a dashboard operation.
+- mksh execution exposed EXIT cleanup returning success after SIGTERM. Install
+  and refresh cleanup now explicitly exit nonzero. SIGKILL/power loss cannot run
+  a trap; readback, tunnel-only recovery and reboot remain necessary then.
+
+Targeted checks run with an AOSP-source mksh R59 host build, revision
+`1548076841f243748a3f56da23b38794d437bc12`, built from
+[Android's mksh source](https://android.googlesource.com/platform/external/mksh/)
+using `CPPFLAGS='-DMKSH_ASSUME_UTF8 -DMKSH_DONT_EMIT_IDSTRING' sh Build.sh -r` in
+`src/`. This is a Linux/glibc build, **not** Android/Bionic/toybox validation.
+Supply that binary explicitly; the tests skip if no mksh is available:
+
+```sh
+POCKETUFW_TEST_MKSH=/path/to/mksh PYTHONDONTWRITEBYTECODE=1 \
+  python -m unittest discover -s tests -p test_android_shell.py
+```
+
+The checks exercise parsing, inherited lifecycle/snapshot/rollback descriptors,
+SIGTERM during installation and refresh, a killed rollback caller, slow, hung and
+SIGTERM-ignoring VPN observations, and bounded boot contention/cancellation. Disposable namespace
+packet checks cover deny-only traffic, including WireGuard named `tun*`. No phone
+was accessed, no APK was signed or deployed, and nothing was pushed or merged.
+
+**Residual trust remains:** in pinned mode, another tunnel can inject a packet
+claiming a tailnet source and addressed to a still-local pinned destination. The
+rule does not authenticate its source or current ingress owner. A later kernel
+WireGuard renamed `tun*` can exploit the same match; detecting DEGRADED on the next
+inspection does not remove that exemption. Deny-only closes this exemption at the
+cost of unsolicited tailnet connectivity. Earlier Android/OEM ACCEPTs still bypass
+either policy. These limits are not resolved by the new status or recovery UI.
+
+Validation for this follow-up: a complete Python run, split by isolated test
+module, completed 613 tests with no failures and one unrelated Pillow-dependent
+icon check skipped. After the final timeout tightening and added second-scan
+regression, all 64 affected tests passed, including 14 AOSP mksh execution checks.
+The broad run included 38 real-kernel physical/tunnel namespace tests. All 211
+Android JVM tests passed offline. These are local host results, not device proof.

@@ -1,6 +1,6 @@
 # Optional inbound filtering on VPN tunnels
 
-**Status: development branch, optional and off by default.** Enabling remains CLI-only; Android exposes status and tunnel-only recovery. The review follow-up to `ebe9019` is local and awaits another independent review. The phone measurements below are historical results from the earlier whole-range policy, not hardware validation of these changes. No watcher or tunnel boot restoration is added.
+**Status: development branch, optional and off by default.** Enabling remains CLI-only; Android exposes status and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, with inspection performance still blocking UI integration. The subsequent local timing changes below await a focused Android retest. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
 
 PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
 
@@ -326,9 +326,9 @@ namespaces. No phone deployment, signing, push or merge was performed.
 ### Independent review follow-up — local, November 7, 2026
 
 - Added the explicit deny-only mode and Android status/recovery described above.
-- The one-shot boot hook retries silent lifecycle-lock contention for up to 1,200
-  sleeps of 0.1 s (about 120 seconds, plus command overhead), instead of the
-  interactive 15-second window. Removing the armed marker cancels the wait; it
+- The one-shot boot hook retries silent lifecycle-lock contention for up to
+  120 seconds, instead of the interactive mutation's 15-second window. The timing
+  follow-up below replaces poll counting with elapsed deadlines. Removing the armed marker cancels the wait; it
   rechecks the marker inside the acquired lock. Permanent contention still exits
   75 without restoration; the app's existing off-but-armed notice remains relevant.
   There is no deferred job or persistent retry service.
@@ -375,3 +375,78 @@ icon check skipped. After the final timeout tightening and added second-scan
 regression, all 64 affected tests passed, including 14 AOSP mksh execution checks.
 The broad run included 38 real-kernel physical/tunnel namespace tests. All 211
 Android JVM tests passed offline. These are local host results, not device proof.
+
+### Android inspection timing follow-up — local, November 7, 2026
+
+The owner reports 34–35 seconds for a full pinned dashboard inspection and about
+14 seconds for `tunnel-status` at `d7baeb2`, exceeding the app's unchanged
+32-second timeout. A nominal 15-second lock wait took about 27 seconds.
+
+The bridge now calls one `pocketufw inspect` snapshot. It audits physical and
+tunnel rules once, reuses that audit's pins/hooks for reporting and counters, and
+shares compact Android VPN metadata from the same bounded probe. The reuse lasts
+only for that process under the snapshot lock; it is not a stored authorization.
+Pinned proof still checks Android ownership, package UID, held TUN descriptor,
+addresses and interface identity before and after the address observation. There
+are two Android ownership scans, with no third bridge scan or expensive greedy
+`sed` parsing of large Android records. OFF and deny-only need one advisory scan,
+which cannot authorize an exemption. Counter-only refresh remains probe-free.
+
+Missing or timed-out evidence remains UNVERIFIED; the bridge does not retry the
+probe or change pins. Protection can remain ACTIVE when its rules are verified
+and connectivity is UNVERIFIED or REAUTHORIZE. A WireGuard `tun*` conflict detected
+after the probe withdraws ACTIVE and counters. Incomplete engine output cannot
+supply connectivity claims or counters.
+
+All four lock callers use `/proc/uptime` deadlines, counting time spent in `flock`
+and scheduler delays. Seconds and fractional seconds are kept separate to avoid
+mksh arithmetic overflow on long uptimes. Dashboard lifecycle and snapshot locks
+each have a two-second busy deadline; mutations retain 15 seconds and boot retains
+120. Busy dashboard reads exit 75 without unlocked fallback. A blocked final
+removal inspection reports UNKNOWN/INCOMPLETE. Missing clock evidence refuses
+the wait; boot marker cancellation and inherited lock descriptors are preserved.
+These are deadlines between nonblocking attempts: a stalled native command can
+still overrun by the duration of that command.
+
+Focused host measurements on the same disposable pinned fixture:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Full inspection iptables/ip6tables invocations | 138 | 52 |
+| Full inspection Android ownership scans | 3 | 2 |
+| Full inspection with injected native-command costs | 22.43 s | 9.43 s |
+| Standalone tunnel-status with 100 ms per kernel/probe call | Not measured | 4.51 s; 40 kernel calls, 2 scans |
+| Mutation contention with 100 ms per failed flock | 30.92 s | Within 16.5 s test bound for a 15 s deadline |
+
+The full-inspection model adds 100 ms per iptables/dumpsys call and 30 ms per
+parsing utility. It is a regression budget, **not a new phone measurement**.
+Fourteen focused checks cover invocation budgets, a 210 KB Android record, stale
+pins, broken IPv6 hooks, a newly appearing WireGuard conflict, probe timeout,
+both inspection locks, clock failure, and boot/bootctl command latency. AOSP mksh
+checks also exercise deadlines beyond 248 days of uptime, inherited descriptors,
+SIGTERM cleanup and VPN probe timing. Android JVM tests pass without UI changes.
+The broad module run plus affected reruns cover 628 Python checks (one unrelated
+Pillow-dependent icon skip), including 38 real-kernel namespace checks; all 211
+Android JVM tests passed offline. The final affected runs passed 153 bridge,
+timing, mksh and removal checks, followed by 97 tunnel/packet checks after the
+inventory output compatibility correction.
+
+Remaining costs are native rule checks (including semantic `iptables -C` checks),
+two Android/kernel ownership observations, interface coverage reads and boot/config
+inspection. The eight-second probe deadline does not bound every native iptables
+or root-manager operation. The 32-second app timeout has not been increased.
+
+For one focused Android timing retest, use the updated scripts together, leave the
+already validated policy unchanged, and record three full `android-bridge inspect`
+and three `pocketufw tunnel-status` durations with pinned filtering active. Include
+the first invocation and repeated invocations; confirm ACTIVE, MATCH (or the honest
+current connectivity status), pins and coverage in the output. Full inspection
+should finish comfortably below 32 seconds; aim for at most 24 seconds to retain
+headroom. Also time a read-only inspection against each deliberately held lock:
+it should return busy around two seconds, not wait for the app timeout. This is a
+timing gate, not a request to repeat the five completed packet/security behaviors.
+No device was accessed, APK signed/deployed, or branch pushed/merged for this work.
+
+The pinned-destination injection limitation described above is unchanged: an
+unrelated tunnel can inject tailnet-source packets into a still-local pinned
+destination. Faster observation does not authenticate packet ingress.

@@ -267,6 +267,8 @@ class ShellBoot(BootContention):
         super().test_disarming_during_lock_wait_cancels_restore()
 
     def test_permanently_busy_boot_lock_has_bounded_attempts(self):
+        # More than 248 days: multiplying uptime by 100 would overflow mksh.
+        self.clock.write_text("30000000.99 0.00\n")
         self.assertEqual(self.call('enable').returncode, 0)
         self.state.write_text('INACTIVE\n')
         shim = self.fakebin / 'flock'

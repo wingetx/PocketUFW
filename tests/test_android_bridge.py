@@ -72,6 +72,7 @@ class AndroidBridgeTests(unittest.TestCase):
         )
         fake_ip.chmod(0o755)
 
+        shutil.copy(PROJECT / "vpn-probe", self.engine / "vpn-probe")
         (self.engine / "pocketufw").write_text(
             "#!/bin/sh\n"
             "echo \"engine:$1\" >> \"$TEST_BRIDGE_LOG\"\n"
@@ -80,13 +81,15 @@ class AndroidBridgeTests(unittest.TestCase):
             "case \"$1\" in\n"
             "verify) cat \"$TEST_ENGINE_STATE\"; "
             "[ \"$(cat \"$TEST_ENGINE_STATE\")\" = ACTIVE ] ;;\n"
-            "activity) [ \"$TEST_ENGINE_ACTIVITY_FAIL\" = 1 ] && exit 9; "
+            "activity|inspect) [ \"$TEST_ENGINE_ACTIVITY_FAIL\" = 1 ] && exit 9; "
             "current=$(cat \"$TEST_ENGINE_STATE\"); echo \"state=$current\"; "
             "[ \"${TEST_ENGINE_ACTIVITY_LEAK:-0}\" != 1 ] || echo ipv4_blocked=41; "
-            "[ \"$current\" = ACTIVE ] || exit 4; "
+            "if [ \"$1\" = inspect ]; then sh \"${0%/*}/vpn-probe\" android-vpn; fi; "
+            "if [ \"$current\" != ACTIVE ]; then [ \"$1\" = inspect ] && { echo inspection=READY; exit 0; }; exit 4; fi; "
             "echo ipv4_blocked=41; echo ipv6_blocked=8; "
             "echo ipv4_blocked_bytes=3200; echo ipv6_blocked_bytes=600; "
-            "echo ipv4_established_replies=900; echo ipv6_established_replies=25 ;;\n"
+            "echo ipv4_established_replies=900; echo ipv6_established_replies=25; "
+            "if [ \"$1\" = inspect ]; then echo inspection=READY; fi ;;\n"
             "enable) [ \"$TEST_ENGINE_FAIL_ENABLE\" = 1 ] && exit 7; "
             "if [ \"$TEST_ENGINE_BAD_ENABLE\" = 1 ]; "
             "then echo DEGRADED > \"$TEST_ENGINE_STATE\"; "
@@ -166,7 +169,7 @@ class AndroidBridgeTests(unittest.TestCase):
         })
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(values.get('vpn_owner'), 'ch.protonvpn.android')
-        self.assertEqual(self.log_lines(), ['engine:activity', 'boot:status'])
+        self.assertEqual(self.log_lines(), ['engine:inspect', 'boot:status'])
 
     def test_tailscale_is_identified_by_its_vpn_owner_not_exit_node(self):
         _, values = self.run_bridge('inspect', {
@@ -240,7 +243,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["ipv4_blocked"], "41")
         self.assertEqual(values["ipv6_blocked"], "8")
         self.assertEqual(self.log_lines(),
-                         ["engine:activity", "boot:status"])
+                         ["engine:inspect", "boot:status"])
 
     def test_one_inspection_includes_read_only_kernel_policy(self):
         result, values = self.run_bridge("inspect")
@@ -286,7 +289,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(values["state"], "INACTIVE")
         self.assertNotIn("ipv4_blocked", values)
-        self.assertEqual(self.log_lines(), ["engine:activity", "boot:status"])
+        self.assertEqual(self.log_lines(), ["engine:inspect", "boot:status"])
 
     def test_enable_verifies_once_and_reads_counters(self):
         self.state.write_text("INACTIVE\n")
@@ -295,7 +298,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["operation"], "SUCCESS")
         self.assertEqual(values["state"], "ACTIVE")
         self.assertEqual(self.log_lines(), [
-            "engine:enable", "engine:activity", "boot:status"
+            "engine:enable", "engine:inspect", "boot:status"
         ])
 
     def test_disable_disarms_boot_before_disabling_firewall(self):
@@ -306,7 +309,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["boot"], "DISABLED")
         self.assertEqual(values["previous_boot"], "ENABLED")
         self.assertEqual(self.log_lines(), [
-            "boot:status", "boot:disable", "engine:disable", "engine:activity", "boot:status"
+            "boot:status", "boot:disable", "engine:disable", "engine:inspect", "boot:status"
         ])
 
     def test_failed_disarm_never_disables_live_rules(self):
@@ -317,7 +320,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["operation"], "FAILED")
         self.assertEqual(values["state"], "ACTIVE")
         self.assertEqual(self.log_lines(), [
-            "boot:status", "boot:disable", "engine:activity", "boot:status"
+            "boot:status", "boot:disable", "engine:inspect", "boot:status"
         ])
 
     def test_home_enable_can_restore_previous_boot_preference(self):
@@ -347,7 +350,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["boot"], "DISABLED")
         self.assertEqual(self.log_lines(), [
             "engine:verify", "boot:status", "boot:disable", "engine:disable",
-            "engine:activity", "boot:status"
+            "engine:inspect", "boot:status"
         ])
 
     def test_tile_toggle_on_without_opt_in_leaves_boot_disabled(self):
@@ -420,7 +423,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['operation'], 'SUCCESS')
         self.assertIn('already up to date', values['message'])
         self.assertIn('No changes needed', values['message'])
-        self.assertEqual(self.log_lines(), ['engine:refresh', 'engine:activity', 'boot:status'])
+        self.assertEqual(self.log_lines(), ['engine:refresh', 'engine:inspect', 'boot:status'])
 
     def test_vpn_refresh_reports_an_actual_update(self):
         result, values = self.run_bridge('vpn-refresh',
@@ -476,7 +479,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["boot"], "ENABLED")
         self.assertNotIn("ipv4_blocked", values)
         self.assertEqual(self.log_lines(), [
-            "engine:activity", "engine:verify", "boot:status"
+            "engine:inspect", "engine:verify", "boot:status"
         ])
 
     def test_unknown_state_is_not_called_active(self):
@@ -494,7 +497,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values["operation"], "FAILED")
         self.assertEqual(values["state"], "INACTIVE")
         self.assertEqual(self.log_lines(), [
-            "engine:enable", "engine:activity", "engine:tunnel-status", "boot:status",
+            "engine:enable", "engine:inspect", "boot:status",
             "engine:disable", "engine:verify"
         ])
 
@@ -515,7 +518,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['state'], 'ACTIVE')
         self.assertIn('Experimental', values['message'])
         self.assertEqual(values['config_mode'], 'AUTOMATIC')
-        self.assertEqual(self.log_lines(), ['engine:get-ports', 'engine:set-ports', 'engine:activity', 'boot:status'])
+        self.assertEqual(self.log_lines(), ['engine:get-ports', 'engine:set-ports', 'engine:inspect', 'boot:status'])
 
     def test_manual_exception_update_fails_closed_when_engine_refuses(self):
         result, values = self.run_bridge('set-ports', {'TEST_ENGINE_FAIL_MANUAL': '1'},
@@ -787,7 +790,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['boot'], 'DISABLED')
         self.assertEqual(values['previous_boot'], 'ENABLED')
         self.assertEqual(self.log_lines(), [
-            'engine:verify', 'boot:status', 'boot:disable', 'engine:disable', 'engine:activity', 'boot:status'
+            'engine:verify', 'boot:status', 'boot:disable', 'engine:disable', 'engine:inspect', 'boot:status'
         ])
 
     def test_remove_partial_changes_nothing_on_any_other_state(self):
@@ -876,7 +879,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['boot'], 'ENABLED')
         self.assertEqual(values['operation'], 'NONE')
         self.assertNotIn('STALE', result.stdout)
-        self.assertEqual(self.log_lines(), ['engine:activity', 'boot:status', 'boot:enable', 'boot:status'])
+        self.assertEqual(self.log_lines(), ['engine:inspect', 'boot:status', 'boot:enable', 'boot:status'])
 
     def test_stale_copies_are_not_refreshed_unless_active(self):
         for state in ('INACTIVE', 'DEGRADED'):
@@ -906,7 +909,7 @@ class AndroidBridgeTests(unittest.TestCase):
     def test_stale_refresh_touches_only_boot_files(self):
         self.boot_state.write_text('STALE\n')
         self.run_bridge('inspect')
-        self.assertEqual(self.engine_args(), ['activity'])
+        self.assertEqual(self.engine_args(), ['inspect'])
 
     def test_no_action_ever_prints_stale(self):
         actions = (('inspect', ()), ('enable', ()), ('enable-restore', ()), ('disable', ()), ('toggle', ()),
@@ -1217,7 +1220,7 @@ class AndroidBridgeTests(unittest.TestCase):
         self.assertEqual(values['operation'], 'FAILED')
         self.assertIn('Could not clear committed', values['message'])
         self.assertEqual(self.log_lines(), [
-            'engine:get-ports', 'engine:refresh', 'engine:set-ports', 'engine:activity', 'boot:status'
+            'engine:get-ports', 'engine:refresh', 'engine:set-ports', 'engine:inspect', 'boot:status'
         ])
         self.assertEqual(self.engine_args('set-ports'), ['set-ports --udp4 50000 --udp6 none'])
         self.assertEqual((self.config_dir / 'udp-committed.conf').read_text(), saved)

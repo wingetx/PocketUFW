@@ -674,7 +674,9 @@ class RealKernelTests(unittest.TestCase):
         say delivered "$(deliver 4 9 47931 5)"
         ''', timeout=150)
         self.assertEqual(values['removal'], 'INCOMPLETE')
-        self.assertEqual(values['state'], 'ACTIVE')
+        # A blocked snapshot is unknown, even though the packet proof below shows
+        # that the old firewall survived. Never use an unlocked fallback as proof.
+        self.assertEqual(values['state'], 'UNKNOWN')
         self.assertEqual(values['still_filtering'], '0')
         self.assertEqual(values['retry'], 'CLEAN')
         self.assertEqual(values['delivered'], '5')

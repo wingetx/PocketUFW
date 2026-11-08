@@ -35,7 +35,9 @@ class BootTests(unittest.TestCase):
         self.app_data = self.root / "app-data"
         self.config_dir = self.root / "device-protected"
         self.config_dir.mkdir()
-        self.env = dict(os.environ,
+        self.clock = self.root / "uptime"
+        self.clock.write_text("0.00 0.00\n")
+        self.env = dict(os.environ, POCKETUFW_UPTIME=str(self.clock),
                         POCKETUFW_CONFIG_DIR=str(self.config_dir),
                         POCKETUFW_LOCK=str(self.root / "engine.lock"),
                         PATH=f"{self.fakebin}:/usr/bin:/bin",
@@ -55,6 +57,11 @@ class BootTests(unittest.TestCase):
                        "polls=$(grep -c '^getprop$' \"$TEST_ORDER_LOG\")\n"
                        "if [ \"$polls\" -gt \"${TEST_BOOT_READY_AFTER:-0}\" ]; then echo 1; else echo 0; fi\n",
             "sleep": "#!/bin/sh\n"
+                     "read -r stamp rest < \"$POCKETUFW_UPTIME\"\n"
+                     "seconds=${stamp%.*}; fraction=${stamp#*.}\n"
+                     "case \"$1\" in 2) step=200 ;; *) step=10 ;; esac\n"
+                     "ticks=$((seconds * 100 + 1$fraction - 100 + step))\n"
+                     "printf '%d.%02d 0.00\\n' $((ticks / 100)) $((ticks % 100)) > \"$POCKETUFW_UPTIME\"\n"
                      "echo \"sleep $1\" >> \"$TEST_ORDER_LOG\"\n"
                      "[ -z \"${TEST_REMOVE_WHILE_SLEEPING:-}\" ] || rm -f \"$TEST_REMOVE_WHILE_SLEEPING\"\n",
             "pm": "#!/bin/sh\n"

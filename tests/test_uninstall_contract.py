@@ -33,10 +33,11 @@ class UninstallContractTests(unittest.TestCase):
                 source = code(name)
                 for resident in ('inotifyd', 'nohup', 'setsid', 'daemon'):
                     self.assertNotIn(resident, source)
-                # The engine's one `while :` is its lock wait, which is bounded below.
-                if name == 'pocketufw':
-                    self.assertEqual(source.count('while :; do'), 1)
-                    self.assertIn('[ "$lock_polls" -lt 150 ] || break', source)
+                # Lock polls are one-shot and bounded by monotonic deadlines.
+                waits = source.count('while :; do')
+                if waits:
+                    self.assertIn('start_deadline', source)
+                    self.assertGreaterEqual(source.count('deadline_reached'), waits + 1)
                     source = source.replace('while :; do', '')
                 self.assertIsNone(re.search(r'while (true|:|\[ 1 \])', source))
         hook = code('boot-service')

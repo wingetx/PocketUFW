@@ -43,6 +43,25 @@ BOOT="$BASE/bootctl"
 CONFIG="$BASE/udp-config"
 [ -r "$ENGINE" ] && [ -r "$BOOT" ] && [ -r "$CONFIG" ] || exit 4
 
+# /proc/uptime is monotonic and includes suspend. Shell builtins avoid a process
+# per clock read. Keep the two-part timestamp: mksh arithmetic is 32-bit on Android.
+clock_now() {
+  read -r clock_stamp clock_rest < "${POCKETUFW_UPTIME:-/proc/uptime}" || return 1
+  clock_seconds=${clock_stamp%.*}; clock_fraction=${clock_stamp#*.}
+  case "$clock_seconds" in ''|*[!0-9]*) return 1 ;; esac
+  case "$clock_fraction" in [0-9][0-9]) ;; *) return 1 ;; esac
+  clock_fraction=$((1$clock_fraction - 100))
+}
+start_deadline() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  wait_until=$((clock_seconds + $1)); wait_fraction=$clock_fraction
+}
+deadline_reached() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  [ "$clock_seconds" -gt "$wait_until" ] ||
+    { [ "$clock_seconds" -eq "$wait_until" ] && [ "$clock_fraction" -ge "$wait_fraction" ]; }
+}
+
 # Serialize the whole lifecycle, including boot files and final removal readback.
 # FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
 # Share FD inheritance with pocketufw; boot-service uses a longer bounded retry window.
@@ -53,14 +72,19 @@ if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
   ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
   exec 8>>"$operation_lock"
 fi
-operation_polls=0
-while [ "$operation_polls" -le 150 ]; do
-  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
-  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
-    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+operation_wait=15
+[ "$ACTION" != inspect ] || operation_wait=2
+start_deadline "$operation_wait"
+while :; do
+  if deadline_reached; then
+    echo 'pocketufw: lifecycle lock busy; recheck before retrying' >&2
     exit 75
   fi
-  operation_polls=$((operation_polls + 1))
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ]; then
+    echo 'pocketufw: lifecycle locking unavailable; recheck before retrying' >&2
+    exit 75
+  fi
   sleep 0.1
 done
 # mksh closes descriptors above 2 for children unless they are passed explicitly.
@@ -375,33 +399,35 @@ case "$ACTION" in
     ;;
 esac
 
-# 'activity' verifies both kernel rule families before reading their counters.
-# It also reports INACTIVE/DEGRADED. Do not run 'verify' a second time on
-# every dashboard opening. Fall back to it only if counter collection fails.
-snapshot=$(sh "$ENGINE" activity 2>/dev/null) || :
-state=$(printf '%s\n' "$snapshot" | sed -n 's/^state=//p')
-case "$state" in
-  ACTIVE|INACTIVE|DEGRADED) : ;;
+# One engine inspection verifies the rules and collects current tailnet evidence.
+# A failed/incomplete inspection cannot supply counters or connectivity claims.
+inspect_exit=0
+snapshot=$(sh "$ENGINE" inspect 2>/dev/null) || inspect_exit=$?
+[ "$inspect_exit" -ne 75 ] || [ "$ACTION" != inspect ] || exit 75
+state=''; inspection_last=''
+while IFS='=' read -r key value; do
+  case "$key" in
+    state) state="$value" ;;
+  esac
+  inspection_last="$key=$value"
+done <<EOF
+$snapshot
+EOF
+case "$state:$inspection_last:$inspect_exit" in
+  ACTIVE:inspection=READY:0|INACTIVE:inspection=READY:0|DEGRADED:inspection=READY:0) : ;;
   *)
-    state=$(sh "$ENGINE" verify 2>/dev/null) || :
-    case "$state" in ACTIVE|INACTIVE|DEGRADED) : ;; *) state='UNKNOWN' ;; esac
+    if [ "$inspect_exit" = 75 ]; then
+      # A mutation still needs its failure/removal receipt. Do not spend another
+      # lock wait or turn an unlocked reading into a verified postcondition.
+      state=UNKNOWN
+    else
+      state=$(sh "$ENGINE" verify 2>/dev/null) || :
+      case "$state" in ACTIVE|INACTIVE|DEGRADED) : ;; *) state='UNKNOWN' ;; esac
+    fi
     snapshot=''
     ;;
 esac
-# Connectivity is a separate, bounded observation. A stale pin does not mean
-# the deny policy stopped enforcing. Counter-only reads never run this probe.
 trust_report="$snapshot"
-case "$state:$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_filter=//p')" in
-  ACTIVE:ON|DEGRADED:*)
-    tunnel_details=$(sh "$ENGINE" tunnel-status 2>/dev/null) || tunnel_details=''
-    if [ "$(printf '%s\n' "$tunnel_details" | tail -n 1)" = tunnel_status=READY ]; then
-      trust_report="$tunnel_details"
-      if printf '%s\n' "$tunnel_details" | grep -qx 'tunnel_filter=DEGRADED'; then
-        state=DEGRADED
-        snapshot=''
-      fi
-    fi ;;
-esac
 boot=$(sh "$BOOT" status 2>/dev/null) || :
 if [ "$boot" = boot=STALE ]; then
   if [ "$state" != ACTIVE ] || [ "$ACTION" = prepare-uninstall ]; then
@@ -427,7 +453,10 @@ removal_left=''
 removal_kept=''
 if [ "$ACTION" = prepare-uninstall ]; then
   note_left() { removal_left="${removal_left:+$removal_left,}$1"; }
-  kernel_report=$(sh "$ENGINE" residue 2>/dev/null) || kernel_report=''
+  kernel_report=''
+  if [ "$inspect_exit" != 75 ]; then
+    kernel_report=$(sh "$ENGINE" residue 2>/dev/null) || kernel_report=''
+  fi
   left4=$(printf '%s\n' "$kernel_report" | sed -n 's/^residue_ipv4=//p')
   left6=$(printf '%s\n' "$kernel_report" | sed -n 's/^residue_ipv6=//p')
   case "$left4" in 0) : ;; ''|*[!0-9]*) note_left ipv4_unverified ;; *) note_left ipv4_rules ;; esac
@@ -509,36 +538,15 @@ fi
 if ! read_config; then
   MODE=DEGRADED; SAVED4=none; SAVED6=none
 fi
-# Read-only, best-effort Android-managed VPN owner identification.
-# This runs inside the root session already used for full dashboard inspection;
-# counter refresh remains a separate fast path. The OS limits owner metadata
-# for ordinary apps. Never infer ownership from merely installed packages.
-# Dumpsys output varies by Android release, so absence/ambiguity is expected.
-VPN_OWNER=''
-VPN_IFACE=''
-if command -v dumpsys >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-  vpn_lines=$(timeout -k 1 2 dumpsys connectivity 2>/dev/null | sed -n '/ni{VPN CONNECTED/p') || vpn_lines=''
-  vpn_matches=$(printf '%s\n' "$vpn_lines" |
-    sed -n 's/.*ni{VPN CONNECTED extra: VPN:\([A-Za-z0-9_.-]*\)}.*/\1/p' |
-    sort -u) || vpn_matches=''
-  case "$vpn_matches" in
-    ''|*'
-'*) : ;; # No recognized Android VPN, or multiple candidates: do not guess.
-    *[!A-Za-z0-9_.-]*) : ;;
-    *) VPN_OWNER=$vpn_matches ;;
-  esac
-  # Android's own record ties the owner to its interface, so this isn't a guess.
-  if [ -n "$VPN_OWNER" ]; then
-    vpn_ifaces=$(printf '%s\n' "$vpn_lines" |
-      sed -n 's/.*InterfaceName: \([A-Za-z0-9_.-]*\)[ }].*/\1/p' |
-      sort -u) || vpn_ifaces=''
-    case "$vpn_ifaces" in
-      ''|*'
-'*) : ;;
-      *) VPN_IFACE=$vpn_ifaces ;;
-    esac
-  fi
-fi
+# Reuse the compact metadata from the bounded engine probe. Never rerun dumpsys
+# here, especially after timeout/unavailable evidence. It is advisory, not proof.
+VPN_OWNER=''; VPN_IFACE=''
+while IFS='=' read -r key value; do
+  case "$value" in *[!A-Za-z0-9_.-]*) continue ;; esac
+  case "$key" in vpn_owner) VPN_OWNER="$value" ;; vpn_iface) VPN_IFACE="$value" ;; esac
+done <<EOF
+$snapshot
+EOF
 
 # Read-only and best effort: interfaces that can receive traffic but that the
 # wlan+, rmnet+ and v4-rmnet+ hooks do not filter. Loopback and dummy carry no
@@ -546,7 +554,10 @@ fi
 # traffic inside any of them really isn't filtered, and the user should be told.
 # Only the engine's verified report can remove one from this list: with the optional
 # tunnel filter on, a hooked tunnel is filtered. Anything else stays listed.
-TUNNEL_HOOKS=$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_hooks=//p')
+TUNNEL_HOOKS=''
+if [ "$state" = ACTIVE ]; then
+  TUNNEL_HOOKS=$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_hooks=//p')
+fi
 UNCOVERED_IFACES=''
 if command -v ip >/dev/null 2>&1; then
   UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk -v hooks="$TUNNEL_HOOKS" '

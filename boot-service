@@ -32,6 +32,25 @@ while [ "$(getprop sys.boot_completed)" != '1' ]; do
   # Turning the firewall off during this wait cancels the restore.
   [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
 done
+# /proc/uptime is monotonic and includes suspend. Shell builtins avoid a process
+# per clock read. Keep the two-part timestamp: mksh arithmetic is 32-bit on Android.
+clock_now() {
+  read -r clock_stamp clock_rest < "${POCKETUFW_UPTIME:-/proc/uptime}" || return 1
+  clock_seconds=${clock_stamp%.*}; clock_fraction=${clock_stamp#*.}
+  case "$clock_seconds" in ''|*[!0-9]*) return 1 ;; esac
+  case "$clock_fraction" in [0-9][0-9]) ;; *) return 1 ;; esac
+  clock_fraction=$((1$clock_fraction - 100))
+}
+start_deadline() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  wait_until=$((clock_seconds + $1)); wait_fraction=$clock_fraction
+}
+deadline_reached() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  [ "$clock_seconds" -gt "$wait_until" ] ||
+    { [ "$clock_seconds" -eq "$wait_until" ] && [ "$clock_fraction" -ge "$wait_fraction" ]; }
+}
+
 # Serialize the whole lifecycle, including boot files and final removal readback.
 # FD 8 is inherited by nested scripts; FD 9 remains the engine snapshot lock.
 # Boot gets a bounded 120-second retry window; interactive commands wait 15 seconds.
@@ -42,15 +61,19 @@ if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
   ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
   exec 8>>"$operation_lock"
 fi
-operation_polls=0
-while [ "$operation_polls" -le 1200 ]; do
-  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
-  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 1200 ]; then
-    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+operation_wait=120
+start_deadline "$operation_wait"
+while :; do
+  [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
+  if deadline_reached; then
+    echo 'pocketufw: lifecycle lock busy; recheck before retrying' >&2
     exit 75
   fi
-  [ "$armed" -eq 0 ] || [ -f "$MARKER" ] || exit 0
-  operation_polls=$((operation_polls + 1))
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ]; then
+    echo 'pocketufw: lifecycle locking unavailable; recheck before retrying' >&2
+    exit 75
+  fi
   sleep 0.1
 done
 # mksh closes descriptors above 2 for children unless they are passed explicitly.

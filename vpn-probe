@@ -11,7 +11,7 @@ SYS_NET="${POCKETUFW_SYS_NET:-/sys/class/net}"
 
 usage() {
     cat <<'HELP'
-Usage: sh vpn-probe [--help | tunnels | tailscale-addresses | tunnel-details]
+Usage: sh vpn-probe [--help | tunnels | tailscale-addresses | tunnel-details | android-vpn]
 
 Read-only Android Tailscale UDP listener discovery. Requires root.
 Prints tailscale_udp4=PORT and tailscale_udp6=PORT when each listener is
@@ -28,11 +28,12 @@ tailscale-addresses requires one such Tailscale tun, with both node addresses.
 It authorizes exact /32 and /128 destinations only; it does not authenticate packets.
 tunnel-details combines inventory and address proof in one observation for callers;
 unavailable proof is authorization=UNVERIFIED, followed by tunnel_details=COMPLETE.
+android-vpn reads advisory owner/interface display metadata without authorizing trust.
 HELP
 }
 case "${1:-}" in
     --help|-h) usage; exit 0 ;;
-    ''|tunnels|tailscale-addresses|tunnel-details) ;;
+    ''|tunnels|tailscale-addresses|tunnel-details|android-vpn) ;;
     stale-ports) [ "$#" -eq 3 ] || exit 2 ;;
     *) echo "vpn-probe: unknown argument: $1" >&2; exit 2 ;;
 esac
@@ -55,14 +56,43 @@ android_claims() {
       /ni{VPN CONNECTED/ {
         from = index($0, "ni{VPN CONNECTED extra: VPN:")
         at = index($0, "InterfaceName: ")
-        if (!from || !at) next
+        if (!from) next
         package = substr($0, from + 28); package = substr(package, 1, index(package, "}") - 1)
-        iface = substr($0, at + 15); sub(/[ }].*/, "", iface)
+        if (package !~ /^[A-Za-z0-9_.-]+$/) package = "?"
+        iface = "-"
+        if (at) {
+          iface = substr($0, at + 15)
+          stop = index(iface, " "); brace = index(iface, "}")
+          if (!stop || (brace && brace < stop)) stop = brace
+          if (stop) iface = substr(iface, 1, stop - 1)
+          if (iface !~ /^[A-Za-z0-9_.-]+$/) iface = "-"
+        }
         claims[iface " " package] = 1
       }
       END { if (!complete) exit 1; for (claim in claims) print claim }
-    ' | sort -u
+    '
 }
+
+# Advisory display metadata from the SAME compact Android observation. This is
+# not the UID/fd ownership proof used to authorize addresses. Ambiguity stays blank.
+android_summary() {
+    printf '%s\n' "$claims" | awk '
+      NF == 2 { owners[$2] = 1; ifaces[$1] = 1 }
+      END {
+        for (p in owners) { owner = p; n++ }
+        for (i in ifaces) { iface = i; m++ }
+        if (n != 1 || owner !~ /^[A-Za-z0-9_.-]+$/) owner = ""
+        if (owner == "" || m != 1 || iface == "-") iface = ""
+        print "vpn_owner=" owner; print "vpn_iface=" iface
+      }
+    '
+}
+if [ "${1:-}" = android-vpn ]; then
+    claims=$(android_claims) || claims=''
+    android_summary
+    echo 'android_vpn=COMPLETE'
+    exit 0
+fi
 
 # The kernel's answer, which an app can't influence: a process running under that
 # package's app ID holds /dev/tun, and fdinfo names exactly this interface. Bounded
@@ -95,6 +125,7 @@ package_holds_tun() {
 tunnel_inventory() {
     [ -d "$SYS_NET" ] || { echo "vpn-probe: $SYS_NET unavailable" >&2; exit 4; }
     claims=$(android_claims) || claims=''
+    [ "${1:-}" != display ] || android_summary
     for device in "$SYS_NET"/*; do
         name=${device##*/}
         case "$name" in ''|*[!A-Za-z0-9_.-]*|lo|wlan*|rmnet*|v4-rmnet*) continue ;; esac
@@ -179,7 +210,7 @@ authorize_addresses() {
 }
 case "${1:-}" in
     tailscale-addresses|tunnel-details)
-        inventory=$(tunnel_inventory) || exit 4
+        inventory=$(tunnel_inventory display) || exit 4
         if [ "$1" = tailscale-addresses ]; then authorize_addresses; exit $?; fi
         printf '%s\n' "$inventory"
         if address_proof=$(authorize_addresses); then printf '%s\n' "$address_proof"

@@ -26,6 +26,9 @@ CMD=''
 DRY_RUN=0
 REQUEST_MODE=PINNED
 TUNNEL_MODE=PINNED
+TUNNEL_CHECKED=0
+TUNNEL_POLICY_VALID=0
+TUNNEL_HAS_RULES=0
 IPT4="${POCKETUFW_IPTABLES4:-iptables}"
 IPT6="${POCKETUFW_IPTABLES6:-ip6tables}"
 
@@ -40,6 +43,7 @@ Usage:
   pocketufw status
   pocketufw verify
   pocketufw activity     # machine-readable live rule counters
+  pocketufw inspect      # one verified dashboard snapshot plus bounded VPN evidence
   pocketufw reset-counters   # zero owned counters without changing firewall rules
   pocketufw verbose      # human-readable status and kernel counters
   pocketufw plan [--auto-tailscale | --tailscale-udp4 PORT --tailscale-udp6 PORT]
@@ -76,7 +80,7 @@ check_port() {
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    doctor|status|verify|activity|reset-counters|verbose|plan|enable|refresh|get-ports|set-ports|disable|residue|tunnel-plan|tunnel-on|tunnel-refresh|tunnel-status|tunnel-off)
+    doctor|status|verify|activity|inspect|reset-counters|verbose|plan|enable|refresh|get-ports|set-ports|disable|residue|tunnel-plan|tunnel-on|tunnel-refresh|tunnel-status|tunnel-off)
       [ -z "$CMD" ] || fail 'Specify one command'; CMD="$1"; shift ;;
     --udp4|--udp6)
       opt="$1"; shift; [ "$#" -gt 0 ] || fail "$opt requires a port or none"
@@ -294,6 +298,7 @@ verify_family() {
 }
 
 verify_all() {
+  TUNNEL_CHECKED=0
   verify_family "$IPT4" 4 && verify_family "$IPT6" 6 && verify_tunnel
 }
 
@@ -319,7 +324,8 @@ valid_pin() {
 }
 # iptables -S may omit host masks. Never accept a range, hostname or extra rule.
 read_pin() {
-  pin_listing=$("$1" -w -S "$VPNCHAIN") || return 1
+  if [ "$#" -ge 3 ]; then pin_listing="$3"
+  else pin_listing=$("$1" -w -S "$VPNCHAIN") || return 1; fi
   pin_value=$(printf '%s\n' "$pin_listing" | awk -v c="$VPNCHAIN" -v s="$(tailnet_range "$2")" '
     NF == 10 && $1 == "-A" && $2 == c && $3 == "-s" && $4 == s && $5 == "-d" &&
       $7 == "-i" && $8 == "tun+" && $9 == "-j" && $10 == "ACCEPT" { print $6 }
@@ -350,11 +356,12 @@ check_wireguard_names() {
   done
 }
 pin_report() {
-  if ! tunnel_present; then
+  [ "${TUNNEL_CHECKED:-0}" -eq 1 ] || verify_tunnel || :
+  if [ "$TUNNEL_HAS_RULES" -eq 0 ]; then
     TUNNEL_MODE=OFF
     say 'tunnel_mode=OFF'; say 'tailnet_trust=OFF'; return
   fi
-  if tunnel_policy_mode; then
+  if [ "$TUNNEL_POLICY_VALID" -eq 1 ]; then
     say "tunnel_mode=$TUNNEL_MODE"
     if [ "$TUNNEL_MODE" = DENY_ONLY ]; then
       say 'tailnet_trust=DENY_ONLY'; say 'tailnet_ingress=NO_EXEMPTION'
@@ -362,7 +369,6 @@ pin_report() {
     else
       say 'tailnet_ingress=ADDRESS_ONLY'
       say "tailnet_wireguard=${WG_TRUST:-UNKNOWN}"
-      PIN4=$(read_pin "$IPT4" 4); PIN6=$(read_pin "$IPT6" 6)
       say 'tailnet_trust=PINNED_DESTINATIONS'
       say "tailnet_pin4=$PIN4"; say "tailnet_pin6=$PIN6"
     fi
@@ -454,7 +460,7 @@ tailnet_connectivity() {
   observed6=$(printf '%s\n' "$INVENTORY" | sed -n 's/^tailnet_pin6=//p')
   valid_pin 4 "$observed4" && valid_pin 6 "$observed6" || { say 'tailnet_current=UNVERIFIED'; return; }
   say "tailnet_observed4=$observed4"; say "tailnet_observed6=$observed6"
-  if [ "$observed4" = "$(read_pin "$IPT4" 4)" ] && [ "$observed6" = "$(read_pin "$IPT6" 6)" ]; then
+  if [ "$observed4" = "${PIN4:-}" ] && [ "$observed6" = "${PIN6:-}" ]; then
     say 'tailnet_current=MATCH'
   else say 'tailnet_current=REAUTHORIZE'; fi
 }
@@ -517,7 +523,7 @@ verify_tunnel_family() {
   ') || return 1
   if [ "$vcount" = 4 ]; then
     [ "$vtargets" = "ACCEPT ACCEPT DROP DROP " ] || return 1
-    vpin=$(read_pin "$vbin" "$2") || return 1
+    vpin=$(read_pin "$vbin" "$2" "$vrules") || return 1
     "$vbin" -w -C "$VPNCHAIN" -s "$vrange" -d "$vpin" -i tun+ -j ACCEPT >/dev/null 2>&1 || return 1
     VERIFIED_MODE=PINNED
   else
@@ -564,14 +570,17 @@ EOF
 # in both families, or the firewall as a whole is degraded.
 tunnel_policy_mode() {
   verify_tunnel_family "$IPT4" 4 || return 1
-  mode4="$VERIFIED_MODE"
+  mode4="$VERIFIED_MODE"; PIN4="${vpin:-}"; TUNNEL_HOOKS4="$vhooks"
   verify_tunnel_family "$IPT6" 6 || return 1
   [ "$mode4" = "$VERIFIED_MODE" ] || return 1
-  TUNNEL_MODE="$VERIFIED_MODE"
-  [ "$(tunnel_hook_names "$IPT4" | sort)" = "$(tunnel_hook_names "$IPT6" | sort)" ]
+  TUNNEL_MODE="$VERIFIED_MODE"; PIN6="${vpin:-}"; TUNNEL_HOOKS6="$vhooks"
+  [ "$(printf '%s\n' "$TUNNEL_HOOKS4" | sort)" = "$(printf '%s\n' "$TUNNEL_HOOKS6" | sort)" ] || return 1
+  TUNNEL_POLICY_VALID=1
 }
 verify_tunnel() {
+  TUNNEL_CHECKED=1; TUNNEL_POLICY_VALID=0; TUNNEL_HAS_RULES=0
   tunnel_present || { TUNNEL_MODE=OFF; return 0; }
+  TUNNEL_HAS_RULES=1
   tunnel_policy_mode || return 1
   if [ "$TUNNEL_MODE" = PINNED ]; then check_wireguard_names || return 1
   else WG_TRUST=NOT_APPLICABLE; fi
@@ -604,7 +613,7 @@ read_tailnet_hits() {
 # Separate from the physical counters, which keep meaning exactly what they meant.
 collect_tunnel_counters() {
   TUNNEL_FILTER=OFF
-  tunnel_present || return 0
+  [ "$TUNNEL_HAS_RULES" -eq 1 ] || return 0
   TUNNEL_FILTER=ON
   tcount4=$(read_counters "$IPT4" "$VPNCHAIN") || fail 'Cannot read IPv4 tunnel counters; not claiming a measurement'
   tcount6=$(read_counters "$IPT6" "$VPNCHAIN") || fail 'Cannot read IPv6 tunnel counters; not claiming a measurement'
@@ -617,7 +626,7 @@ collect_tunnel_counters() {
   tblocked4="$1"; tbytes4="$2"; treplies4="$3"
   set -- $tcount6
   tblocked6="$1"; tbytes6="$2"; treplies6="$3"
-  thooks=$(tunnel_hook_names "$IPT4" | tr '\n' ',') || fail 'Cannot read tunnel hooks'
+  thooks=$(printf '%s\n' "$TUNNEL_HOOKS4" | tr '\n' ',') || fail 'Cannot read tunnel hooks'
   thooks=${thooks%,}
 }
 
@@ -646,12 +655,16 @@ read_counters() {
 collect_counters() {
   if ! chain_exists4 && ! chain_exists6 && ! ts_exists4 && ! ts_exists6 && ! tunnel_present; then
     if [ "$CMD" = 'verbose' ]; then say 'Status: inactive'; return 3; fi
-    say 'state=INACTIVE'
+    COLLECT_STATE=INACTIVE
+    [ "$CMD" = inspect ] || say 'state=INACTIVE'
     return 3
   fi
   if ! verify_all; then
-    if [ "$CMD" = 'verbose' ]; then say 'Status: degraded (rules or hooks missing)'; else say 'state=DEGRADED'; fi
-    if tunnel_present && tunnel_policy_mode && [ "$TUNNEL_MODE" = PINNED ] && ! check_wireguard_names; then say "tailnet_wireguard=$WG_TRUST"; fi
+    COLLECT_STATE=DEGRADED
+    if [ "$CMD" = verbose ]; then say 'Status: degraded (rules or hooks missing)'
+    elif [ "$CMD" != inspect ]; then say 'state=DEGRADED'; fi
+    [ "${TUNNEL_CHECKED:-0}" -eq 1 ] || verify_tunnel || :
+    if [ "$CMD" != inspect ] && [ "${WG_TRUST:-}" = CONFLICT ]; then say 'tailnet_wireguard=CONFLICT'; fi
     return 4
   fi
   count4=$(read_counters "$IPT4") || fail 'Cannot read IPv4 counters; not claiming a measurement'
@@ -661,6 +674,7 @@ collect_counters() {
   set -- $count6
   blocked6="$1"; bytes6="$2"; replies6="$3"
   collect_tunnel_counters
+  COLLECT_STATE=ACTIVE
   return 0
 }
 
@@ -758,9 +772,52 @@ apply_verified_refresh() {
   return 1
 }
 
+# /proc/uptime is monotonic and includes suspend. Shell builtins avoid a process
+# per clock read. Keep the two-part timestamp: mksh arithmetic is 32-bit on Android.
+clock_now() {
+  read -r clock_stamp clock_rest < "${POCKETUFW_UPTIME:-/proc/uptime}" || return 1
+  clock_seconds=${clock_stamp%.*}; clock_fraction=${clock_stamp#*.}
+  case "$clock_seconds" in ''|*[!0-9]*) return 1 ;; esac
+  case "$clock_fraction" in [0-9][0-9]) ;; *) return 1 ;; esac
+  clock_fraction=$((1$clock_fraction - 100))
+}
+start_deadline() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  wait_until=$((clock_seconds + $1)); wait_fraction=$clock_fraction
+}
+deadline_reached() {
+  clock_now || { echo 'pocketufw: monotonic clock unavailable' >&2; exit 75; }
+  [ "$clock_seconds" -gt "$wait_until" ] ||
+    { [ "$clock_seconds" -eq "$wait_until" ] && [ "$clock_fraction" -ge "$wait_fraction" ]; }
+}
+
+emit_activity() {
+  say 'state=ACTIVE'
+  say "ipv4_blocked=$blocked4"
+  say "ipv6_blocked=$blocked6"
+  say "ipv4_blocked_bytes=$bytes4"
+  say "ipv6_blocked_bytes=$bytes6"
+  say "ipv4_established_replies=$replies4"
+  say "ipv6_established_replies=$replies6"
+  say "hook_patterns=$IFACES"
+  say "tunnel_filter=$TUNNEL_FILTER"
+  if [ "$TUNNEL_FILTER" = ON ]; then
+    pin_report
+    say "tunnel_hooks=$thooks"
+    say "ipv4_tunnel_blocked=$tblocked4"
+    say "ipv6_tunnel_blocked=$tblocked6"
+    say "ipv4_tunnel_blocked_bytes=$tbytes4"
+    say "ipv6_tunnel_blocked_bytes=$tbytes6"
+    say "ipv4_tunnel_established_replies=$treplies4"
+    say "ipv6_tunnel_established_replies=$treplies6"
+    say "ipv4_tunnel_tailnet=$ttailnet4"
+    say "ipv6_tunnel_tailnet=$ttailnet6"
+  fi
+}
+
 # Cross-process lock: one engine's half-finished install must not be seen as
 # DEGRADED by a reader, or be torn down by another engine's failure cleanup.
-# Toybox flock takes only a descriptor, so poll -n: 150 x 0.1 s, about 15 s.
+# Toybox flock takes only a descriptor: poll -n against a monotonic deadline.
 # No flock or no usable lock file means proceeding unlocked. Nothing the engine
 # runs re-invokes the engine, so holding this cannot deadlock against itself.
 lock_engine() {
@@ -770,18 +827,20 @@ lock_engine() {
   # created this file, and with whatever umask, only root may hold the firewall's lock.
   ( umask 077; : >>"$lock_file" && { chmod 600 "$lock_file" || :; } ) 2>/dev/null || return 0
   exec 9>>"$lock_file"
-  lock_polls=0
+  snapshot_wait=15
+  [ "$CMD" != inspect ] || snapshot_wait=2
+  start_deadline "$snapshot_wait"
   while :; do
+    deadline_reached && break
     # 9>&9 hands the descriptor over explicitly: mksh, Android's sh, keeps exec'd
     # descriptors above 2 from child commands otherwise.
     lock_error=$(flock -n "$1" 9 9>&9 2>&1) && return 0
     # Contention is silent. A diagnostic means flock cannot work here at all.
     [ -z "$lock_error" ] || { exec 9>&-; return 0; }
-    [ "$lock_polls" -lt 150 ] || break
-    lock_polls=$((lock_polls + 1))
     sleep 0.1 2>/dev/null || :
   done
   exec 9>&-
+  [ "$CMD" != inspect ] || { say 'pocketufw: snapshot lock busy; recheck' >&2; exit 75; }
   [ "$1" = -s ] || fail 'Another PocketUFW operation is still running; no changes made. Try again.'
   say 'pocketufw: another operation is still running; reading without the lock' >&2
 }
@@ -798,14 +857,18 @@ if [ "$(readlink /proc/$$/fd/8 2>/dev/null)" != "$operation_lock" ]; then
   ( umask 077; : >>"$operation_lock" && chmod 600 "$operation_lock" ) || exit 1
   exec 8>>"$operation_lock"
 fi
-operation_polls=0
-while [ "$operation_polls" -le 150 ]; do
-  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
-  if [ -n "$operation_error" ] || [ "$operation_polls" -eq 150 ]; then
-    echo 'pocketufw: lifecycle lock unavailable or busy; recheck before retrying' >&2
+operation_wait=15
+start_deadline "$operation_wait"
+while :; do
+  if deadline_reached; then
+    echo 'pocketufw: lifecycle lock busy; recheck before retrying' >&2
     exit 75
   fi
-  operation_polls=$((operation_polls + 1))
+  operation_error=$(flock -n -x 8 8>&8 2>&1) && break
+  if [ -n "$operation_error" ]; then
+    echo 'pocketufw: lifecycle locking unavailable; recheck before retrying' >&2
+    exit 75
+  fi
   sleep 0.1
 done
 # mksh closes descriptors above 2 for children unless they are passed explicitly.
@@ -814,7 +877,7 @@ sh() { command sh "$@" 8>&8; }
 
 case "$CMD" in
   enable|disable|refresh|set-ports|reset-counters|tunnel-on|tunnel-refresh|tunnel-off) lock_engine -x ;;
-  verify|activity|verbose|status|get-ports|residue|tunnel-status) lock_engine -s ;;
+  verify|activity|verbose|inspect|status|get-ports|residue|tunnel-status) lock_engine -s ;;
 esac
 
 case "$CMD" in
@@ -885,32 +948,40 @@ case "$CMD" in
     fi
     say 'PocketUFW: owned counters reset; newly arriving packets may already be counted.'
     ;;
+  inspect)
+    root_needed
+    prereqs
+    collect_counters || :
+    # At most one probe. Retain both ownership/address checks in pinned mode.
+    # OFF/deny-only need only advisory Android owner metadata, not authorization.
+    [ "${TUNNEL_CHECKED:-0}" -eq 1 ] || verify_tunnel || :
+    INVENTORY=''
+    if [ "$TUNNEL_HAS_RULES" -eq 1 ] && [ "$TUNNEL_MODE" = PINNED ]; then
+      read_tunnel_details || INVENTORY=''
+      # Interface kinds can change while the probe runs, independently of FD9.
+      if ! check_wireguard_names; then COLLECT_STATE=DEGRADED; fi
+    else
+      case "$0" in */*) inventory_dir=${0%/*} ;; *) inventory_dir=. ;; esac
+      INVENTORY=$(timeout -s KILL 8 sh "$inventory_dir/vpn-probe" android-vpn 9>&-) || INVENTORY=''
+      case "$INVENTORY" in *android_vpn=COMPLETE) ;; *) INVENTORY='' ;; esac
+    fi
+    if [ "$COLLECT_STATE" = ACTIVE ]; then emit_activity
+    else say "state=$COLLECT_STATE"; fi
+    if [ "$TUNNEL_HAS_RULES" -eq 0 ]; then
+      [ "$COLLECT_STATE" = ACTIVE ] || say 'tunnel_filter=OFF'
+    elif [ "$COLLECT_STATE" != ACTIVE ]; then say 'tunnel_filter=DEGRADED'; fi
+    # ACTIVE/ON emitted pins above; all other states still disclose what is known.
+    if [ "$COLLECT_STATE" != ACTIVE ] || [ "$TUNNEL_FILTER" = OFF ]; then pin_report; fi
+    tailnet_connectivity
+    printf '%s\n' "$INVENTORY" | grep -E '^vpn_(owner|iface)=' || :
+    say 'inspection=READY'
+    ;;
   activity|verbose)
     root_needed
     prereqs
     collect_counters || exit $?
     if [ "$CMD" = 'activity' ]; then
-      say 'state=ACTIVE'
-      say "ipv4_blocked=$blocked4"
-      say "ipv6_blocked=$blocked6"
-      say "ipv4_blocked_bytes=$bytes4"
-      say "ipv6_blocked_bytes=$bytes6"
-      say "ipv4_established_replies=$replies4"
-      say "ipv6_established_replies=$replies6"
-      say "hook_patterns=$IFACES"
-      say "tunnel_filter=$TUNNEL_FILTER"
-      if [ "$TUNNEL_FILTER" = ON ]; then
-        pin_report
-        say "tunnel_hooks=$thooks"
-        say "ipv4_tunnel_blocked=$tblocked4"
-        say "ipv6_tunnel_blocked=$tblocked6"
-        say "ipv4_tunnel_blocked_bytes=$tbytes4"
-        say "ipv6_tunnel_blocked_bytes=$tbytes6"
-        say "ipv4_tunnel_established_replies=$treplies4"
-        say "ipv6_tunnel_established_replies=$treplies6"
-        say "ipv4_tunnel_tailnet=$ttailnet4"
-        say "ipv6_tunnel_tailnet=$ttailnet6"
-      fi
+      emit_activity
     else
       say 'PocketUFW verbose status'
       say 'Status: ACTIVE (own rules and hooks verified)'
@@ -1130,7 +1201,7 @@ $refresh_removed"
   tunnel-status)
     root_needed
     prereqs
-    check_wireguard_names || :
+    TUNNEL_CHECKED=0
     if ! tunnel_present; then
       say 'tunnel_filter=OFF'
     elif verify_all; then

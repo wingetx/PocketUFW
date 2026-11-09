@@ -77,15 +77,18 @@ class TideProgressTest {
         val fake = FakeGateway(tunnelDashboard()); open(fake)
         val gate = hold(fake)
         val button = compose.onNodeWithTag("recheck-status")
+        node("Recheck").assertIsDisplayed()
         val before = button.getUnclippedBoundsInRoot()
         button.performClick()
         compose.settle { fake.count("inspect") == 2 }
         loading("Recheck firewall status", "Checking…")
+        node("Checking…").assertIsDisplayed()
         assertEquals(before, button.getUnclippedBoundsInRoot())
         repeat(3) { button.performClick() }
         assertEquals(2, fake.count("inspect"))
         release(fake, gate)
         button.assertIsEnabled()
+        node("Recheck").assertIsDisplayed()
         assertEquals(listOf("inspect", "inspect"), fake.calls.toList())
     }
 

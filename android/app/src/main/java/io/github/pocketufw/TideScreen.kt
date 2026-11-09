@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -162,29 +161,12 @@ internal fun TideScreen(
         containerColor = Background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp)
-                .heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (exceptions) IconButton(onClick = { exceptions = false }) {
-                    TideIcon(R.drawable.tide_back, description = "Back")
-                }
-                Text("Pocket", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = if (exceptions) 0.dp else 8.dp))
-                Text("UFW", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Normal)
-                Spacer(Modifier.weight(1f))
-                val checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.TOOLBAR
-                IconButton(onClick = { checkControl = TideCheckControl.TOOLBAR; actions.recheck() },
-                    enabled = !ui.busy && ui.snapshot.protection != FirewallClient.Protection.CHECKING,
-                    modifier = Modifier.testTag("recheck-status").semantics {
-                        contentDescription = "Recheck firewall status"
-                        if (checking) {
-                            stateDescription = "Checking…"
-                            progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
-                            liveRegion = LiveRegionMode.Polite
-                        }
-                    }) {
-                    if (checking) TideProgressIndicator() else TideIcon(R.drawable.tide_refresh)
-                }
-            }
+            TideTopBar(
+                showBack = exceptions, onBack = { exceptions = false },
+                checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.TOOLBAR,
+                recheckEnabled = !ui.busy && ui.snapshot.protection != FirewallClient.Protection.CHECKING,
+                onRecheck = { checkControl = TideCheckControl.TOOLBAR; actions.recheck() }
+            )
         },
         bottomBar = {
             Column(Modifier.background(Background).navigationBarsPadding()) {

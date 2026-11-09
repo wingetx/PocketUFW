@@ -13,7 +13,7 @@ emit_rules() {
   listing="$3"
   max="$4"
   printf '%s\n' "$listing" | awk -v kind="$kind" -v fam="$fam" -v max="$max" -v n="${5:-0}" '
-    BEGIN { label = (kind == "tunnel") ? "main" : kind }
+    BEGIN { label = (kind == "tunnel") ? "main" : kind; start = n }
     $1 == "-A" {
       if (kind == "hook" && !($2 == "INPUT" && /--comment PocketUFW/ &&
                                   (/-j POCKETUFW_IN/ || /-j POCKETUFW_VPN/))) next
@@ -24,6 +24,7 @@ emit_rules() {
       if (n > max || length($0) > 190) exit 9
       printf "%s%s_%02d=%s\n", label, fam, n, $0
     }
+    END { printf "report_%s%s_count=%d\n", kind, fam, n-start }
   '
 }
 
@@ -61,6 +62,7 @@ emit_bypasses() {
           printf "input_bypass%s_%02d=%s\n", fam, n, rule[r]
         }
       }
+      printf "report_bypass%s_count=%d\n", fam, n
     }
   '
 }
@@ -94,6 +96,7 @@ emit_family() {
   # own chains jump to oem_in, pl_INPUT and so on. With no hook, nothing is bypassed.
   case "$input" in
     *'--comment PocketUFW'*) emit_bypasses || return 1 ;;
+    *) printf 'report_bypass%s_count=0\n' "$fam" ;;
   esac
   # Four physical hooks, plus at most MAX_TUNNEL_HOOKS when the tunnel filter is on.
   hook_limit=6
@@ -104,6 +107,8 @@ emit_family() {
     main_lines=$(printf '%s\n' "$main" | grep -c '^-A ') || main_lines=0
     # Its three deny-only or four pinned rules, in the same numbered list the app reads.
     emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 4))" "$main_lines" || return 1
+  else
+    printf 'report_tunnel%s_count=0\n' "$fam"
   fi
   emit_rules vpn "$fam" "$vpn" 3 || return 1
 }

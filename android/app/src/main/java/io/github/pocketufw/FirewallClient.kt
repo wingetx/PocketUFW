@@ -3,12 +3,16 @@ package io.github.pocketufw
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** Exit status for "we stopped waiting". The root shell itself may still be running. */
 private const val ROOT_TIMEOUT_EXIT = 124
 private const val LIFECYCLE_BUSY_EXIT = 75
+internal const val ROOT_OUTPUT_LIMIT = 64 * 1024
+private const val ROOT_OUTPUT_INCOMPLETE_EXIT = 122
+private const val ROOT_OUTPUT_DETAILS = "Root response was incomplete or too large to verify. Recheck live firewall state."
 
 /** What one privileged command returned. */
 internal data class ShellResult(val exitCode: Int, val text: String) {
@@ -28,18 +32,54 @@ private object SuShell : RootShell {
         } catch (e: Exception) {
             return ShellResult(127, "Unable to request root: ${e.message ?: "su unavailable"}")
         }
-        return try {
-            if (!process.waitFor(maxSeconds, TimeUnit.SECONDS)) {
+        return collectRootOutput(process, maxSeconds)
+    }
+}
+
+/**
+ * Drain while the command runs, retaining at most 64 KiB (the bounded report is
+ * under 24 KiB). Overflow is discarded and explicitly rejected, never truncated
+ * into a successful response. Only read available bytes: a descendant holding
+ * stdout open cannot turn an exited command into an unbounded read/reader thread.
+ * Short waits belong to this one IO call; there is no service or persistent poller.
+ */
+internal fun collectRootOutput(process: Process, maxSeconds: Long): ShellResult {
+    val started = System.nanoTime()
+    val budget = TimeUnit.SECONDS.toNanos(maxSeconds)
+    val output = ByteArrayOutputStream(ROOT_OUTPUT_LIMIT)
+    val buffer = ByteArray(4096)
+    var overflow = false
+    try {
+        while (true) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            val remaining = budget - (System.nanoTime() - started)
+            if (remaining <= 0) {
                 process.destroyForcibly()
-                ShellResult(ROOT_TIMEOUT_EXIT, "Root command timed out. Check the superuser prompt.")
-            } else {
-                val output = process.inputStream.bufferedReader().use { it.readText() }
-                ShellResult(process.exitValue(), output.trim().take(8192))
+                return ShellResult(ROOT_TIMEOUT_EXIT, "Root command timed out. Check the superuser prompt.")
             }
-        } catch (e: Exception) {
-            process.destroyForcibly()
-            ShellResult(125, "Unable to complete root command: ${e.message ?: "unknown error"}")
+            val available = process.inputStream.available()
+            if (available > 0) {
+                val read = process.inputStream.read(buffer, 0, minOf(available, buffer.size))
+                if (read > 0) {
+                    val retain = minOf(read, ROOT_OUTPUT_LIMIT - output.size())
+                    output.write(buffer, 0, retain)
+                    if (read > retain) overflow = true
+                }
+            } else if (!process.isAlive) {
+                return if (overflow) ShellResult(ROOT_OUTPUT_INCOMPLETE_EXIT, ROOT_OUTPUT_DETAILS)
+                    else ShellResult(process.exitValue(), output.toString("UTF-8"))
+            } else {
+                process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(10)), TimeUnit.NANOSECONDS)
+            }
         }
+    } catch (e: Exception) {
+        process.destroyForcibly()
+        if (e is InterruptedException) Thread.currentThread().interrupt()
+        return ShellResult(ROOT_OUTPUT_INCOMPLETE_EXIT, ROOT_OUTPUT_DETAILS)
+    } finally {
+        runCatching { process.inputStream.close() }
+        runCatching { process.errorStream.close() }
+        runCatching { process.outputStream.close() }
     }
 }
 
@@ -88,6 +128,8 @@ internal class FirewallClient(
         val vpnProvider: String? = null,
         /** Live interfaces PocketUFW has no hook on. Empty does not prove full coverage. */
         val uncoveredInterfaces: List<String> = emptyList(),
+        /** Empty interface lists only mean no known gaps after a successful inventory. */
+        val interfaceInventoryAvailable: Boolean = false,
         /** The interface Android's own record gives the active VPN, when it says. */
         val vpnInterface: String? = null,
         /** Session-only. ON verifies installed hooks, not all interfaces or ownership. */
@@ -182,8 +224,6 @@ internal class FirewallClient(
         val ENGINE_SCRIPTS = listOf("pocketufw", "vpn-probe", "bootctl", "boot-service",
             "android-bridge", "rules-report", "udp-config")
         val ENGINE_LOCK = Any()
-        /** The chains rules-report may list as inbound policy. Anything else voids the report. */
-        val INBOUND_CHAINS = listOf("POCKETUFW_IN", "POCKETUFW_VPN")
         var enginePrepared = false
 
         /**
@@ -289,18 +329,26 @@ internal class FirewallClient(
     private fun kernelFamily(values: Map<String, String>, fam: Int): RuleFamily? {
         val policy = values["input_policy$fam"] ?: return null
         if (policy !in setOf("ACCEPT", "DROP", "REJECT")) return null
-        fun lines(prefix: String): List<String> = values.entries
-            .filter { (key, _) -> key.matches(Regex("^" + prefix + "[0-9]{2}$")) }
-            .sortedBy { it.key }
-            .map { it.value }
-        val hooks = lines("hook" + fam + "_")
-        val inbound = lines("main" + fam + "_")
-        val vpn = lines("vpn" + fam + "_")
-        val bypass = lines("input_bypass" + fam + "_")
-        if (hooks.isEmpty() || inbound.isEmpty()) return null
+        fun count(kind: String, max: Int): Int? = values["report_${kind}${fam}_count"]
+            ?.takeIf { it.matches(Regex("0|[1-9][0-9]?")) }?.toIntOrNull()?.takeIf { it <= max }
+        fun lines(prefix: String, count: Int): List<String>? {
+            val keys = (1..count).map { prefix + it.toString().padStart(2, '0') }
+            if (values.keys.filter { it.startsWith(prefix) }.toSet() != keys.toSet()) return null
+            return keys.map { values.getValue(it) }.takeIf { rows ->
+                rows.all { it.length <= 190 && it.none(Char::isISOControl) }
+            }
+        }
+        val mainCount = count("main", 12) ?: return null
+        val tunnelCount = count("tunnel", 4) ?: return null
+        val hooks = lines("hook${fam}_", count("hook", 12) ?: return null) ?: return null
+        val inbound = lines("main${fam}_", mainCount + tunnelCount) ?: return null
+        val vpn = lines("vpn${fam}_", count("vpn", 3) ?: return null) ?: return null
+        val bypass = lines("input_bypass${fam}_", count("bypass", 6) ?: return null) ?: return null
+        if (hooks.isEmpty() || mainCount == 0) return null
         if (hooks.any { !it.startsWith("-A INPUT ") } ||
             bypass.any { !it.startsWith("-A INPUT ") } ||
-            inbound.any { rule -> INBOUND_CHAINS.none { rule.startsWith("-A $it ") } } ||
+            inbound.take(mainCount).any { !it.startsWith("-A POCKETUFW_IN ") } ||
+            inbound.drop(mainCount).any { !it.startsWith("-A POCKETUFW_VPN ") } ||
             vpn.any { !it.startsWith("-A POCKETUFW_TS ") }) return null
         return RuleFamily(policy, hooks, inbound.filter { it.startsWith("-A POCKETUFW_IN ") },
             vpn, bypass, inbound.filter { it.startsWith("-A POCKETUFW_VPN ") })
@@ -379,6 +427,9 @@ internal class FirewallClient(
     }
 
     internal fun dashboardFromOutput(exitCode: Int, text: String, vpn: Boolean): Dashboard {
+        if (exitCode == ROOT_OUTPUT_INCOMPLETE_EXIT || text.length > ROOT_OUTPUT_LIMIT ||
+            text.toByteArray(Charsets.UTF_8).size > ROOT_OUTPUT_LIMIT) return Dashboard(Snapshot(
+                protection = Protection.DEGRADED, details = ROOT_OUTPUT_DETAILS, vpnActive = vpn))
         if (exitCode == LIFECYCLE_BUSY_EXIT) return Dashboard(Snapshot(
             protection = Protection.DEGRADED, rootReady = true, vpnActive = vpn,
             details = "A firewall operation is still running or its lock is unavailable. Recheck status before retrying."
@@ -421,7 +472,15 @@ internal class FirewallClient(
         val activity = if (protection == Protection.ACTIVE) parseCounterActivity(values)
             else null
 
-        val policyReport = if (rootGranted && values["rules_report"] == "READY") {
+        val reportEntries = text.lineSequence().filter { line ->
+            line.startsWith("input_policy") || line.startsWith("hook") || line.startsWith("main") ||
+                line.startsWith("vpn4") || line.startsWith("vpn6") || line.startsWith("input_bypass") ||
+                line.startsWith("report_") || line.startsWith("rules_report")
+        }.map { it.substringBefore('=') }.toList()
+        val reportKey = Regex("input_policy[46]|(hook|main|vpn|input_bypass)[46]_[0-9]{2}|report_(hook|main|tunnel|vpn|bypass)[46]_count|rules_report")
+        val reportComplete = text.trimEnd().substringAfterLast('\n') == "rules_report=READY" &&
+            reportEntries.distinct().size == reportEntries.size && reportEntries.all { it.matches(reportKey) }
+        val policyReport = if (rootGranted && reportComplete) {
             val four = kernelFamily(values, 4)
             val six = kernelFamily(values, 6)
             if (four != null && six != null) {
@@ -446,6 +505,11 @@ internal class FirewallClient(
             committedUdp6 = values["committed_udp6"] ?: "none",
             uncoveredInterfaces = if (!rootGranted) emptyList() else
                 values["uncovered_ifaces"].orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() },
+            interfaceInventoryAvailable = rootGranted && values["interface_report"] == "READY" &&
+                text.lineSequence().count { it.startsWith("interface_report=") } == 1 &&
+                text.lineSequence().count { it.startsWith("uncovered_ifaces=") } == 1 &&
+                values["uncovered_ifaces"]?.let { list -> list.isEmpty() ||
+                    list.split(',').all { it.matches(Regex("[A-Za-z0-9_.-]{1,15}")) } } == true,
             vpnInterface = if (rootGranted) values["vpn_iface"]?.takeIf { it.isNotEmpty() } else null,
             tunnelFilter = when {
                 !rootGranted -> TunnelFilter.UNKNOWN
@@ -533,6 +597,7 @@ internal class FirewallClient(
             val dashboard = dashboardFromOutput(result.exitCode, result.text, vpn)
             val success = dashboard.snapshot.rootReady && values["operation"] == "SUCCESS"
             val message = when {
+                result.exitCode == ROOT_OUTPUT_INCOMPLETE_EXIT -> ROOT_OUTPUT_DETAILS
                 result.exitCode == LIFECYCLE_BUSY_EXIT -> dashboard.snapshot.details
                 result.timedOut -> ROOT_TIMEOUT_MESSAGE
                 !dashboard.snapshot.rootReady -> "Root access is needed for this action."

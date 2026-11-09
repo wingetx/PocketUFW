@@ -92,8 +92,8 @@ class TideWordingTest {
     private data class Headline(val title: String, val label: String, val body: String, val button: String)
 
     private val headlines = listOf(
-        Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "KERNEL RULES VERIFIED",
-            "Unsolicited incoming traffic is blocked on supported physical interfaces.", "Turn firewall off"),
+        Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "RULES VERIFIED · COVERAGE UNKNOWN",
+            "PocketUFW's rules are installed, but traffic coverage could not be fully inspected.", "Turn firewall off"),
         Snapshot(Protection.INACTIVE, rootReady = true) to Headline("Off.", "POCKETUFW IS INACTIVE",
             "PocketUFW rules are not installed. Android’s own firewall remains unchanged.", "Turn firewall on"),
         Snapshot(Protection.DEGRADED, rootReady = true, details = "Incomplete firewall.") to Headline(

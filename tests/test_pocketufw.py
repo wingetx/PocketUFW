@@ -191,7 +191,7 @@ class PocketUFWTests(unittest.TestCase):
         self.assertEqual(enabled.returncode, 0, enabled.stderr)
         for family in ('iptables', 'ip6tables'):
             self.assertTrue((self.base / f'{family}.POCKETUFW_IN').exists())
-            self.assertEqual(self.read(family).count('PocketUFW'), 3)
+            self.assertEqual(self.read(family).count('PocketUFW'), 4)
             self.assertTrue(self.read(family).startswith('-j oem_in\n-j bw_INPUT\n-j fw_INPUT\n'))
             self.assertTrue(self.read(family, 'POCKETUFW_IN').endswith('-j DROP\n'))
         self.assertEqual(self.run_cmd('status').returncode, 0)
@@ -268,7 +268,7 @@ class PocketUFWTests(unittest.TestCase):
             enabled = self.run_cmd('enable')
             self.assertEqual(enabled.returncode, 0, enabled.stderr)
             for family in ('iptables', 'ip6tables'):
-                self.assertEqual(self.read(family).count('PocketUFW'), 3)
+                self.assertEqual(self.read(family).count('PocketUFW'), 4)
             disabled = self.run_cmd('disable')
             self.assertEqual(disabled.returncode, 0, disabled.stderr)
             for family in ('iptables', 'ip6tables'):
@@ -621,7 +621,7 @@ class PocketUFWTests(unittest.TestCase):
         # Remove one of our own interface hooks to simulate lost enforcement.
         infile = self.base / 'iptables.INPUT'
         lines = infile.read_text().splitlines()
-        self.assertEqual(len(lines), 6)
+        self.assertEqual(len(lines), 7)
         infile.write_text('\n'.join(lines[:-1]) + '\n')
         broken = self.run_cmd('verify')
         self.assertNotEqual(broken.returncode, 0)

@@ -68,6 +68,7 @@ internal fun activeDashboard(
 ) = Dashboard(
     Snapshot(
         protection = Protection.ACTIVE, rootReady = true, vpnActive = true,
+        interfaceInventoryAvailable = true,
         details = "IPv4 and IPv6 rules and hooks verified.",
         bootRestore = boot, udpConfigMode = mode,
         committedUdp4 = committed4, committedUdp6 = committed6,

@@ -666,7 +666,7 @@ class Report(Base):
         result = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('POCKETUFW_VPN', result.stdout)
-        self.assertEqual(result.stdout.count('hook4_'), 4)
+        self.assertEqual(sum(line.startswith('hook4_') for line in result.stdout.splitlines()), 4)
 
     def test_with_the_filter_on_its_hooks_and_rules_continue_the_same_lists(self):
         self.proven_tailscale()

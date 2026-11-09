@@ -28,7 +28,9 @@ private fun reportLines(fam: Int, port: String?): List<String> {
     )
     val main = rules.mapIndexed { i, rule -> "main${fam}_%02d=$rule".format(i + 1) }
     val vpn = listOfNotNull(port?.let { "vpn${fam}_01=-A POCKETUFW_TS -p udp -m udp --dport $it -j ACCEPT" })
-    return listOf("input_policy$fam=ACCEPT") + hooks + main + vpn
+    return listOf("input_policy$fam=ACCEPT", "report_hook${fam}_count=${hooks.size}",
+        "report_main${fam}_count=${main.size}", "report_tunnel${fam}_count=0",
+        "report_vpn${fam}_count=${vpn.size}") + hooks + main + vpn
 }
 
 /** Distinct per key, so that swapping any two counters changes an assertion. */
@@ -62,6 +64,7 @@ internal fun bridgeOutput(
 ): String = buildList {
     add("root=GRANTED")
     add("vpn_owner=$vpnOwner")
+    add("interface_report=READY")
     if (mode != null) add("config_mode=$mode")
     add("committed_udp4=$committed4")
     add("committed_udp6=$committed6")
@@ -77,6 +80,8 @@ internal fun bridgeOutput(
         addAll(reportLines(6, port6))
         bypass4.forEachIndexed { i, rule -> add("input_bypass4_%02d=$rule".format(i + 1)) }
         bypass6.forEachIndexed { i, rule -> add("input_bypass6_%02d=$rule".format(i + 1)) }
+        add("report_bypass4_count=${bypass4.size}")
+        add("report_bypass6_count=${bypass6.size}")
         add("rules_report=$reportStatus")
     }
 }.joinToString("\n")

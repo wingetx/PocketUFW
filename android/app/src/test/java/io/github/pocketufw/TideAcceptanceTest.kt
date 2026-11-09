@@ -54,13 +54,19 @@ class TideAcceptanceTest {
         val extra = listOf(4, 6).flatMap { family ->
             val source = if (family == 4) "100.64.0.0/10" else "fd7a:115c:a1e0::/48"
             val pin = if (family == 4) "100.64.0.1/32" else "fd7a:115c:a1e0::1/128"
-            listOf("hook${family}_04=-A INPUT -i tun+ -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN",
+            listOf("hook${family}_05=-A INPUT -i tun+ -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN",
                 "main${family}_09=-A POCKETUFW_VPN -s $source -d $pin -i tun+ -j ACCEPT",
                 "main${family}_10=-A POCKETUFW_VPN -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
                 "main${family}_11=-A POCKETUFW_VPN -m conntrack --ctstate INVALID -j DROP",
                 "main${family}_12=-A POCKETUFW_VPN -j DROP")
         }
-        return client.dashboardFromOutput(0, bridgeOutput() + "\n" + extra.joinToString("\n"), false).kernelReport!!
+        val output = bridgeOutput()
+            .replace("report_hook4_count=4", "report_hook4_count=5")
+            .replace("report_hook6_count=4", "report_hook6_count=5")
+            .replace("report_tunnel4_count=0", "report_tunnel4_count=4")
+            .replace("report_tunnel6_count=0", "report_tunnel6_count=4")
+            .replace("rules_report=READY", extra.joinToString("\n") + "\nrules_report=READY")
+        return client.dashboardFromOutput(0, output, false).kernelReport!!
     }
 
     @Test fun tunnelRulesAreNotPartOfThePhysicalExecutionOrder() {

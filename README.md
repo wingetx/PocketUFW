@@ -168,6 +168,14 @@ sh pocketufw disable
 
 `activity` returns structured IPv4/IPv6 DROP and established/related rule counters; `verbose` presents a human-readable summary. Tide shows these measurements in the expandable **Statistics** pill and the existing **Activity → Counters** view, with physical and optional tunnel measurements kept separate. Counters reset on request or when rules are reinstalled. Nonzero DROP counts prove that packets matched PocketUFW’s rules, not that every incoming path is protected. **Activity → Kernel rules** shows the actual INPUT hooks, inbound chains and VPN listener exceptions, including a raw-rule view. Opening these views uses the last inspection; manual counter refresh is a separate lightweight root read.
 
+A verified ruleset and known traffic coverage are separate. If the detailed rule
+report or live interface inventory is missing or incomplete, Tide shows **coverage
+unknown** instead of implying complete filtering. Known gaps remain visible as
+partial coverage. Reports must contain complete, counted sections for both address
+families; an oversized root response is rejected, not silently truncated. See the
+[medium audit follow-up](docs/medium-audit-followup.md) for limits and the Wi-Fi
+464XLAT upgrade transition.
+
 
 ```sh
 iptables -w -S POCKETUFW_IN

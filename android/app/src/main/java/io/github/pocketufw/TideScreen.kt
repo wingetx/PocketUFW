@@ -314,7 +314,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     // only what it's allowed to imply changes.
     val bypass = bypassRules(ui.report)
     val coverageGap = active && (state.uncoveredInterfaces.isNotEmpty() || bypass.isNotEmpty())
-    val accent = if (coverageGap || attention) Amber else if (verified) Mint else Muted
+    val coverageUnknown = active && (ui.report == null || !state.interfaceInventoryAvailable)
+    val accent = if (coverageGap || coverageUnknown || attention) Amber else if (verified) Mint else Muted
     val title = if (ui.verificationInDoubt) "Not\nverified." else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> "Active."
         FirewallClient.Protection.INACTIVE -> "Off."
@@ -324,13 +325,14 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     }
     val label = if (ui.verificationInDoubt) "Recheck required" else when (state.protection) {
         FirewallClient.Protection.ACTIVE ->
-            if (coverageGap) "Rules verified · not all traffic filtered" else "Kernel rules verified"
+            if (coverageGap) "Rules verified · not all traffic filtered"
+            else if (coverageUnknown) "Rules verified · coverage unknown" else "Kernel rules verified"
         FirewallClient.Protection.INACTIVE -> "PocketUFW is inactive"
         FirewallClient.Protection.CHECKING -> "Reading kernel state"
         FirewallClient.Protection.DEGRADED -> "Protection not verified"
         FirewallClient.Protection.ROOT_REQUIRED -> "Root permission needed"
     }
-    val icon = if (ui.verificationInDoubt || coverageGap) R.drawable.tide_warning else when (state.protection) {
+    val icon = if (ui.verificationInDoubt || coverageGap || coverageUnknown) R.drawable.tide_warning else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> R.drawable.tide_check
         FirewallClient.Protection.INACTIVE -> R.drawable.tide_off
         FirewallClient.Protection.CHECKING -> R.drawable.tide_refresh
@@ -341,6 +343,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         stateDescription = when {
             ui.verificationInDoubt -> "Not verified; recheck required"
             coverageGap -> "Active; not all traffic filtered"
+            coverageUnknown -> "Active; coverage unknown"
             else -> state.protection.name.replace('_', ' ')
         }
         liveRegion = LiveRegionMode.Polite
@@ -374,6 +377,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         ui.verificationInDoubt -> "A later read failed or the Quick Settings tile changed. " +
             "Last known status is not proof of current protection. Recheck the kernel."
         coverageGap -> "Unsolicited incoming traffic is blocked only where PocketUFW's rules see it."
+        coverageUnknown -> "PocketUFW's rules are installed, but traffic coverage could not be fully inspected."
         active -> "Unsolicited incoming traffic is blocked on supported physical interfaces."
         state.protection == FirewallClient.Protection.INACTIVE -> "PocketUFW rules are not installed. Android’s own firewall remains unchanged."
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
@@ -382,6 +386,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") { uncoveredLabel(it, state) } + ".", true)
     }
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
+    if (coverageUnknown) TideNotice("Coverage information is incomplete. Recheck to inspect interfaces and earlier INPUT rules.", true)
     if (state.rootReady && !ui.verificationInDoubt) when (state.tunnelFilter) {
         FirewallClient.TunnelFilter.ON -> TideNotice(
             if (state.tunnelMode == FirewallClient.TunnelMode.DENY_ONLY)
@@ -444,6 +449,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TidePolicyRow(R.drawable.tide_down, "Physical protection", physicalStatus(ui))
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {
             verified && coverageGap -> "Partly filtered¹"
+            verified && coverageUnknown -> "Coverage unknown"
             verified -> "Matched deny policy¹"
             !ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE -> "Not installed"
             else -> "Not verified"

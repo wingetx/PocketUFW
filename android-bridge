@@ -624,9 +624,14 @@ TUNNEL_HOOKS=''
 if [ "$state" = ACTIVE ]; then
   TUNNEL_HOOKS=$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_hooks=//p')
 fi
-UNCOVERED_IFACES=''
+interface_report='interface_report=UNAVAILABLE
+uncovered_ifaces='
 if command -v ip >/dev/null 2>&1; then
-  UNCOVERED_IFACES=$({ ip -o link 2>/dev/null; echo '--addresses--'; ip -o addr 2>/dev/null; } | awk -v hooks="$TUNNEL_HOOKS" '
+  interface_report=$({
+    ip -o link 2>/dev/null && echo '--links-ready--'
+    echo '--addresses--'
+    ip -o addr 2>/dev/null && echo '--addresses-ready--'
+  } | awk -v hooks="$TUNNEL_HOOKS" '
     function hooked(name, i, pattern) {
       for (i = 1; i <= hook_count; i++) {
         pattern = hook[i]
@@ -636,27 +641,41 @@ if command -v ip >/dev/null 2>&1; then
       return 0
     }
     BEGIN { hook_count = split(hooks, hook, ",") }
+    $0 == "--links-ready--" { links_ready = 1; next }
     $0 == "--addresses--" { in_addresses = 1; next }
+    $0 == "--addresses-ready--" { addresses_ready = 1; next }
+    NF == 0 { next }
+    $1 !~ /^[0-9]+:$/ { bad = 1; next }
     !in_addresses {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
+      if (name !~ /^[A-Za-z0-9_.-]+$/ || length(name) > 15 || $3 !~ /^<.*>$/) { bad = 1; next }
+      link_count++
+      known[name] = 1
       if ($3 ~ /[<,]UP[,>]/) up[name] = 1
       next
     }
-    $3 == "inet" || ($3 == "inet6" && / scope global /) {
+    {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
+      if (!(name in known) || ($3 != "inet" && $3 != "inet6") ||
+          $4 !~ /^[0-9a-fA-F:.]+\/[0-9]+$/ || $0 !~ / scope [^ ]+/) { bad = 1; next }
+      if ($3 == "inet6" && $0 !~ / scope global /) next
       if (!(name in up) || (name in listed)) next
       if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|v4-wlan|dummy)/ || hooked(name)) next
       listed[name] = 1
       list = list (list == "" ? "" : ",") name
     }
-    END { print list }
-  ') || UNCOVERED_IFACES=''
+    END {
+      print "interface_report=" (links_ready && addresses_ready && link_count && !bad ? "READY" : "UNAVAILABLE")
+      print "uncovered_ifaces=" list
+    }
+  ') || interface_report='interface_report=UNAVAILABLE
+uncovered_ifaces='
 fi
 
 echo 'root=GRANTED'
 echo "vpn_owner=$VPN_OWNER"
 echo "vpn_iface=$VPN_IFACE"
-echo "uncovered_ifaces=$UNCOVERED_IFACES"
+printf '%s\n' "$interface_report"
 echo "config_mode=$MODE"
 echo "committed_udp4=$SAVED4"
 echo "committed_udp6=$SAVED6"

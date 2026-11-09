@@ -245,8 +245,10 @@ class FirewallClientParsingTest {
     }
 
     @Test fun aReportWithTheTunnelFilterKeepsEachChainInItsOwnKernelOrder() {
-        val good = bridgeOutput().replace("rules_report=READY", listOf(
-            "hook4_04=-A INPUT -i tun+ -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN",
+        val good = bridgeOutput().replace("report_hook4_count=4", "report_hook4_count=5")
+            .replace("report_tunnel4_count=0", "report_tunnel4_count=2")
+            .replace("rules_report=READY", listOf(
+            "hook4_05=-A INPUT -i tun+ -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN",
             "main4_09=-A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.0/10 -i tun+ -j ACCEPT",
             "main4_10=-A POCKETUFW_VPN -j DROP",
             "rules_report=READY",

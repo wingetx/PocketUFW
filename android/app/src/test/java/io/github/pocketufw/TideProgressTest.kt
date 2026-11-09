@@ -148,7 +148,12 @@ class TideProgressTest {
 
     private fun enableTunnel(mode: TunnelMode) {
         val d = activeDashboard().let { it.copy(snapshot = it.snapshot.copy(tunnelFilter = TunnelFilter.OFF)) }
-        val fake = FakeGateway(d).apply { operationSuccess = false; operationMessage = "Enable could not be verified." }
+        val fake = FakeGateway(d).apply {
+            operationSuccess = false
+            operationMessage = if (mode == TunnelMode.PINNED)
+                "Kernel WireGuard tun* conflict or unreadable interface types; rename conflicting WireGuard before enabling. Nothing changed."
+            else "Could not read the current tunnels; nothing changed"
+        }
         open(fake); node("Settings").performClick(); click("Tunnel protection")
         val gate = hold(fake)
         val name = mode.name.replace('_', '-')
@@ -163,6 +168,23 @@ class TideProgressTest {
     }
     @Test fun pinnedEnableShowsOnlyItsOwnProgressAndClearsOnFailure() = enableTunnel(TunnelMode.PINNED)
     @Test fun denyOnlyEnableShowsOnlyItsOwnProgressAndClearsOnFailure() = enableTunnel(TunnelMode.DENY_ONLY)
+
+    @Test fun tunnelRefreshFailureDisplaysItsSpecificReasonAndClearsProgress() {
+        val fake = FakeGateway(tunnelDashboard()).apply {
+            operationSuccess = false
+            operationMessage = "Could not add a tunnel hook. Recheck tunnel protection."
+        }
+        open(fake); node("Settings").performClick(); click("Tunnel protection")
+        val gate = hold(fake)
+        click("Refresh tunnel hooks")
+        compose.settle { fake.count("tunnel-refresh") == 1 }
+        loading("Refresh tunnel hooks", "Refreshing…")
+        release(fake, gate)
+        node(fake.operationMessage).assertExists()
+        compose.onNodeWithTag("banner-failed").assertExists()
+        node("Refresh tunnel hooks").assertIsEnabled()
+        assertEquals(listOf("inspect", "tunnel-refresh"), fake.calls.toList())
+    }
 
     @Test fun tunnelRefreshAndRecoveryHaveTheirOwnProgressWithoutPhysicalRemoval() {
         val fake = FakeGateway(tunnelDashboard()); open(fake)

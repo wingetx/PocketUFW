@@ -219,14 +219,22 @@ class ShellBridge(BridgeAudit):
         self.assertFalse(self.device.store.exists())
 
     def test_engine_keeps_lifecycle_lock_after_bridge_is_killed(self):
+        self.assert_engine_keeps_lock_after_bridge_is_killed('enable', 'wlan+')
+
+    def test_captured_tunnel_operation_keeps_lock_after_bridge_is_killed(self):
+        self.authorized_tunnel()
+        self.assertEqual(self.bridge('tunnel-off')['operation'], 'SUCCESS')
+        self.assert_engine_keeps_lock_after_bridge_is_killed('tunnel-on', 'tun+', 'PINNED')
+
+    def assert_engine_keeps_lock_after_bridge_is_killed(self, action, interface, *args):
         seen, gate = self.root / 'seen', self.root / 'gate'
         self.device.add_command('iptables', MOCK.replace('echo "$*" >> "$file"', f'''echo "$*" >> "$file"
-    if [ "$name" = INPUT ] && [ "$2" = wlan+ ]; then
+    if [ "$name" = INPUT ] && [ "$2" = '{interface}' ]; then
       : > "{seen}"
       while [ ! -f "{gate}" ]; do sleep .02; done
     fi'''))
         with (self.root / 'output').open('w') as out:
-            process = subprocess.Popen(['sh', str(self.device.engine / 'android-bridge'), 'enable'],
+            process = subprocess.Popen(['sh', str(self.device.engine / 'android-bridge'), action, *args],
                                        env=self.env, stdout=out, stderr=out)
             try:
                 wait_file(self, seen)

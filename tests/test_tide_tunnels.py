@@ -18,6 +18,7 @@ class TideTunnels(BridgeAudit):
             self.assertEqual(self.script('android-bridge', 'tunnel-on', *args).returncode, 2)
         failed = self.bridge('tunnel-on', 'PINNED')
         self.assertEqual(failed['operation'], 'FAILED')
+        self.assertIn('Cannot authorize tailnet destinations', failed['message'])
         self.assertEqual(failed['tunnel_filter'], 'OFF')
         deny = self.bridge('tunnel-on', 'DENY_ONLY')
         self.assertEqual(deny['operation'], 'SUCCESS')
@@ -26,6 +27,42 @@ class TideTunnels(BridgeAudit):
         # A later mode request cannot remove or replace the existing policy.
         self.assertEqual(self.bridge('tunnel-on', 'PINNED')['operation'], 'FAILED')
         self.assertEqual(self.bridge('inspect')['tailnet_trust'], 'DENY_ONLY')
+
+    def test_wireguard_tun_conflict_reports_the_real_reason_without_installing(self):
+        self.authorized_tunnel()
+        self.bridge('tunnel-off')
+        conflict = self.root / 'sys' / 'tun50'
+        conflict.mkdir()
+        (conflict / 'uevent').write_text('DEVTYPE=wireguard\n')
+        before = {p.name: p.read_text() for p in self.kernel.glob('*.*')}
+        failed = self.bridge('tunnel-on', 'PINNED')
+        self.assertEqual(failed['operation'], 'FAILED')
+        self.assertIn('Kernel WireGuard tun* conflict', failed['message'])
+        self.assertNotIn('Cannot authorize tailnet', failed['message'])
+        self.assertEqual(failed['tunnel_filter'], 'OFF')
+        self.assertEqual({p.name: p.read_text() for p in self.kernel.glob('*.*')}, before)
+        self.assertEqual(self.bridge('tunnel-on', 'DENY_ONLY')['operation'], 'SUCCESS')
+
+    def test_deny_only_failure_is_about_physical_state_not_tailscale(self):
+        failed = self.bridge('tunnel-on', 'DENY_ONLY')
+        self.assertEqual(failed['operation'], 'FAILED')
+        self.assertEqual(failed['message'], 'Firewall disabled or degraded; tunnel filter not installed')
+        self.assertEqual(failed['state'], 'INACTIVE')
+
+    def test_refresh_hook_failure_keeps_its_reason_and_physical_rules(self):
+        self.authorized_tunnel()
+        before = self.physical_rules()
+        hooks = {fam: self.chain(fam, 'INPUT') for fam in ('iptables', 'ip6tables')}
+        new = self.root / 'sys' / 'WG-NEW'
+        new.mkdir()
+        (new / 'uevent').write_text('DEVTYPE=wireguard\n')
+        failed = self.bridge('tunnel-refresh', env={
+            'PUFW_TEST_FAIL_FAMILY': 'ip6tables',
+            'PUFW_TEST_FAIL': '-A INPUT -i WG-NEW -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN'})
+        self.assertEqual(failed['operation'], 'FAILED')
+        self.assertEqual(failed['message'], 'Could not add a tunnel hook. Recheck tunnel protection.')
+        self.assertEqual(self.physical_rules(), before)
+        self.assertEqual({fam: self.chain(fam, 'INPUT') for fam in hooks}, hooks)
 
     def test_pinned_enable_and_stale_reauthorization_require_separate_removal(self):
         self.authorized_tunnel()

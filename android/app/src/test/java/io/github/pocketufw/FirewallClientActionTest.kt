@@ -71,6 +71,24 @@ class FirewallClientActionTest {
         assertTrue(shell.actions.isEmpty())
     }
 
+    @Test fun tunnelFailuresKeepTheBridgesSpecificReasonForEveryAction() {
+        val cases = listOf<Pair<() -> FirewallClient.Operation, String>>(
+            { client.enableTunnelProtection(FirewallClient.TunnelMode.PINNED) } to
+                "Kernel WireGuard tun* conflict or unreadable interface types; rename conflicting WireGuard before enabling. Nothing changed.",
+            { client.enableTunnelProtection(FirewallClient.TunnelMode.DENY_ONLY) } to
+                "Could not read the current tunnels; nothing changed",
+            { client.refreshTunnelHooks() } to
+                "Could not add a tunnel hook. Recheck tunnel protection."
+        )
+        cases.forEach { (request, reason) ->
+            shell.respond = { ShellResult(0, bridgeOutput(operation = "FAILED", message = reason)) }
+            val result = request()
+            assertFalse(result.success)
+            assertEquals(reason, result.explanation)
+        }
+        assertEquals(listOf("tunnel-on PINNED", "tunnel-on DENY_ONLY", "tunnel-refresh"), shell.actions.toList())
+    }
+
     @Test fun removingPartialRulesHasItsOwnAction() {
         client.removePartialRules()
         assertEquals(listOf("remove-partial"), shell.actions.toList())

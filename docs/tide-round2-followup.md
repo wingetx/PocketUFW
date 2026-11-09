@@ -91,3 +91,51 @@ rollback procedure. Keep the original evidence; capture into a new directory.
 If activation recurs, capture the exact x/y, window focus/input-target diagnostics,
 activity stack and monotonic bridge timestamps together before another interaction.
 Do not label the input mechanism resolved solely because singleTask is configured.
+
+## Tunnel failure reporting
+
+The bridge previously discarded both engine output streams and substituted a
+Tailscale authorization explanation for every tunnel-on/refresh failure. It now
+captures that same invocation and selects the first exact allowlisted user-facing
+reason. Probe noise, raw netfilter output and later cleanup notices cannot replace
+it. Hook failures use UI wording instead of a CLI command name. Unknown failures
+get separate PINNED, DENY-ONLY and refresh messages without guessing a cause or
+claiming that nothing changed. No diagnostics are evaluated as shell code or
+passed through as arbitrary bridge fields. Existing postcondition verification,
+failure state, timeouts and kernel policy are unchanged.
+
+Tests reproduce the actual WireGuard `tun50` conflict with verified Tailscale,
+assert no rule installation on refusal, and cover real authorization refusal,
+DENY-ONLY while physical protection is off, and IPv6 hook-add failure/rollback.
+Bridge fixtures exercise busy, unknown and misleading multiline diagnostics;
+Kotlin and Compose tests verify that each action keeps its specific explanation
+and clears its spinner. The captured invocation is also exercised under a local
+AOSP Android 15 mksh host build, including a killed bridge whose engine child must
+retain the lifecycle lock. This is not a Bionic/toybox device test.
+
+For the supervised error-message check, start with verified Tailscale, physical
+protection ACTIVE and tunnel protection OFF. Save both filter tables. Confirm
+`tun50` does not already exist, then create the same temporary kernel WireGuard
+fixture used in round two (`su -c 'ip link add tun50 type wireguard'`). Request
+Enable PINNED in Settings. Require the WireGuard/interface-types explanation,
+stopped spinner, tunnel OFF and unchanged tables. Delete **only that test-created**
+fixture (`su -c 'ip link del tun50'`). The denied request must not automatically
+retry or switch modes. DENY-ONLY and refresh failure mapping are covered without
+damaging live rules in the host tests above.
+
+## Local validation
+
+- 273 JVM tests passed, including Compose pointer/progress/navigation regressions.
+- 151 bridge, Tide integration and UI-contract tests passed; 17 diagnostic/mksh
+  checks passed; 14 bridge timing/regression checks passed. No skipped checks in
+  these final runs. Android 15 mksh source: AOSP `platform/external/mksh`,
+  `android15-release` at `695e5e5`, built in `/tmp` without installation.
+- Timing model: pinned dashboard 9.47 s; tunnel-status 4.48 s (host fixture,
+  not a new phone measurement).
+- `:app:lintDebug` passed with the existing three warnings/two informational
+  notices; `:app:compileDebugAndroidTestKotlin` passed. Android task-routing
+  instrumentation is compiled only; supervised hardware acceptance is pending.
+- All 207 original round-two evidence files have unchanged SHA-256 hashes.
+  The main checkout remains at `144f739` with its original untracked documents.
+
+No APK assembly/signing, phone operations, merge or push was performed.

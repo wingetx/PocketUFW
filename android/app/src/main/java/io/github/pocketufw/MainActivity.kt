@@ -20,7 +20,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.lifecycle.Lifecycle
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.CancellationException
@@ -36,14 +38,24 @@ import kotlinx.coroutines.withContext
 private const val MAX_SUPERSEDED_RECHECKS = 2
 
 class MainActivity : ComponentActivity() {
+    // Instance-scoped seam for lifecycle/input tests; production always uses FirewallClient.
+    internal var newClient: (Context) -> FirewallGateway = { FirewallClient(it) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             TideTheme {
-                PocketScreen(remember { FirewallClient(applicationContext) })
+                PocketScreen(remember { newClient(applicationContext) })
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Both entry points only bring the existing screen forward. In particular, never
+        // rebuild its composition, clear busy, or interpret a launch as a firewall action.
+        setIntent(intent)
     }
 }
 
@@ -81,6 +93,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     val scope = rememberCoroutineScope { Dispatchers.Main.immediate }
     val context = LocalContext.current.applicationContext
     val windowInfo = LocalWindowInfo.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     suspend fun adopt(dashboard: FirewallClient.Dashboard) {
         // Read the stamp before publishing state, so a subsequent focus check
@@ -173,7 +186,9 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     fun perform(kind: TideOperation? = null, vpn: Boolean = false, transientSuccess: Boolean = false,
                 onResult: (FirewallClient.Operation?) -> Unit = {},
                 work: () -> FirewallClient.Operation) {
-        if (busy) return
+        // A retained callback from a paused screen cannot authorize a new mutation.
+        // Already-started work keeps its busy guard and completes normally across relaunches.
+        if (busy || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         busy = true
         operation = kind
         message = ""

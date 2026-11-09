@@ -11,7 +11,7 @@
 > [!WARNING]
 > **Experimental beta, not a security guarantee.** PocketUFW requires root and a compatible `iptables`/`ip6tables` backend. Coverage varies by device, kernel, interface naming, and Android/OEM rules. It is not a replacement for Android's security model.
 
-**Release status (November 2026):** The [public GitHub releases](https://github.com/wingetx/PocketUFW/releases) currently contain older signed betas, most recently Beta 4. This repository's development branch contains newer Tide, tunnel-filtering, and audit fixes that **have not yet been published as a signed release**. The Android build metadata may still say `0.1.0-beta5`; that alone does not mean a new beta is available.
+**Latest signed beta:** [PocketUFW 0.1.0-beta5](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5) is published as an **experimental prerelease**, with Tide, optional tunnel filtering, and audited engine fixes. [Download the APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/PocketUFW-0.1.0-beta5.apk) and [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/SHA256SUMS.txt). Its source is tagged `v0.1.0-beta5` at commit `508cb29`; later documentation edits do not change that release.
 
 ## What it does
 

@@ -1,12 +1,11 @@
 # PocketUFW Android beta
 
-**Local tunnel review follow-up (November 7, 2026):** optional tunnel filtering
-remains off by default and enabled only from CLI. The Firewall screen now reports
-pinned or deny-only policy, installed and changed verified tailnet addresses, and
-REAUTHORIZE separately from enforcement. It offers confirmed tunnel-only removal
-when tunnel protection is DEGRADED; physical rules and boot opt-in stay in place.
-No tunnel enable switch or counter display was added. No build from this follow-up
-has been signed or deployed. See [policy and limits](../docs/tunnel-filtering.md).
+**Beta 5 update:** The Tide interface provides optional **PINNED** and
+**DENY-ONLY** tunnel filtering in Settings, off by default, with separate physical
+and tunnel counters. It reports pinned and observed tailnet destinations,
+REAUTHORIZE when addresses change, and tunnel-only recovery when DEGRADED.
+Tunnel rules are not restored after reboot. See [tunnel policy and limitations](../docs/tunnel-filtering.md)
+and the [signed Beta 5 release](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5).
 
 
 **0.1.0-beta5 (versionCode 26)** is a testing release of the one-switch
@@ -28,8 +27,8 @@ Tailscale and WireGuard configurations belong to their own applications.
 Independent security testing strengthened boot restoration, tile state reporting,
 Tailscale listener verification, and root-operation serialization. The Tide
 interface adds an explicit confirmation before turning protection off and keeps
-UDP exception customization under Settings. A signed Beta 5 release is not
-published by this source/version change alone.
+UDP exception customization under Settings. **Beta 5 is published** with the original
+PocketUFW release certificate; debug builds remain signed with a debug key.
 
 ## Beta4: counter refresh UI reliability
 
@@ -140,14 +139,14 @@ No changes to root operations, Android tile behavior, or kernel rules.
 
 - **Optional** Magisk late-start boot restoration, disabled until the owner enables it. No persistent Android process; supported only on Magisk for now.
 - No continuous VPN monitoring, and no automatic repair of degraded or unexpectedly reset rules after boot
-- The Android GUI checks the existence of required firewall rules, not end-to-end
-  packet enforcement. Upstream Android or OEM chains may still bypass these hooks.
+- The Android GUI checks installed rules and reports known or unknown coverage,
+  not end-to-end packet enforcement. Earlier Android or OEM accepts can still bypass these hooks.
 - Currently assumes Android devices with `iptables` legacy support and physical
   interfaces matching the CLI's documented patterns
 - Root authorization must be granted by the phone owner in their root manager.
   A superuser toast **may still appear once** per user-triggered operation,
   depending on Magisk/root-manager settings; PocketUFW does not suppress it.
-- No stable release signing key; **debug-signed only**
+- Official GitHub Beta 2 and newer APKs use the original release certificate. Locally assembled debug builds use a separate debug certificate and cannot update release builds in place.
 
 ## Build on Arch
 

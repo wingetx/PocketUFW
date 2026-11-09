@@ -97,8 +97,9 @@ internal class FakeGateway(
 
     /** Inspections served in order before falling back to [dashboard]. */
     val nextInspections = java.util.concurrent.ConcurrentLinkedQueue<Dashboard>()
-    /** While set, inspections and firewall switches block here, to hold the UI busy. */
+    /** While set, requests block here so UI tests can observe progress before completion. */
     @Volatile var gate: java.util.concurrent.CountDownLatch? = null
+    @Volatile var requestFailure: Exception? = null
     /** The result of the next firewall switch, boot switch or removal. */
     @Volatile var operationSuccess = true
     @Volatile var operationMessage = "done"
@@ -107,14 +108,17 @@ internal class FakeGateway(
         tileContext?.let { TileStatusStore.publish(it, dash.snapshot) }
     }
     private fun operation() = Operation(operationSuccess, operationMessage, dashboard)
-    private fun waitAtGate() { gate?.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+    private fun waitAtGate() {
+        gate?.await(10, java.util.concurrent.TimeUnit.SECONDS)
+        requestFailure?.let { throw it }
+    }
 
     override fun inspectDashboard(): Dashboard {
         calls += "inspect"
         waitAtGate()
         return publish(nextInspections.poll() ?: dashboard)
     }
-    override fun refreshCounterActivity(): RuleActivity { calls += "counters"; return counterRead }
+    override fun refreshCounterActivity(): RuleActivity { calls += "counters"; waitAtGate(); return counterRead }
     override fun changeProtection(activate: Boolean): Operation {
         calls += if (activate) "enable" else "disable"
         waitAtGate()
@@ -122,18 +126,22 @@ internal class FakeGateway(
     }
     override fun removeTunnelRules(): Operation {
         calls += "tunnel-off"
+        waitAtGate()
         return operation()
     }
     override fun enableTunnelProtection(mode: FirewallClient.TunnelMode): Operation {
         calls += "tunnel-on:${mode.name}"
+        waitAtGate()
         return operation()
     }
     override fun refreshTunnelHooks(): Operation {
         calls += "tunnel-refresh"
+        waitAtGate()
         return operation()
     }
     override fun removePartialRules(): Operation {
         calls += "remove-partial"
+        waitAtGate()
         return operation()
     }
     /** What the next removal reports. */
@@ -152,10 +160,12 @@ internal class FakeGateway(
     }
     override fun refreshVerifiedPorts(): Operation {
         calls += "vpn-refresh"
+        waitAtGate()
         return Operation(vpnSuccess, vpnMessage, publish(dashboard))
     }
     override fun resetCounters(): Operation {
         calls += "reset-counters"
+        waitAtGate()
         return Operation(true, BridgeMessages.RESET_OK, dashboard)
     }
     override fun updateUdpExceptions(ipv4: String, ipv6: String, committed: Boolean): Operation {

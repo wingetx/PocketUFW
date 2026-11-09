@@ -20,9 +20,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.lifecycle.Lifecycle
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -35,14 +38,24 @@ import kotlinx.coroutines.withContext
 private const val MAX_SUPERSEDED_RECHECKS = 2
 
 class MainActivity : ComponentActivity() {
+    // Instance-scoped seam for lifecycle/input tests; production always uses FirewallClient.
+    internal var newClient: (Context) -> FirewallGateway = { FirewallClient(it) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             TideTheme {
-                PocketScreen(remember { FirewallClient(applicationContext) })
+                PocketScreen(remember { newClient(applicationContext) })
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Both entry points only bring the existing screen forward. In particular, never
+        // rebuild its composition, clear busy, or interpret a launch as a firewall action.
+        setIntent(intent)
     }
 }
 
@@ -56,6 +69,7 @@ class MainActivity : ComponentActivity() {
 internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Boolean) = ::openAndroidAppInfo) {
     var state by remember { mutableStateOf(FirewallClient.Snapshot()) }
     var busy by remember { mutableStateOf(false) }
+    var operation by remember { mutableStateOf<TideOperation?>(null) }
     var message by remember { mutableStateOf("") }
     var transientMessage by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
@@ -79,6 +93,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     val scope = rememberCoroutineScope { Dispatchers.Main.immediate }
     val context = LocalContext.current.applicationContext
     val windowInfo = LocalWindowInfo.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     suspend fun adopt(dashboard: FirewallClient.Dashboard) {
         // Read the stamp before publishing state, so a subsequent focus check
@@ -115,6 +130,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     fun recheck(showFeedback: Boolean = false, keepResult: Boolean = false) {
         if (busy) return
         busy = true
+        operation = TideOperation.CHECK
         if (!keepResult) {
             message = ""
             transientMessage = false
@@ -146,12 +162,14 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                     FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE)
                 failed = !verifiedState || (keepResult && failed)
                 if (showFeedback) transientMessage = verifiedState && snapshot.rootReady
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 verificationInDoubt = true
                 failed = true
                 message = "Live firewall state could not be verified."
+                if (error is CancellationException) throw error
             } finally {
                 busy = false
+                operation = null
             }
             if (needsAnotherRead(finished)) recheck(showFeedback, keepResult)
         }
@@ -165,11 +183,14 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
         }
     }
 
-    fun perform(vpn: Boolean = false, transientSuccess: Boolean = false,
+    fun perform(kind: TideOperation? = null, vpn: Boolean = false, transientSuccess: Boolean = false,
                 onResult: (FirewallClient.Operation?) -> Unit = {},
                 work: () -> FirewallClient.Operation) {
-        if (busy) return
+        // A retained callback from a paused screen cannot authorize a new mutation.
+        // Already-started work keeps its busy guard and completes normally across relaunches.
+        if (busy || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         busy = true
+        operation = kind
         message = ""
         transientMessage = false
         counterRefreshNote = ""
@@ -187,13 +208,15 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                 message = outcome.explanation
                 transientMessage = transientSuccess && outcome.success
                 onResult(outcome)
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 verificationInDoubt = true
                 failed = true
                 message = "Firewall operation could not be verified. Recheck kernel state."
                 onResult(null)
+                if (error is CancellationException) throw error
             } finally {
                 busy = false
+                operation = null
                 vpnRefreshing = false
             }
             if (needsAnotherRead(finished)) recheck(keepResult = true)
@@ -206,12 +229,14 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             val inspected = withContext(Dispatchers.IO) { client.inspectDashboard() }
             finished = inspected
             adopt(inspected)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             verificationInDoubt = true
             failed = true
             message = "Could not inspect live firewall state. Check root access and try again."
+            if (error is CancellationException) throw error
+        } finally {
+            firstRead = false
         }
-        firstRead = false
         if (needsAnotherRead(finished)) recheck(keepResult = true)
     }
 
@@ -259,6 +284,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     fun refreshCounters() {
         if (busy || verificationInDoubt || state.protection != FirewallClient.Protection.ACTIVE) return
         busy = true
+        operation = TideOperation.REFRESH_COUNTERS
         counterRefreshing = true
         // Clear the last result, or it would hide this one and lend it its color.
         message = ""
@@ -288,13 +314,15 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                     verificationInDoubt = true
                     counterRefreshNote = fresh.error ?: "Counter refresh failed; previous counts kept."
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 verificationInDoubt = true
                 counterRefreshError = true
                 counterRefreshNote = "Counter refresh failed; previous counts kept."
+                if (error is CancellationException) throw error
             } finally {
                 counterRefreshing = false
                 busy = false
+                operation = null
             }
             if (needsAnotherRead(null)) recheck(keepResult = true)
         }
@@ -305,7 +333,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     TideScreen(
         ui = TideUiState(
             snapshot = state, counters = counters, report = kernelReport,
-            busy = busy, message = message, failed = failed, transientMessage = transientMessage,
+            busy = busy, operation = operation, message = message, failed = failed, transientMessage = transientMessage,
             counterRefreshing = counterRefreshing, counterRefreshNote = counterRefreshNote,
             counterRefreshError = counterRefreshError, verificationInDoubt = verificationInDoubt,
             checkedAt = checkedAt, vpnRefreshing = vpnRefreshing,
@@ -318,7 +346,7 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.protection in listOf(
                         FirewallClient.Protection.ACTIVE, FirewallClient.Protection.INACTIVE
-                    )) perform { client.changeProtection(next) }
+                    )) perform(if (next) TideOperation.ACTIVATE else TideOperation.DEACTIVATE) { client.changeProtection(next) }
             },
             changeBootRestoration = { next ->
                 if (!busy && verifiedActive && state.bootRestore in listOf(
@@ -328,37 +356,38 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             refreshCounters = { refreshCounters() },
             resetCounters = {
                 if (!busy && verifiedActive && state.rootReady) {
-                    perform(transientSuccess = true) { client.resetCounters() }
+                    perform(TideOperation.RESET_COUNTERS, transientSuccess = true) { client.resetCounters() }
                 }
             },
             refreshVpn = {
                 if (!busy && verifiedActive &&
                     state.udpConfigMode == FirewallClient.UdpConfigMode.AUTOMATIC) {
-                    perform(vpn = true) { client.refreshVerifiedPorts() }
+                    perform(TideOperation.REFRESH_PORTS, vpn = true) { client.refreshVerifiedPorts() }
                 }
             },
             removeTunnelRules = {
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.tunnelFilter in setOf(FirewallClient.TunnelFilter.ON, FirewallClient.TunnelFilter.DEGRADED)) {
-                    perform { client.removeTunnelRules() }
+                    perform(TideOperation.REMOVE_TUNNEL) { client.removeTunnelRules() }
                 }
             },
             enableTunnelProtection = { mode ->
                 if (!busy && verifiedActive && state.rootReady &&
                     state.tunnelFilter == FirewallClient.TunnelFilter.OFF &&
                     mode in setOf(FirewallClient.TunnelMode.PINNED, FirewallClient.TunnelMode.DENY_ONLY)) {
-                    perform { client.enableTunnelProtection(mode) }
+                    perform(if (mode == FirewallClient.TunnelMode.PINNED) TideOperation.ENABLE_PINNED
+                        else TideOperation.ENABLE_DENY_ONLY) { client.enableTunnelProtection(mode) }
                 }
             },
             refreshTunnelHooks = {
                 if (!busy && verifiedActive && state.rootReady && state.tunnelFilter == FirewallClient.TunnelFilter.ON) {
-                    perform { client.refreshTunnelHooks() }
+                    perform(TideOperation.REFRESH_TUNNEL) { client.refreshTunnelHooks() }
                 }
             },
             removePartialRules = {
                 if (!busy && !verificationInDoubt && state.rootReady &&
                     state.protection == FirewallClient.Protection.DEGRADED) {
-                    perform { client.removePartialRules() }
+                    perform(TideOperation.REMOVE_PARTIAL) { client.removePartialRules() }
                 }
             },
             prepareUninstall = {

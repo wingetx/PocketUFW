@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -129,14 +130,60 @@ internal fun TideNotice(message: String, error: Boolean = false) {
 
 @Composable
 internal fun TidePrimaryButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-                              icon: Int? = null, enabled: Boolean = true) {
-    Button(onClick, modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), enabled = enabled,
+                              icon: Int? = null, enabled: Boolean = true,
+                              loading: Boolean = false, loadingLabel: String? = null) {
+    Button(onClick, modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), enabled = enabled && !loading,
+        colors = if (loading) ButtonDefaults.buttonColors(disabledContainerColor = Mint,
+            disabledContentColor = MaterialTheme.colorScheme.onPrimary) else ButtonDefaults.buttonColors(),
         shape = TideActionShape, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
-        if (icon != null) {
-            TideIcon(icon, tint = LocalContentColor.current)
-            Spacer(Modifier.width(10.dp))
+        TideActionContent(label, loading, loadingLabel, icon,
+            progressColor = MaterialTheme.colorScheme.onPrimary)
+    }
+}
+
+@Composable
+internal fun TideOutlinedButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
+                               enabled: Boolean = true, loading: Boolean = false,
+                               loadingLabel: String? = null, icon: Int? = null) {
+    OutlinedButton(onClick, modifier.fillMaxWidth().heightIn(min = TideActionMinHeight),
+        enabled = enabled && !loading, shape = TideActionShape) {
+        TideActionContent(label, loading, loadingLabel, icon)
+    }
+}
+
+/** Decorative animation; its containing control owns the accessible progress state. */
+@Composable
+internal fun TideProgressIndicator(color: Color = Mint) {
+    CircularProgressIndicator(Modifier.size(20.dp).clearAndSetSemantics {}, color = color, strokeWidth = 2.dp)
+}
+
+/** Measure both labels so a busy control never changes its footprint, even at large text. */
+@Composable
+internal fun TideActionContent(label: String, loading: Boolean = false, loadingLabel: String? = null,
+                               icon: Int? = null, progressColor: Color = Mint) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.semantics {
+        if (loading) {
+            contentDescription = label
+            stateDescription = loadingLabel ?: "Working…"
+            progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+            liveRegion = LiveRegionMode.Polite
         }
-        Text(label)
+    }) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = if (loading) Modifier.alpha(0f).clearAndSetSemantics {} else Modifier) {
+            if (icon != null) {
+                TideIcon(icon, tint = LocalContentColor.current)
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+        if (loadingLabel != null) Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = if (!loading) Modifier.alpha(0f).clearAndSetSemantics {} else Modifier) {
+            // No animation or extra accessibility node is created while idle.
+            if (loading) TideProgressIndicator(progressColor) else Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(loadingLabel, style = MaterialTheme.typography.labelLarge, color = if (loading) progressColor else LocalContentColor.current)
+        }
     }
 }
 

@@ -13,10 +13,11 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false"
         android:supportsRtl="true">
-        <!-- Rotation must not recreate this: a new Activity meant a new root session,
-             and it dropped the guard against starting a second operation. -->
+        <!-- MAIN and QS_TILE_PREFERENCES must reuse the same screen and operation guard,
+             including when the task is in the background. Rotation also keeps that state. -->
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
             android:exported="true">
             <intent-filter>

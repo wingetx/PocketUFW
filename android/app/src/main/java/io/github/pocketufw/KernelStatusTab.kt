@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallClient.KernelReport?,
                             busy: Boolean, recheck: () -> Unit,
-                            verificationInDoubt: Boolean = false) {
+                            verificationInDoubt: Boolean = false, checking: Boolean = false) {
     var ipv6 by rememberSaveable { mutableStateOf(false) }
     var raw by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -112,11 +112,9 @@ internal fun KernelStatusTab(state: FirewallClient.Snapshot, report: FirewallCli
                 }
             }
         }
-        OutlinedButton(onClick = recheck, enabled = !busy && state.protection != FirewallClient.Protection.CHECKING,
-            modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight), shape = TideActionShape) {
-            TideIcon(R.drawable.tide_refresh, tint = LocalContentColor.current)
-            Spacer(Modifier.width(8.dp)); Text("Recheck kernel rules")
-        }
+        TideOutlinedButton("Recheck kernel rules", recheck,
+            enabled = !busy && state.protection != FirewallClient.Protection.CHECKING,
+            loading = checking, loadingLabel = "Checking…", icon = R.drawable.tide_refresh)
         Text("Read-only snapshot, not a continuous monitor. Physical hooks enter POCKETUFW_IN; " +
             "optional tun+ and WireGuard hooks enter POCKETUFW_VPN separately. " +
             "Earlier Android/OEM ACCEPT rules may bypass these INPUT hooks. " +

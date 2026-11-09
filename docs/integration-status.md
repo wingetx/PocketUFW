@@ -1,5 +1,99 @@
 # PocketUFW current handoff (2026-11-08)
 
+## Approved UI integration
+
+The owner reports that Claude's supervised Frankenpixel validation of
+`fix/tide-operation-progress` at `5e2a82c` passed all five acceptance priorities:
+20 Statistics-pill taps while Off caused zero unintended activations; repeated
+MAIN and Quick Settings launches retained one Activity; loading animations and
+the persistent Recheck label worked; busy operations survived relaunches without
+duplicate commands; and WireGuard conflicts displayed the correct reason.
+The UI is approved for local integration.
+
+The four follow-up commits (`06053a3`, `1c1e198`, `035bfd5`, `5e2a82c`) are
+merged into local `feature/tunnel-inbound-filter` with the full existing history,
+including the uninstall-lifecycle fixes. The integration has no conflict
+resolutions or runtime changes relative to the hardware-approved `5e2a82c` tree;
+only handoff notes and an outdated source-contract assertion are updated. Prior
+acceptance evidence and Jay's two untracked design documents are preserved.
+
+Combined integration verification:
+
+- Full Python discovery ran 650 cases. The only failure was a source contract
+  expecting the retired inline Tailscale-refresh button syntax. It now checks
+  that there is exactly one callback and label; its targeted rerun passed. Final
+  coverage is 649 passing cases and one optional icon-transparency check skipped
+  because Pillow is unavailable. mksh and isolated real-kernel tests ran.
+- All 273 Android JVM/Compose tests passed. Lint passed with the existing three
+  warnings and two informational notices. Debug APK assembly and Android
+  instrumentation-test compilation passed; instrumentation was not device-run.
+- Outputs are isolated under `android/build/integration-20261109T041436Z/`.
+  The temporary setup initially hit AGP's working-directory override and
+  Robolectric's relative resource paths; those bootstrap problems were corrected
+  without changing app code. Only the failed/unfinished checks were resumed;
+  passing Python cases, APK assembly and test compilation were not repeated.
+- The debug APK contains the loading indicators, Recheck label, Statistics fixes,
+  tunnel controls and specific failure messages. All seven bundled scripts match
+  the repository sources byte-for-byte. Its manifest uses singleTask, and its
+  certificate is the normal Android Debug certificate, not a release certificate.
+- All 702 preserved document/evidence files retain their hashes and modification
+  times. Neither Jay's documents nor any earlier acceptance/build evidence was
+  overwritten. Detailed logs, the preserved-file manifest and APK checks are in
+  the isolated output directory.
+
+APK: `android/build/integration-20261109T041436Z/app/outputs/apk/debug/app-debug.apk`.
+SHA-256: `7af66751b684c890c0a1fb74ebd3c3e6e8944a5c03ac27f9679950ccf9896c36`.
+
+The next release gate is the planned final independent security review before
+preparing a signed beta. Pinned destinations still do not authenticate packets:
+another tunnel can inject tailnet-source packets into a still-local pinned
+destination. Optional tunnel protection remains off by default and does not
+restore after reboot. See [tunnel filtering](tunnel-filtering.md) for that existing
+policy and other documented validation limits. No merge to `main`, push,
+release signing or phone deployment is part of this integration.
+
+## Historical isolated loading-feedback follow-up
+
+The following records the earlier worktree validation, superseded by the approval
+and integration above.
+
+This follow-up is on `fix/tide-operation-progress`, based on `144f739`, in the
+separate `~/toolbox/projects/PocketUFW-tide-loading` worktree. Claude's acceptance
+checkout and its evidence remain untouched on `feature/tunnel-inbound-filter`.
+The change has not been merged into that baseline.
+
+Recheck (toolbar, home and Kernel rules), firewall on/off, counter refresh/reset,
+Tailscale port refresh, tunnel enable/refresh/removal and partial-rule recovery
+show a 20 dp Material 3 indeterminate indicator inside the requested control.
+Labels say Checking, Activating, Deactivating, Refreshing, Resetting or Removing.
+The existing busy guard still serializes requests; operation identity only
+selects presentation. Confirmation dialogs are unchanged and dismiss before
+work starts. Inline feedback replaces the redundant busy banner for these
+operations so it cannot push the active control below the viewport. Result and
+error messages keep their existing placement and dismissal behavior.
+
+Idle and busy labels are measured together to keep control bounds stable.
+Hidden measurement labels and the decorative arc are excluded from accessibility;
+the control exposes its action name, contextual state, indeterminate progress and
+a polite live region. Progress is cleared in the existing `finally` blocks.
+Coroutine cancellation keeps verification uncertain and propagates after cleanup,
+preventing a cancelled request from scheduling a follow-up inspection. No new
+cancel action is offered, nor is a stopped UI coroutine claimed to undo a root
+operation. Existing timeout/recheck behavior is preserved.
+
+Validation: **261 Android JVM tests** (including 18 focused progress tests),
+**23 Python UI/tile contracts**, Android lint with no errors, and Android test
+compilation pass. The focused tests hold gateway calls open, check immediate
+feedback and duplicate-tap rejection, cover success/failure/timeout/cancellation,
+verify exact gateway calls and stable large-text bounds, and compare animation
+frames. Light/dark and 200% text host renders are in this worktree's
+`android/app/build/reports/tide-progress/`; displayed counters are test fixtures.
+Real TalkBack announcements and animation smoothness still need the next supervised
+device check, after acceptance of the separate baseline. No device access,
+signing, deployment, push, merge, dependencies, polling or engine changes.
+
+## UI acceptance baseline
+
 Current local work is on `feature/tunnel-inbound-filter`, including the unmerged
 uninstall lifecycle changes. The follow-up to Claude's independent review at
 `ebe9019` added explicit deny-only tunnel filtering, separate stale-pin/connectivity

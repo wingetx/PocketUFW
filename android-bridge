@@ -151,6 +151,44 @@ read_boot_status() {
   printf '%s\n' "$boot_status"
 }
 
+# Keep user-facing engine reasons, not raw VPN/iptables diagnostics or arbitrary
+# key=value output. Exact matches bound the UI message and keep it single-line.
+# The first recognized failure wins: an EXIT cleanup notice is not its cause.
+tunnel_failure_message() {
+  case "$ACTION:${TUNNEL_REQUEST:-}" in
+    tunnel-on:PINNED) message='PINNED tunnel protection could not be enabled. Recheck status before retrying.' ;;
+    tunnel-on:DENY_ONLY) message='DENY-ONLY tunnel protection could not be enabled. Recheck status before retrying.' ;;
+    *) message='Tunnel hooks could not be refreshed. Recheck tunnel protection before retrying.' ;;
+  esac
+  while IFS= read -r tunnel_line; do
+    case "$tunnel_line" in
+      'pocketufw: Kernel WireGuard tun* conflict or unreadable interface types; rename conflicting WireGuard before enabling. Nothing changed.'|\
+      'pocketufw: Cannot authorize tailnet destinations; start Tailscale and verify both node addresses. No deny-only fallback; nothing changed.'|\
+      'pocketufw: Invalid tailnet destinations; nothing changed'|\
+      'pocketufw: Could not read the current tunnels; nothing changed'|\
+      'pocketufw: Too many tunnels to hook; nothing changed'|\
+      'pocketufw: Another PocketUFW operation is still running; no changes made. Try again.'|\
+      'pocketufw: AFWall+ active; tunnel filter refused'|\
+      'pocketufw: Firewall disabled or degraded; tunnel filter not installed'|\
+      'pocketufw: Firewall degraded; no refresh attempted'|\
+      'pocketufw: Tunnel filter is off; nothing to refresh'|\
+      'pocketufw: Cannot read tunnel hooks; nothing changed'|\
+      'pocketufw: Tunnel rules could not be verified; rolling back tunnel rules'|\
+      'pocketufw: Cannot locate tunnel hook; rolling back refresh')
+        message=${tunnel_line#pocketufw: }; return ;;
+      'pocketufw: Tunnel filter already installed. Use tunnel-refresh, or tunnel-off first.')
+        message='Tunnel protection is already installed. Refresh tunnel hooks, or turn tunnel protection off before changing modes.'; return ;;
+      'pocketufw: Could not add a tunnel hook; inspect tunnel-status'|\
+      'pocketufw: Could not remove a tunnel hook; inspect tunnel-status'|\
+      'pocketufw: Tunnel refresh could not be verified; inspect tunnel-status')
+        message=${tunnel_line#pocketufw: }
+        message="${message%; inspect tunnel-status}. Recheck tunnel protection."; return ;;
+    esac
+  done <<EOF
+$tunnel_output
+EOF
+}
+
 outcome='NONE'
 message=''
 created_now=0
@@ -202,7 +240,7 @@ case "$ACTION" in
     if [ "$ACTION" = tunnel-on ] && [ "$TUNNEL_REQUEST" = DENY_ONLY ]; then
       set -- "$@" --deny-only
     fi
-    if sh "$ENGINE" "$@" >/dev/null 2>&1; then
+    if tunnel_output=$(sh "$ENGINE" "$@" 2>&1); then
       outcome=SUCCESS
       if [ "$ACTION" = tunnel-on ]; then
         message='Tunnel protection enabled until restart. Physical rules and boot opt-in were kept.'
@@ -211,7 +249,7 @@ case "$ACTION" in
       fi
     else
       outcome=FAILED
-      message='Tunnel operation failed. PINNED requires verified Tailscale ownership and both node addresses; there is no automatic fallback. Inspect status before retrying.'
+      tunnel_failure_message
     fi
     ;;
   tunnel-off)

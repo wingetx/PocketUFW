@@ -135,8 +135,10 @@ class TideAuditContractTests(unittest.TestCase):
         self.assertNotIn('actions.refreshVpn', settings)
         self.assertNotIn('Refresh VPN', settings)
         self.assertNotIn('Refresh Tailscale ports', settings)
-        self.assertEqual(screen.count('onClick = actions.refreshVpn'), 1)
-        self.assertEqual(screen.count('else "Refresh Tailscale ports"'), 1)
+        # The shared loading button keeps a stable idle label and takes its callback
+        # positionally. Count the action/label, not the retired inline-button syntax.
+        self.assertEqual(screen.count('actions.refreshVpn'), 1)
+        self.assertEqual(screen.count('"Refresh Tailscale ports"'), 1)
         self.assertNotIn('"Refresh VPN"', screen)
         self.assertIn('not your current VPN connection', screen)
         self.assertNotIn('Refresh VPN', SCREENS["UdpExceptionsPanel.kt"])

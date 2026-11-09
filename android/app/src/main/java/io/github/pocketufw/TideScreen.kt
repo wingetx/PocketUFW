@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.*
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -45,8 +44,17 @@ internal data class TideUiState(
     val removal: TideRemoval = TideRemoval.NONE,
     val removalDetail: String = "",
     /** Only routine successful reads/resets expire. Warnings and operation notices stay. */
-    val transientMessage: Boolean = false
+    val transientMessage: Boolean = false,
+    val operation: TideOperation? = null
 )
+
+/** Presentation identity only; busy remains the single operation guard. */
+internal enum class TideOperation {
+    CHECK, ACTIVATE, DEACTIVATE, REFRESH_COUNTERS, RESET_COUNTERS, REFRESH_PORTS,
+    ENABLE_PINNED, ENABLE_DENY_ONLY, REMOVE_TUNNEL, REFRESH_TUNNEL, REMOVE_PARTIAL
+}
+internal fun TideUiState.working(operation: TideOperation) = busy && this.operation == operation
+private enum class TideCheckControl { TOOLBAR, FIREWALL, KERNEL }
 
 /** How the last Remove PocketUFW attempt ended. CLEAN means the read-back found nothing left. */
 internal enum class TideRemoval { NONE, CLEAN, INCOMPLETE }
@@ -90,6 +98,7 @@ internal fun TideScreen(
     var removeConfirmOpen by rememberSaveable { mutableStateOf(false) }
     var tunnelRemoveConfirmOpen by rememberSaveable { mutableStateOf(false) }
     var offConfirmOpen by rememberSaveable { mutableStateOf(false) }
+    var checkControl by remember { mutableStateOf(TideCheckControl.TOOLBAR) }
     // Never let a pending OFF confirmation outlive the verified ACTIVE state.
     LaunchedEffect(ui.snapshot.protection, ui.snapshot.rootReady, ui.verificationInDoubt, ui.busy) {
         if (ui.snapshot.protection != FirewallClient.Protection.ACTIVE ||
@@ -110,6 +119,8 @@ internal fun TideScreen(
     }
 
     val note = when {
+        // Inline progress must not shrink the viewport and push its own control offscreen.
+        ui.busy && ui.operation != null -> ""
         ui.busy && !ui.counterRefreshing ->
             if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Working…"
         ui.message.isNotEmpty() -> ui.message
@@ -150,20 +161,12 @@ internal fun TideScreen(
         containerColor = Background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp)
-                .heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (exceptions) IconButton(onClick = { exceptions = false }) {
-                    TideIcon(R.drawable.tide_back, description = "Back")
-                }
-                Text("Pocket", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = if (exceptions) 0.dp else 8.dp))
-                Text("UFW", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Normal)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = actions.recheck, enabled = !ui.busy &&
-                    ui.snapshot.protection != FirewallClient.Protection.CHECKING) {
-                    TideIcon(R.drawable.tide_refresh, description = "Recheck firewall status")
-                }
-            }
+            TideTopBar(
+                showBack = exceptions, onBack = { exceptions = false },
+                checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.TOOLBAR,
+                recheckEnabled = !ui.busy && ui.snapshot.protection != FirewallClient.Protection.CHECKING,
+                onRecheck = { checkControl = TideCheckControl.TOOLBAR; actions.recheck() }
+            )
         },
         bottomBar = {
             Column(Modifier.background(Background).navigationBarsPadding()) {
@@ -203,17 +206,17 @@ internal fun TideScreen(
                     val vpnAllowed = !ui.busy && !ui.verificationInDoubt &&
                         ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
                         ui.snapshot.rootReady && vpnReason == null
-                    OutlinedButton(shape = TideActionShape, onClick = actions.refreshVpn,
-                        enabled = vpnAllowed, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                        Text(if (ui.vpnRefreshing) "Refreshing Tailscale ports…" else "Refresh Tailscale ports",
-                            style = MaterialTheme.typography.labelLarge)
-                    }
+                    TideOutlinedButton("Refresh Tailscale ports", actions.refreshVpn, enabled = vpnAllowed,
+                        loading = ui.working(TideOperation.REFRESH_PORTS), loadingLabel = "Refreshing…")
                     Text("Checks Tailscale's UDP listeners, not your current VPN connection.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)
                     if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
                         color = Muted)
                 }
-                destination == TideDestination.FIREWALL -> TideFirewall(ui, actions, appVersion,
+                destination == TideDestination.FIREWALL -> TideFirewall(ui, actions.copy(recheck = {
+                    checkControl = TideCheckControl.FIREWALL; actions.recheck()
+                }), appVersion,
+                    checkingAction = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.FIREWALL,
                     requestRemoval = { removeConfirmOpen = true },
                     requestTunnelRemoval = { tunnelRemoveConfirmOpen = true },
                     requestDisable = { offConfirmOpen = true },
@@ -226,7 +229,9 @@ internal fun TideScreen(
                     }
                     if (inspection == TideInspection.COUNTERS) TideCounters(ui, actions)
                     else KernelStatusTab(ui.snapshot, ui.report, ui.busy,
-                        actions.recheck, verificationInDoubt = ui.verificationInDoubt)
+                        { checkControl = TideCheckControl.KERNEL; actions.recheck() },
+                        verificationInDoubt = ui.verificationInDoubt,
+                        checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.KERNEL)
                 }
                 else -> TideSettings(ui, actions, appVersion, onExceptions = { exceptions = true })
             }
@@ -295,7 +300,7 @@ internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): Strin
 }
 
 @Composable
-private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String,
+private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String, checkingAction: Boolean,
                          requestRemoval: () -> Unit, requestDisable: () -> Unit,
                          requestTunnelRemoval: () -> Unit,
                          showRules: () -> Unit, showSettings: () -> Unit) {
@@ -400,7 +405,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     }
     restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
 
-    // Keep verified appearance steady during other operations; the existing busy guard ignores taps.
+    // The last verified status stays steady while the requested action is in progress.
     TidePrimaryButton(
         label = when {
             checking -> "Checking kernel protection"
@@ -411,7 +416,13 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             else -> "Recheck status"
         }, icon = if (!attention && (active || state.protection == FirewallClient.Protection.INACTIVE))
             R.drawable.tide_power else icon,
-        enabled = !checking && (attention || state.rootReady),
+        enabled = !ui.busy && !checking && (attention || state.rootReady),
+        loading = checkingAction || ui.working(TideOperation.ACTIVATE) || ui.working(TideOperation.DEACTIVATE),
+        loadingLabel = when {
+            attention || checking -> "Checking…"
+            active -> "Deactivating…"
+            else -> "Activating…"
+        },
         modifier = Modifier.testTag("firewall-action"),
         onClick = { if (!ui.busy) {
             if (attention) actions.recheck()
@@ -423,10 +434,10 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TideLink("Inspect kernel rules", onClick = showRules)
         if (state.rootReady && !ui.verificationInDoubt) {
             if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
-                OutlinedButton(onClick = requestTunnelRemoval, enabled = !ui.busy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove tunnel rules only") }
-            else OutlinedButton(onClick = requestRemoval, enabled = !ui.busy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Remove partial PocketUFW rules") }
+                TideOutlinedButton("Remove tunnel rules only", requestTunnelRemoval, enabled = !ui.busy,
+                    loading = ui.working(TideOperation.REMOVE_TUNNEL), loadingLabel = "Removing…")
+            else TideOutlinedButton("Remove partial PocketUFW rules", requestRemoval, enabled = !ui.busy,
+                loading = ui.working(TideOperation.REMOVE_PARTIAL), loadingLabel = "Removing…")
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

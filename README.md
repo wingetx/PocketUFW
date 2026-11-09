@@ -1,124 +1,124 @@
 # PocketUFW 🐧
 
-## Your phone runs Linux. Give it a Linux firewall.
+<img src="assets/branding/pocketufw-neon-penguin.png" alt="PocketUFW's armored penguin mascot" width="145" align="right">
 
-**Real, stateful, kernel-level inbound packet filtering for rooted Android. Not another app-blocking switchboard.**
+### Your phone runs Linux. Give it a Linux firewall.
 
-Most Android firewall apps start with an app list. PocketUFW starts with the network itself. It uses Android's existing Linux `iptables` and `ip6tables` firewall to enforce a straightforward policy on supported physical interfaces:
+**A small, open-source inbound firewall for rooted Android.** PocketUFW uses the phone's Linux kernel firewall rather than occupying Android's VPN slot. The Tide interface makes protection, VPN compatibility, and real kernel counters visible without an always-running app or an account.
 
-- **Outgoing traffic:** leave it alone.
-- **Replies to connections your phone initiated:** let them in.
-- **Unsolicited incoming packets:** drop them by default, with allowances for essential network protocols and explicitly permitted VPN listeners.
+**The policy is simple:** allow outbound traffic, allow replies to connections the phone started, and deny other inbound traffic on the interfaces PocketUFW covers. Essential networking and verified VPN-listener exceptions are handled separately.
 
-**It's an actual packet-filtering firewall, not an app-by-app internet permission manager.** No sprawling allowlists, no occupying Android's VPN slot, and no continuous traffic-capture service. Once installed, the kernel enforces the rules even when PocketUFW's interface is closed.
+> [!WARNING]
+> **Experimental beta, not a security guarantee.** PocketUFW requires root and a compatible `iptables`/`ip6tables` backend. Coverage varies by device, kernel, interface naming, and Android/OEM rules. It is not a replacement for Android's security model.
 
-Think UFW's *deny incoming, allow outgoing* philosophy, adapted for rooted Android. PocketUFW is independent software, not UFW and not affiliated with Canonical.
+**Release status (November 2026):** The [public GitHub releases](https://github.com/wingetx/PocketUFW/releases) currently contain older signed betas, most recently Beta 4. This repository's development branch contains newer Tide, tunnel-filtering, and audit fixes that **have not yet been published as a signed release**. The Android build metadata may still say `0.1.0-beta5`; that alone does not mean a new beta is available.
 
-**What you get:** one protection switch, readable rules, live kernel packet counters, optional one-shot Magisk boot restoration, and manual verified Tailscale listener refresh. No accounts, advertising, analytics, or continuously running background app.
+## What it does
 
-**This development branch:** Tide Settings also offers optional **PINNED** and
-**DENY-ONLY** tunnel protection, off by default and never restored after reboot.
-The expandable **Statistics** pill separates physical and tunnel kernel counters;
-one confirmed reset clears all owned counters without rebuilding rules. See
-[tunnel filtering](docs/tunnel-filtering.md) for authorization, recovery and the
-remaining address-trust limitations. The UI integration has not been deployed.
+| Feature | Behavior |
+| --- | --- |
+| **Physical inbound firewall** | Drops unsolicited IPv4 and IPv6 input on supported Wi-Fi, cellular, and CLAT interfaces |
+| **Optional tunnel protection** | Independently filters incoming traffic on Android `tun*` interfaces and detected kernel WireGuard interfaces |
+| **Outgoing connections** | Leaves Android's outbound firewall rules unchanged |
+| **Statistics** | Shows real packets and bytes matched by PocketUFW's DROP and established/related rules, separated by physical/tunnel and IPv4/IPv6 |
+| **Live rule inspection** | Shows the verified rule chains, exceptions, incomplete coverage, and raw kernel rules |
+| **Quick Settings tile** | Deliberate toggle with a fresh state check; long-press opens PocketUFW |
+| **Boot restoration** | Optional one-shot **Magisk** restore for physical filtering only |
+| **Network compatibility** | Does not use `VpnService`, leaving the VPN slot available for apps such as Tailscale or Proton VPN |
 
-> **Beta, not a security guarantee.** Version `0.1.0-beta5` is intended for testing, not unattended or production security use. Root and compatible `iptables`/`ip6tables` are required; Shizuku-only operation is not supported. Default coverage is limited to supported physical interfaces; tunnel filtering requires a separate opt-in. Earlier Android/OEM `INPUT` rules can bypass PocketUFW. Forwarded/tethered traffic is outside its scope. See the [v1 scope](docs/v1-scope.md) and [hardware validation](docs/hardware-validation.md) for details.
+Tide includes a single primary firewall switch, an expandable **Statistics** pill, a labeled **Recheck** action, progress indicators, and separate controls for advanced tunnel and VPN settings. Resetting counters clears PocketUFW-owned measurements without rebuilding the firewall or changing Android/OEM rules.
 
-**Permanent Android app identity:** Starting with `0.1.0-beta2`,
-the app ID is `io.github.pocketufw`. The earlier beta1 used the
-temporary `io.github.pocketufw.alpha` ID. This one-time change
-requires uninstalling the old app before using the renamed version.
+PocketUFW has **no accounts, ads, analytics, or application telemetry**. It does not continuously capture packets, retain traffic history, or run a persistent Android foreground service.
 
-**Beta3:** A manual **Reset counters** action zeroes only owned IPv4/IPv6
-packet counters, without restarting protection; a reduced-glow shield-penguin
-launcher image and a shield-only Quick Settings tile complete the beta polish.
+## How the filtering works
 
-**Beta4:** The **Refresh counters** control now reads kernel counters through
-a dedicated read-only operation, shows explicit progress/results, and displays
-Last checked down to the second. Refresh never resets counters or changes rules.
+### 1. Physical protection
 
-## Design philosophy
+PocketUFW creates its own `POCKETUFW_IN` and `POCKETUFW_TS` chains in the IPv4 and IPv6 filter tables. Its four supported interface patterns are:
 
-**Debian calm, in your pocket.** PocketUFW aims to be simple, dependable, and easy to trust. The firewall engine can be sophisticated; the experience should not be.
+```text
+wlan+    rmnet+    v4-rmnet+    v4-wlan+
+```
 
-- **Sensible defaults:** allow outgoing traffic and block unsolicited incoming traffic, with essential network protocols preserved.
-- **One primary switch:** the user's main decision is protection on or off. General-purpose custom rules are not part of v1; a small VPN UDP exception control exists only for connection compatibility.
-- **Verified protection:** never display a reassuring "protected" indicator or state unless the app has verified that the relevant rules are installed and effective.
-- **Set it and forget it:** handle restarts, VPN port changes, and recovery with minimal interaction. Magisk boot restoration is implemented on the Moto; continuous VPN tracking and broader recovery are **not yet implemented**.
-- **No unnecessary baggage:** no accounts, ads, analytics, or app-by-app permission maze.
-- **Plain-language failures:** tell users what is working, what is not, and whether intervention is necessary.
+The last two cover cellular and Wi-Fi 464XLAT interface names. The firewall admits established/related replies and necessary control traffic (including DHCP, ICMP, mDNS, and ESP), optionally allows verified Tailscale UDP listeners, and drops other inbound matches.
 
-**Quiet when everything works. Unmistakable when something doesn't.**
+It **does not flush, replace, or change the default policies of** Android/OEM `INPUT`, `OUTPUT`, or `FORWARD` chains. Its hooks are appended after existing Android rules, so an earlier `ACCEPT` may bypass them. Interfaces with different vendor names may also be outside coverage.
 
-### Visual identity (selected direction)
+A verified ruleset is **not** proof that every incoming path is filtered. If the detailed rule report or interface inventory is missing, the app reports **coverage unknown**; known bypasses and uncovered interfaces are reported as partial coverage.
 
-**Terminal penguin**, not a shield. A small friendly, geometric penguin holding a dark terminal with a muted-green `>_` prompt. Flat charcoal, off-white, and restrained green. Minimal shapes, legible at Android launcher icon sizes, no elaborate mascots or security clichés.
+### 2. Optional tunnel protection
 
-- Wordmark: `Pocket` in charcoal, `UFW` in muted green.
-- Separate the icon from the wordmark so the launcher icon works without text.
-- Use the same restrained palette and typography for the one-switch app interface.
-- Neon artwork is the app launcher and Home image; a separate monochrome penguin is used for Quick Settings.
+VPNs can deliver decrypted packets to virtual interfaces that the physical firewall does not cover. The optional tunnel filter adds its own `POCKETUFW_VPN` chain and separate counters. It is **off by default** and is **not restored after a reboot**, even when physical boot restoration is enabled.
 
-## Firewall policy
+| Mode | What it means |
+| --- | --- |
+| **PINNED** | Initially verifies Tailscale's ownership and the phone's IPv4 and IPv6 node addresses, then allows tailnet-source traffic addressed to those exact saved destinations while filtering other unsolicited tunnel input |
+| **DENY-ONLY** | No tailnet exception. Drops unsolicited incoming tunnel packets, including new peer-initiated Tailscale traffic, while allowing established/related replies |
 
-- Incoming from a physical interface: **deny by default** after essential network allowances.
-- Established inbound replies: **allow**.
-- Outbound: **left unchanged** (other apps/system policy may still restrict it).
-- Tailscale virtual interfaces and WireGuard tunnels: **not filtered directly** by default, though their *underlying* UDP listeners may require explicit allowances. The [optional tunnel filter](docs/tunnel-filtering.md) is enabled only from the command line and is off by default. Default pinned mode requires verified Tailscale ownership to authorize exact node destinations, then retains those pins across reconnects. Explicit `tunnel-on --deny-only` needs no Tailscale proof and adds no tailnet exemption, including for later Tailscale connections. Android reports stale pins separately from protection and offers tunnel-only recovery. Packet sources and ingress ownership are not authenticated. The follow-up to the independent review at `ebe9019` remains local and has not been deployed; earlier phone results used the previous whole-range exemption.
-- Android's preexisting INPUT/OUTPUT/FORWARD rules and their default policies: **never flushed or modified**.
-- PocketUFW owns two filter chains per address family: `POCKETUFW_IN` for inbound policy and `POCKETUFW_TS` for verified Tailscale UDP exceptions, with tagged hooks into `INPUT`. The optional tunnel filter adds `POCKETUFW_VPN` while it's on, and leaves those two alone.
-- The standalone CLI does not persist rules after reboot. The Android alpha offers **optional Magisk boot restoration**, tested on the Moto; no continuous background monitoring.
+PINNED retains its authorized destinations across ordinary Tailscale reconnects. If the phone's addresses change, the UI reports **REAUTHORIZE**; it never silently broadens the allowance. A DEGRADED tunnel filter has a **tunnel-only recovery** action that leaves physical protection intact.
 
-## Why this exists
+**Important trust boundary:** PINNED authenticates addresses during initial setup, **not the source of every subsequent packet**. Another qualifying tunnel could inject a packet claiming a tailnet source and aimed at a pinned local destination. The app documents this limitation, but PINNED is **not equivalent to cryptographically authenticated Tailscale-only ingress**. Earlier Android/OEM accepts can still bypass both modes. See [tunnel policy and threat model](docs/tunnel-filtering.md).
 
-On Android, "firewall" often means choosing which apps get Wi-Fi or mobile data. That can be useful, but **controlling an app's internet access is not the same job as denying unsolicited inbound connections**.
+### 3. Tailscale UDP exceptions
 
-PocketUFW takes the familiar Linux host-firewall approach: use connection tracking to recognize replies to traffic the phone initiated, allow essential network traffic, and deny other incoming packets on supported physical interfaces. Its rules live in the kernel's existing netfilter/iptables machinery. They don't depend on a packet-capture VPN, a constantly running Android service, or an app-by-app blocklist.
+Physical firewall allowances can preserve verified Tailscale UDP listeners. Listener ports can change after Tailscale restarts; without a continuous watcher, existing exceptions may become stale until a manual refresh. A failed refresh may retire ports proven unused, but it will not guess new ones or silently change committed manual settings.
 
-Other Android tools can use genuine kernel firewall rules too. **PocketUFW's difference is its policy: connection state and direction, not app permissions.** It complements Android's existing security model rather than replacing it.
+This is a compatibility feature, **not** a general-purpose open-port editor.
 
-**Default-deny incoming. Keep outgoing working. Verify the rules.**
+## Understanding Statistics
 
-### Important limitations in 0.1.0-beta1
+- **Dropped** means a packet matched one of PocketUFW's actual kernel DROP rules, not necessarily that an attacker was stopped.
+- **Established/related** counts recognized return traffic that reached PocketUFW's chains. It isn't a count of *all* packets arriving on the phone.
+- **Tunnel** and **physical** counters are separate. Values may change between two successive reads.
+- **Reset** zeroes the counters owned by PocketUFW, not other Android or VPN counters. New packets can increment them immediately.
 
-1. **Do not enable alongside AFWall+'s active rules**. PocketUFW checks for its output hook and refuses to enable. Android or other firewall tools may still own unknown chains.
-2. **No continuous Tailscale port tracking.** `--auto-tailscale` verifies current Android app-owned sockets when enabling rules. Use `refresh` after a port change to update only the exception chain. There is no background monitor. Failed explicit refreshes can retire proven-stale allowances while preserving sockets whose ownership is unknown. A blocked direct UDP listener can push Tailscale onto encrypted relays.
-3. Assumes physical interfaces named `wlan*`, `rmnet*`, `v4-rmnet*`, or `v4-wlan*` (Wi-Fi 464XLAT). Network interfaces differ across phones. Devices with `eth*`, `ccmni*`, or other names **will not be covered**.
-4. Does not filter **tethered/FORWARD traffic**, or, unless the optional tunnel filter is on, traffic arriving through the *inner* `tun*` VPN interfaces.
-   Optional pinned mode requires initial verified Tailscale node addresses; explicit deny-only mode has no tailnet exemption. Neither restores after reboot. See [its address-trust limitations](docs/tunnel-filtering.md).
-5. `INPUT` hooks are appended **after system/OEM rules**. This preserves Android behavior but means an earlier terminal ACCEPT can bypass PocketUFW. It is not a universal host firewall guarantee.
-6. Current profile uses broad allowances for IPv6 ICMP, ESP, DHCP and mDNS to favor compatibility; they will be tightened after multi-device tests.
-7. No automatic watchdog or general rule-repair service. The Android app can install an opt-in one-shot Magisk boot hook; interrupted operations or later rule resets may still require manual intervention. Root access must remain available.
-8. **Hardware tested, not production-ready.** IPv4/IPv6 ingress blocking, removal, Proton VPN coexistence, and Magisk reboot restoration were validated on a rooted Moto G 5G (2024). Other kernels, carriers, root managers, and unattended operation still require testing. See [hardware validation](docs/hardware-validation.md).
-9. DNS filtering (such as Quad9) and VPN encryption are separate from PocketUFW's inbound firewall policy.
+**Seeing zero drops is normal.** Home routers, carriers, Android, and VPNs may stop unsolicited traffic before PocketUFW ever sees it. Deliberate IPv4/IPv6 Wi-Fi and cellular probes have verified that supported rules drop matching traffic on a test phone, but a quiet counter is not proof of either failure or total protection.
 
-## Android app (beta)
+PocketUFW does **not** currently provide per-app outbound blocking, domain/ad blocking, live DNS interception, or a PCAP-style traffic log. These are possible future directions, **not features in this beta**.
 
-The Kotlin/Jetpack Compose app lives in [`android/`](android/). It has a terminal-penguin launcher icon, one protection switch, root/VPN status, verified rule checks, and manual VPN refresh. Alpha5 combines each control action and its status/counter verification into **one root request**. Opt-in Magisk boot restoration is available without running a background app. **Use on test devices only.**
+## Requirements and compatibility
 
-Build and installation instructions are in [the Android README](android/README.md). The debug APK is written locally under `android/app/build/outputs/apk/debug/`, not committed into Git.
+- Root access with functioning `su`. Magisk is hardware tested; KernelSU and APatch compatibility is not yet established.
+- A compatible IPv4/IPv6 legacy `iptables` implementation with the needed conntrack matches. Pure `nftables`/other backend variants are not established.
+- Android API 26 or later for the app; successful operation still depends on the phone's actual kernel and interfaces.
+- **Do not activate alongside AFWall+'s existing custom inbound setup.** PocketUFW has a basic conflict check, not universal detection of other firewall managers.
 
-### Background operation and recovery roadmap
+**Hardware evidence:** The physical firewall, controlled packet drops, boot behavior, VPN coexistence, and multiple UI flows have been tested on a Pixel 9a (Android 17) and a Moto G 5G (2024). Selected tunnel and cellular tests ran on the Pixel 9a. Wi-Fi 464XLAT hook matching has passed isolated real-Linux-kernel testing, **not** an end-to-end Android IPv6-only/NAT64 Wi-Fi trial. These are targeted experiments, not certification of every Android device.
 
-- **Already works:** the Linux kernel filters inbound packets independently of whether the Android UI is visible, force-stopped, or closed. The optional Magisk late-start hook restores the policy after a reboot. No Android foreground service is needed.
-- **Optional active Quick Settings tile:** opening the shade does not request
-  root; it displays the last verified state with a check timestamp. A tap
-  performs a fresh kernel-verified toggle, requiring an unlock when locked.
-  The tile does not poll root or run a background service. Magisk may show a
-  toast after an explicit operation. On Pixel 9a, the owner confirmed the
-  active-tile change stopped repeated shade-open Magisk toasts.
-- **Not yet solved:** later Android/OEM firewall rewrites, interrupted rule installation, unexpected interface changes, and Tailscale listener-port rotations. The existing boot hook runs only once.
-- **Next design target:** an opt-in, low-overhead root-side health/recovery mechanism with explicit ownership checks, bounded retries, and honest failure reporting. It must refuse to overwrite unknown or conflicting chains, preserve boot and VPN functionality, and be removable through the off switch. Avoid repeatedly invoking `su` or keeping a foreground Android service alive.
-- **Optional visibility:** packet totals can be shown on demand or in an opt-in notification. Counts are DROP-rule matches, never automatic claims of attacks or blocked trackers. No notification permission, constant polling, or packet-history collection should be required for ordinary protection.
+See [hardware validation](docs/hardware-validation.md), [compatibility notes](docs/compatibility.md), and [latest audit follow-up](docs/medium-audit-followup.md).
 
-### Uninstalling
+## Install and first use
 
-Use **Settings → Remove PocketUFW**. It turns the firewall off, removes PocketUFW's rules and Magisk boot files, reads both back to confirm they're gone, then opens Android's app page, where you tap Uninstall. If anything can't be confirmed, it says what's left and doesn't open that page.
+1. Download a **signed** APK from [GitHub Releases](https://github.com/wingetx/PocketUFW/releases), checking the release tag and notes for the features actually included. Development/debug builds are not interchangeable with release-signed APKs.
+2. Install it on a rooted, compatible phone. Open PocketUFW and grant root in your root manager if prompted.
+3. Tap **Recheck**. Confirm the app can read the live kernel state before enabling protection.
+4. Tap **Turn firewall on**. Inspect the result and the reported coverage. Tunnel protection is an independent, optional choice under **Settings**.
+5. If desired, enable **Restore after reboot**. This restores **physical** filtering using Magisk's one-shot boot hook, not the optional tunnel filter.
 
-Android doesn't tell an app it's being uninstalled, so no other route can clean up first. **After an ordinary uninstall, the rules keep dropping unsolicited incoming traffic until the next restart.** A restart clears them. If boot restoration was armed, the hook then sees that the app and its data are gone, and removes itself and its files without restoring anything. Nothing stays running to watch for an uninstall.
+For initial testing, keep a trusted recovery route (such as USB ADB), especially when your phone depends on cellular, Wi-Fi calling, local services, or VPN connectivity. Installing or opening PocketUFW does not itself install firewall rules.
 
-To clear the rules without restarting, run this with root:
+### Updating older betas
+
+**The current four-hook engine does not silently migrate a three-hook installation.** An older active installation may show **DEGRADED** after upgrading because its installed rules do not match the new verifier.
+
+On the upgraded app, use **Remove partial PocketUFW rules** if offered and verified, then turn the firewall back on to install the four-hook policy. Recheck your **Restore after reboot** setting and ensure its root-owned engine snapshot has been refreshed. Until that happens, an older Magisk hook may restore the old three-hook rules at the next boot.
+
+The original Beta 1 used the different package ID `io.github.pocketufw.alpha`; Beta 2 onward uses `io.github.pocketufw`. Android treats those as distinct apps. Remove the old app's owned firewall rules and boot hook before uninstalling that old package.
+
+See [the audited upgrade notes](docs/medium-audit-followup.md). **Never assume APK installation alone replaces already-running kernel rules.**
+
+### Uninstalling safely
+
+Prefer **Settings → Remove PocketUFW**. It removes verified PocketUFW-owned rules and Magisk boot files, checks that cleanup completed, and only then opens Android's uninstall screen.
+
+An ordinary uninstall cannot remove already-installed kernel rules immediately. They can remain until the next reboot; a properly disarmed/self-cleaning boot hook then removes its own files rather than restoring rules. **Avoid `pm uninstall -k`:** keeping app data can cause an existing boot hook to keep restoring the firewall.
+
+<details>
+<summary>Advanced recovery: manual removal of PocketUFW's kernel rules (root)</summary>
+
+Use the in-app removal flow whenever possible. The following is an emergency fallback for a known PocketUFW ruleset, **not a general iptables reset**. It removes PocketUFW's owned kernel chains/hooks; it **does not disarm its Magisk boot hook**, which must be cleaned up separately to prevent restoration on reboot.
+
+To clear the rules without restarting, run the following from a trusted root shell after confirming the rules really belong to PocketUFW:
 
 ```sh
 for t in iptables ip6tables; do
@@ -135,102 +135,35 @@ for t in iptables ip6tables; do
 done
 ```
 
-`pm uninstall -k` keeps the app's data, and the hook treats that as an app that may come back: it keeps restoring the firewall at each boot until you reinstall and remove it, or delete `/data/adb/service.d/pocketufw.sh` and `/data/adb/pocketufw`. Android's normal uninstall screen doesn't offer this.
+Recheck both filter tables and the Magisk service hook before trusting the resulting state.
 
-## Preview without changing anything
+</details>
 
-```sh
-sh pocketufw doctor
-sh pocketufw plan --tailscale-udp4 46867 --tailscale-udp6 43504
-# Root-only, read-only runtime port discovery:
-sh pocketufw plan --auto-tailscale
-```
+## Build from source
 
-The ports above are **examples from one Pixel's observed session**, not universal or permanent defaults. Tailscale may choose different values.
-
-## Command-line operation (root required; use only on authorized devices)
+PocketUFW is written in Kotlin/Jetpack Compose with a small root-side shell engine. A local debug APK requires Java 17 and an Android SDK with API 36:
 
 ```sh
-# From a tested root shell, only after disabling conflicting AFWall rules:
-sh pocketufw enable --tailscale-udp4 PORT4 --tailscale-udp6 PORT6
-# Or, if the bundled vpn-probe finds verified Tailscale sockets:
-sh pocketufw enable --auto-tailscale
-sh pocketufw status
-# Read-only kernel DROP counters and an administrator-style report:
-sh pocketufw activity
-sh pocketufw verbose
-# Refresh verified Tailscale UDP ports without rebuilding the firewall:
-sh pocketufw refresh
-sh pocketufw disable
+cd android
+./gradlew :app:assembleDebug
 ```
 
-## Verifying what it owns
+Output: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-`activity` returns structured IPv4/IPv6 DROP and established/related rule counters; `verbose` presents a human-readable summary. Tide shows these measurements in the expandable **Statistics** pill and the existing **Activity → Counters** view, with physical and optional tunnel measurements kept separate. Counters reset on request or when rules are reinstalled. Nonzero DROP counts prove that packets matched PocketUFW’s rules, not that every incoming path is protected. **Activity → Kernel rules** shows the actual INPUT hooks, inbound chains and VPN listener exceptions, including a raw-rule view. Opening these views uses the last inspection; manual counter refresh is a separate lightweight root read.
+This is **debug-signed**, not an official release-signed update. Root permission must be granted by the phone owner. Use [the Android build guide](android/README.md) for SDK setup and [the v1 scope](docs/v1-scope.md) for the intentionally limited product boundaries.
 
-A verified ruleset and known traffic coverage are separate. If the detailed rule
-report or live interface inventory is missing or incomplete, Tide shows **coverage
-unknown** instead of implying complete filtering. Known gaps remain visible as
-partial coverage. Reports must contain complete, counted sections for both address
-families; an oversized root response is rejected, not silently truncated. See the
-[medium audit follow-up](docs/medium-audit-followup.md) for limits and the Wi-Fi
-464XLAT upgrade transition.
+For developers with a tested root shell, the engine also provides read-only commands such as `doctor`, `plan`, `verify`, `activity`, `verbose` and `tunnel-status`. Rule-changing commands are not required for ordinary app use. All tests involving firewall changes should have a known rollback/recovery path.
 
+## Project principles
 
-```sh
-iptables -w -S POCKETUFW_IN
-ip6tables -w -S POCKETUFW_IN
-iptables -w -S POCKETUFW_TS
-ip6tables -w -S POCKETUFW_TS
-iptables -w -S INPUT | grep PocketUFW
-ip6tables -w -S INPUT | grep PocketUFW
-sh pocketufw tunnel-status
-```
+**Make the kernel do the enforcement. Make the UI tell the truth.**
 
-No `iptables -F`, `iptables -P INPUT DROP`, or global `iptables-restore` is used. Clean removal is a design requirement, not an optional feature.
+- **Own only our rules:** never indiscriminately flush Android/OEM policies.
+- **Distinguish verification from coverage:** ACTIVE, DEGRADED, unknown coverage, stale authorization, and unsupported interfaces are different conditions.
+- **Be quiet by default:** no telemetry, background packet capture, or constant root polling.
+- **Stay reversible:** explicit on/off, narrowly owned cleanup, verified removal, and optional boot restoration.
+- **Prioritize usable security:** the main interface stays simple even when the engine isn't.
 
-## What v1 actually ships
+PocketUFW is MIT-licensed; see [LICENSE](LICENSE). The firewall policy is inspired by [UFW](https://launchpad.net/ufw), but the project is independent, does not use UFW's source code, and is not affiliated with Canonical. Thanks to the upstream Linux, Android, Tailscale, and open-source projects whose documentation made the investigation possible.
 
-**Deny unsolicited incoming on supported physical interfaces; leave outgoing
-rules alone.** One toggle, accurate DROP counters, optional verified VPN
-listener exceptions, and a one-shot boot restore. No general custom-rule
-editor, arbitrary root scripts, per-app traffic blocking, VPN slot, or
-always-running daemon. Beta1 is a tested prototype, not a production security release. See [the minimal v1 checklist](docs/v1-scope.md).
-
-## Security & release checklist
-
-- [ ] More tests for failed `iptables` operations and partial cleanup
-- [x] Verified Tailscale UDP discovery and manual dual-stack live refresh (mock-tested; removal hardware-tested)
-- [x] One privileged session per dashboard inspection or action, with real status and counter verification (Moto-tested)
-- [x] Opt-in Magisk boot restoration on the Moto (other devices still unverified)
-- [ ] Automatic monitoring of Tailscale restarts and listening-port changes
-- [x] Read-only `verify` command checks both families' chains, default DROP rule, and physical interface hooks
-- [ ] Non-destructive firewall recovery/watchdog
-- [ ] Verify Android 17 kernel/root tool support and Android 14–16 compatibility
-- [ ] Wi-Fi/cellular handover, DHCP renewal, IPv6 RA/NDP, hotspot and IMS calls
-- [ ] Avoid public release claims until independently tested on multiple devices
-- [ ] Document safe interaction with AFWall+ and other managers
-
-## Sources and acknowledgements
-
-Inspired by UFW's **policy design**, with independently authored shell commands:
-
-- [UFW `before.rules`](https://sources.debian.org/src/ufw/0.36.2-10/conf/before.rules)
-- [UFW `before6.rules`](https://sources.debian.org/src/ufw/0.36.2-10/conf/before6.rules)
-- [Tailscale UDP firewall guidance](https://tailscale.com/docs/reference/faq/firewall-ports)
-
-See `LICENSE` for PocketUFW's own source. No UFW source code is copied into this prototype.
-
-### Alpha11 UI clarity
-
-The optional Quick Settings tile's **long press** resolves to PocketUFW's main dashboard through Android's `ACTION_QS_TILE_PREFERENCES` activity intent filter (instead of the default App Info). A short tap acts on the state the tile showed, after checking the live kernel state, and only verifies when that state is unknown. Initial app launch displays a neutral, explicit kernel-checking panel until the first live root inspection completes, rather than showing false OFF switches. Changing Magisk boot restoration no longer temporarily dims the unrelated firewall switch. Pending the tester's visual confirmation on the Moto.
-
-### Alpha12: optional advanced UDP exception editor
-
-The Status tab's **About / edit VPN UDP exceptions** expands a plain-language explanation and an advanced, explicitly warned editor. Only one incoming UDP port per IPv4/IPv6 family is supported, with blank meaning no exception. **Experimental** applies only to the current live firewall rules; **Committed** persists across app launches and firewall restarts, and is restored by the opt-in one-shot Magisk boot hook on reboot. A second confirmation is required before committing. **Reset to automatic VPN exceptions** restores verified Tailscale listeners and clears a committed choice, or undoes an experimental edit, after a successful refresh. Normal Refresh VPN refuses to silently replace committed ports. Manual ports can become stale if Tailscale rotates its listeners, potentially falling back to DERP.
-
-Committed settings are a root-validated, strictly formatted file in Android's app-owned **device-protected private storage**, not a permanent global Android setting. Uninstalling the app removes its data; the Magisk service self-disarms at next boot if the app is absent, and live rules last until that restart (see [Uninstalling](#uninstalling)). No new Android foreground service, extra network permission, or background polling is required. Test builds are still experimental; compatibility and hardware reboot behavior of alpha12's new committed mode need validation on the Moto.
-
-### Alpha13: precise lifetimes and reset control
-
-The advanced UDP editor now explicitly states that **Experimental** edits survive app closure and Tailscale reconnect, but are lost when firewall rules are rebuilt (turning protection off/on or rebooting); Refresh VPN can overwrite them in Automatic mode. **Committed** stays saved until changed, reset to automatic detection, or app data is removed; it is restored on future firewall enables, and after reboot only with Magisk boot restoration enabled. The **Reset to automatic VPN exceptions** action is offered for both Experimental and Committed states, with a confirmation describing verified Tailscale listener discovery, including the possibility that no listener is currently detected. The engine's existing safe refresh/reset path is reused. No extra services, permissions, or firewall-engine modifications were required for alpha13.
+**FOSS be fossin'. 🦩**

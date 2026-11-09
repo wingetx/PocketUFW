@@ -29,7 +29,8 @@ Do not infer firewall capabilities from an installed APK or an `su` binary. Veri
 
 - Initially verified on Motorola Android 15 (kernel 5.4) with **legacy** `iptables` and `ip6tables`; Pixel 9a Android 17 inspected separately.
 - Android's native firewall stack may use iptables, eBPF, or vendor chains. We must not flush, reorder, or bypass system-owned rules.
-- Current physical-interface patterns cover `wlan+`, `rmnet+`, and `v4-rmnet+`. Many other vendors may use `ccmni*`, `wwan*`, `eth*`, or other identifiers. Unknown interfaces must be called out explicitly rather than silently claimed protected.
+- Current physical-interface patterns cover `wlan+`, `rmnet+`, `v4-rmnet+`, and `v4-wlan+` (Wi-Fi 464XLAT). Many other vendors may use `ccmni*`, `wwan*`, `eth*`, or other identifiers. Unknown interfaces must be called out explicitly rather than silently claimed protected.
+- An older three-hook installation is DEGRADED under this verifier until explicitly removed and enabled again with the fourth hook. Inspection does not silently reinstall rules. Cleanup handles both old and new owned hook signatures and preserves other owners' rules.
 - `iptables-nft` and pure `nftables` require explicit backend testing; using an incompatible firewall backend may produce misleading success messages.
 - No phone requires rooting just for PocketUFW. The app should clearly say when the full kernel firewall is unavailable.
 

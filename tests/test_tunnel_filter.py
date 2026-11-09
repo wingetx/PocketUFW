@@ -240,6 +240,8 @@ class WhatGetsHooked(Base):
         self.proven_tailscale('tun-auth')
         self.device('ipsec0')
         self.device('v4-rmnet16', tun_flags='0x1001')
+        self.device('v4-wlan0', tun_flags='0x1001')
+        self.device('v4-wlan9', wireguard=True)
         self.device('wlan9', wireguard=True)
         self.device('rmnet9', wireguard=True)
         self.device('-j', wireguard=True)
@@ -664,7 +666,7 @@ class Report(Base):
         result = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('POCKETUFW_VPN', result.stdout)
-        self.assertEqual(result.stdout.count('hook4_'), 3)
+        self.assertEqual(result.stdout.count('hook4_'), 4)
 
     def test_with_the_filter_on_its_hooks_and_rules_continue_the_same_lists(self):
         self.proven_tailscale()
@@ -673,7 +675,7 @@ class Report(Base):
         result = self.report()
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
-        self.assertIn(f'hook4_04=-A INPUT {HOOK_TUN}', lines)
+        self.assertIn(f'hook4_05=-A INPUT {HOOK_TUN}', lines)
         self.assertIn('main4_09=-A POCKETUFW_VPN -s 100.64.0.0/10 -d 100.64.0.1/32 -i tun+ -j ACCEPT', lines)
         self.assertIn('main6_09=-A POCKETUFW_VPN -s fd7a:115c:a1e0::/48 -d fd7a:115c:a1e0::1/128 -i tun+ -j ACCEPT', lines)
         self.assertIn('main4_10=-A POCKETUFW_VPN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT', lines)

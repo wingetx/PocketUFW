@@ -95,9 +95,9 @@ emit_family() {
   case "$input" in
     *'--comment PocketUFW'*) emit_bypasses || return 1 ;;
   esac
-  # Three physical hooks, plus at most MAX_TUNNEL_HOOKS when the tunnel filter is on.
+  # Four physical hooks, plus at most MAX_TUNNEL_HOOKS when the tunnel filter is on.
   hook_limit=6
-  [ "$has_tunnel" -eq 0 ] || hook_limit=11
+  [ "$has_tunnel" -eq 0 ] || hook_limit=12
   emit_rules hook "$fam" "$input" "$hook_limit" || return 1
   emit_rules main "$fam" "$main" 12 || return 1
   if [ "$has_tunnel" -eq 1 ]; then

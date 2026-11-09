@@ -22,7 +22,7 @@ class TideUiTest {
 
     private fun family(ipv6: Boolean = false) = FirewallClient.RuleFamily(
         inputPolicy = "ACCEPT",
-        hooks = listOf("wlan+", "rmnet+", "v4-rmnet+").map {
+        hooks = listOf("wlan+", "rmnet+", "v4-rmnet+", "v4-wlan+").map {
             "-A INPUT -i $it -m comment --comment PocketUFW -j POCKETUFW_IN"
         },
         // Beta 4 kernel order: control traffic precedes INVALID, as reported.

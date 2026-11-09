@@ -2,7 +2,7 @@
 
 **Status: development branch, optional and off by default.** Tide Settings exposes PINNED and DENY-ONLY modes, status, hook refresh and tunnel-only recovery. The owner reports that Claude's Frankenpixel validation at `d7baeb2` passed all five security behaviors, the timing retest averaged about 9.7 seconds for full inspections, and basic UI acceptance at `2c83438` passed all exercised functions. The local UI acceptance corrections below still need a focused device check, including actual TalkBack, light mode, large text and safety states. The earlier packet measurements in this document describe the historical whole-range policy. No watcher or tunnel boot restoration is added.
 
-PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their three hooks stay byte for byte the same, and the tunnel rules are separate chains with separate counters.
+PocketUFW's physical policy never sees traffic inside a tunnel. This optional filter covers that gap and changes nothing about the physical policy: `POCKETUFW_IN`, `POCKETUFW_TS` and their physical hooks stay byte for byte the same when toggling tunnel filtering, and the tunnel rules are separate chains with separate counters. Physical coverage now includes four patterns: `wlan+`, `rmnet+`, `v4-rmnet+` and `v4-wlan+` (Wi-Fi 464XLAT).
 
 ## How inbound packets reach Android
 

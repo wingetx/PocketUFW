@@ -84,7 +84,7 @@ Other Android tools can use genuine kernel firewall rules too. **PocketUFW's dif
 
 1. **Do not enable alongside AFWall+'s active rules**. PocketUFW checks for its output hook and refuses to enable. Android or other firewall tools may still own unknown chains.
 2. **No continuous Tailscale port tracking.** `--auto-tailscale` verifies current Android app-owned sockets when enabling rules. Use `refresh` after a port change to update only the exception chain. There is no background monitor. Failed explicit refreshes can retire proven-stale allowances while preserving sockets whose ownership is unknown. A blocked direct UDP listener can push Tailscale onto encrypted relays.
-3. Assumes physical interfaces named `wlan*`, `rmnet*`, or `v4-rmnet*`. Network interfaces differ across phones. Devices with `eth*`, `ccmni*`, or other names **will not be covered**.
+3. Assumes physical interfaces named `wlan*`, `rmnet*`, `v4-rmnet*`, or `v4-wlan*` (Wi-Fi 464XLAT). Network interfaces differ across phones. Devices with `eth*`, `ccmni*`, or other names **will not be covered**.
 4. Does not filter **tethered/FORWARD traffic**, or, unless the optional tunnel filter is on, traffic arriving through the *inner* `tun*` VPN interfaces.
    Optional pinned mode requires initial verified Tailscale node addresses; explicit deny-only mode has no tailnet exemption. Neither restores after reboot. See [its address-trust limitations](docs/tunnel-filtering.md).
 5. `INPUT` hooks are appended **after system/OEM rules**. This preserves Android behavior but means an earlier terminal ACCEPT can bypass PocketUFW. It is not a universal host firewall guarantee.
@@ -127,7 +127,7 @@ for t in iptables ip6tables; do
     $t -w -D INPUT -i "$i" -m comment --comment PocketUFW-VPN -j POCKETUFW_VPN
   done
   $t -w -F POCKETUFW_VPN; $t -w -X POCKETUFW_VPN
-  for i in wlan+ rmnet+ v4-rmnet+; do
+  for i in wlan+ rmnet+ v4-rmnet+ v4-wlan+; do
     $t -w -D INPUT -i "$i" -m comment --comment PocketUFW -j POCKETUFW_IN
   done
   $t -w -F POCKETUFW_IN; $t -w -X POCKETUFW_IN

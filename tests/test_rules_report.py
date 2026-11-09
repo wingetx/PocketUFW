@@ -29,6 +29,7 @@ case "$chain" in
       echo '-A INPUT -i wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN'
       echo '-A INPUT -i rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
       echo '-A INPUT -i v4-rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN'
+      echo '-A INPUT -i v4-wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN'
     fi
     printf '%s' "${TEST_INPUT_AFTER:-}"
     ;;

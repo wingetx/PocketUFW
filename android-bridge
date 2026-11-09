@@ -615,7 +615,7 @@ $snapshot
 EOF
 
 # Read-only and best effort: interfaces that can receive traffic but that the
-# wlan+, rmnet+ and v4-rmnet+ hooks do not filter. Loopback and dummy carry no
+# wlan+, rmnet+, v4-rmnet+ and v4-wlan+ hooks do not filter. Loopback and dummy carry no
 # inbound traffic. A VPN's tun is listed like its kernel and IPsec equivalents:
 # traffic inside any of them really isn't filtered, and the user should be told.
 # Only the engine's verified report can remove one from this list: with the optional
@@ -645,7 +645,7 @@ if command -v ip >/dev/null 2>&1; then
     $3 == "inet" || ($3 == "inet6" && / scope global /) {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
       if (!(name in up) || (name in listed)) next
-      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|dummy)/ || hooked(name)) next
+      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|v4-wlan|dummy)/ || hooked(name)) next
       listed[name] = 1
       list = list (list == "" ? "" : ",") name
     }

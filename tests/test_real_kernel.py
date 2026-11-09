@@ -272,21 +272,22 @@ class RealKernelTests(unittest.TestCase):
         link wlan0 9
         link rmnet_data0 10
         link v4-rmnet_data0 11
-        for subnet in 9 10 11; do
+        link v4-wlan0 12
+        for subnet in 9 10 11 12; do
           say "before4_$subnet" "$(deliver 4 "$subnet" 47931 10)"
           say "before6_$subnet" "$(deliver 6 "$subnet" 47931 10)"
         done
         say tcp_before "$(peer $N tcp 4 10.9.0.1 47932 1)"
         sh "$ENG" enable >/dev/null || exit 91
         say verify "$(sh "$ENG" verify)"
-        for subnet in 9 10 11; do
+        for subnet in 9 10 11 12; do
           say "after4_$subnet" "$(deliver 4 "$subnet" 47931 10)"
           say "after6_$subnet" "$(deliver 6 "$subnet" 47931 10)"
         done
         say tcp_after "$(peer $N tcp 4 10.9.0.1 47932 0.4)"
         ''')
         self.assertEqual(values['verify'], 'ACTIVE')
-        for subnet in ('9', '10', '11'):
+        for subnet in ('9', '10', '11', '12'):
             # The control proves the listener and the path work; only the firewall changed.
             self.assertEqual(values[f'before4_{subnet}'], '10')
             self.assertEqual(values[f'before6_{subnet}'], '10')

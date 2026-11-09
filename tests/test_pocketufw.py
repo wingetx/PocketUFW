@@ -704,7 +704,7 @@ class PocketUFWTests(unittest.TestCase):
         self.assertEqual(values["ipv4_established_replies"], "76")
         self.assertEqual(values["ipv6_established_replies"], "138")
         self.assertEqual(values["ipv4_blocked_bytes"], "888")
-        self.assertEqual(values["hook_patterns"], "wlan+ rmnet+ v4-rmnet+")
+        self.assertEqual(values["hook_patterns"], "wlan+ rmnet+ v4-rmnet+ v4-wlan+")
         for fam in before:
             self.assertEqual(self.read(fam, "POCKETUFW_IN"), before[fam])
         self.assertEqual(self.run_cmd("disable").returncode, 0)
@@ -829,6 +829,7 @@ class PocketUFWTests(unittest.TestCase):
         '-i wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN',
         '-i rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN',
         '-i v4-rmnet+ -m comment --comment PocketUFW -j POCKETUFW_IN',
+        '-i v4-wlan+ -m comment --comment PocketUFW -j POCKETUFW_IN',
     ]
     ANDROID_INPUT = ['-j oem_in', '-j bw_INPUT', '-j fw_INPUT']
 

@@ -218,7 +218,7 @@ class FirewallClientParsingTest {
     @Test fun aCompleteReportIsReadInKernelOrderPerFamily() {
         val report = parse(bridgeOutput()).kernelReport!!
         assertEquals("ACCEPT", report.ipv4.inputPolicy)
-        assertEquals(3, report.ipv4.hooks.size)
+        assertEquals(4, report.ipv4.hooks.size)
         assertEquals(8, report.ipv4.inbound.size)
         assertEquals("-A POCKETUFW_IN -p icmp -j ACCEPT", report.ipv4.inbound[1])
         assertEquals("-A POCKETUFW_IN -j DROP", report.ipv4.inbound.last())

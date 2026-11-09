@@ -4,7 +4,7 @@ import java.util.Collections
 
 /** The `-S` lines rules-report emits for one family, as FakeGateway's report renders them. */
 private fun reportLines(fam: Int, port: String?): List<String> {
-    val hooks = listOf("wlan+", "rmnet+", "v4-rmnet+").mapIndexed { i, iface ->
+    val hooks = listOf("wlan+", "rmnet+", "v4-rmnet+", "v4-wlan+").mapIndexed { i, iface ->
         "hook${fam}_%02d=-A INPUT -i $iface -m comment --comment PocketUFW -j POCKETUFW_IN".format(i + 1)
     }
     val rules = if (fam == 4) listOf(

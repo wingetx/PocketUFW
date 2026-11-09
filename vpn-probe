@@ -128,7 +128,7 @@ tunnel_inventory() {
     [ "${1:-}" != display ] || android_summary
     for device in "$SYS_NET"/*; do
         name=${device##*/}
-        case "$name" in ''|*[!A-Za-z0-9_.-]*|lo|wlan*|rmnet*|v4-rmnet*) continue ;; esac
+        case "$name" in ''|*[!A-Za-z0-9_.-]*|lo|wlan*|rmnet*|v4-rmnet*|v4-wlan*) continue ;; esac
         if grep -qx 'DEVTYPE=wireguard' "$device/uevent" 2>/dev/null; then
             kind=wireguard
         elif [ -e "$device/tun_flags" ]; then

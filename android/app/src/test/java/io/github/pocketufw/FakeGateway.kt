@@ -22,7 +22,7 @@ internal object BridgeMessages {
 internal const val READ_AT = 1_793_880_000_000L
 
 private fun family(fam: Int, port: String?): RuleFamily {
-    val hooks = listOf("wlan+", "rmnet+", "v4-rmnet+").map {
+    val hooks = listOf("wlan+", "rmnet+", "v4-rmnet+", "v4-wlan+").map {
         "-A INPUT -i $it -m comment --comment PocketUFW -j POCKETUFW_IN"
     }
     val inbound = if (fam == 4) listOf(

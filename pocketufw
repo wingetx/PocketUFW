@@ -15,7 +15,7 @@ MAX_TUNNEL_HOOKS=8
 TAILNET4='100.64.0.0/10'
 TAILNET6='fd7a:115c:a1e0::/48'
 # Android interface wildcard syntax supported by iptables (-i wlan+, etc.).
-IFACES='wlan+ rmnet+ v4-rmnet+'
+IFACES='wlan+ rmnet+ v4-rmnet+ v4-wlan+'
 TS4=''
 TS6=''
 AUTO_TS=0
@@ -59,7 +59,7 @@ Usage:
   pocketufw tunnel-status   # read-only: filter state, tunnel owners and their proof, who holds tailnet addresses
   pocketufw tunnel-off      # remove only the tunnel rules
 
-Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+.
+Default: allow outbound (unchanged), filter inbound only on wlan+, rmnet+, v4-rmnet+, v4-wlan+.
 The tunnel filter is optional and lasts until disable, tunnel-off or the next restart.
 By default, initial tunnel authorization requires a verified Tailscale tun with IPv4 and IPv6.
 Trust is pinned to its /32 and /128, survives reconnects, and does not authenticate ingress.
@@ -381,7 +381,7 @@ pin_report() {
 # Interface names reach iptables as arguments, so they must not read as options or
 # wildcards. Physical patterns already have their own policy and are never tunnels.
 iface_is_safe() {
-  case "$1" in ''|-*|*[!A-Za-z0-9_.-]*) return 1 ;; lo|wlan*|rmnet*|v4-rmnet*) return 1 ;; esac
+  case "$1" in ''|-*|*[!A-Za-z0-9_.-]*) return 1 ;; lo|wlan*|rmnet*|v4-rmnet*|v4-wlan*) return 1 ;; esac
   [ "${#1}" -le 15 ]
 }
 
@@ -893,7 +893,7 @@ case "$CMD" in
     if chain_exists4 || chain_exists6; then say '  PocketUFW chain exists'; else say '  Not installed'; fi
     if afwall_active; then say '  WARNING: AFWall+ is active; do NOT enable alongside its custom INPUT rules'; else say '  AFWall+ output hook not active'; fi
     say '  Requires iptables legacy, conntrack, IPv6, root, and trusted network interfaces.'
-    say '  Assumed physical interfaces: wlan+, rmnet+, v4-rmnet+'
+    say '  Assumed physical interfaces: wlan+, rmnet+, v4-rmnet+, v4-wlan+'
     ;;
   plan)
     DRY_RUN=1

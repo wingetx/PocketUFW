@@ -3,6 +3,7 @@ package io.github.pocketufw
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import io.github.pocketufw.FirewallClient.BootRestore
 import io.github.pocketufw.FirewallClient.Protection
@@ -310,12 +311,13 @@ class TideStateSyncTest {
         compose.settle { compose.hasText("No counters.") }
         node("Dismiss").performClick()
         compose.waitForIdle()
-        // The next thing the banner says isn't a failure, so it must not look like one.
+        // The next read has inline progress, not the old failure banner/style.
         val gate = CountDownLatch(1)
         fake.gate = gate
         recheckButton().performClick()
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Working…") }
-        compose.onNodeWithTag("banner").assertExists()
+        compose.settle { fake.count("inspect") == 2 }
+        recheckButton().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Checking…"))
+        compose.onNodeWithTag("banner").assertDoesNotExist()
         compose.onNodeWithTag("banner-failed").assertDoesNotExist()
         fake.gate = null
         gate.countDown()

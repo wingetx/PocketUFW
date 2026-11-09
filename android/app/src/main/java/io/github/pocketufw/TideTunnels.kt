@@ -76,10 +76,11 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
                 Text("PINNED verifies Tailscale ownership before authorizing this phone’s /32 and /128. DENY-ONLY is for Proton-only or WireGuard-only use; it grants no tailnet trust.",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
                 TidePrimaryButton("Enable PINNED", { requested = FirewallClient.TunnelMode.PINNED },
-                    enabled = canEnableTunnel(ui))
-                OutlinedButton(onClick = { requested = FirewallClient.TunnelMode.DENY_ONLY },
-                    enabled = canEnableTunnel(ui), shape = TideActionShape,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) { Text("Enable DENY-ONLY") }
+                    enabled = canEnableTunnel(ui), loading = ui.working(TideOperation.ENABLE_PINNED),
+                    loadingLabel = "Activating…")
+                TideOutlinedButton("Enable DENY-ONLY", { requested = FirewallClient.TunnelMode.DENY_ONLY },
+                    enabled = canEnableTunnel(ui), loading = ui.working(TideOperation.ENABLE_DENY_ONLY),
+                    loadingLabel = "Activating…")
                 if (state.protection != FirewallClient.Protection.ACTIVE) Text(
                     "Enable and verify the physical firewall first.", style = MaterialTheme.typography.bodySmall, color = Muted)
             }
@@ -88,15 +89,17 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
                     "Tunnel rules are incomplete or their trust is unsafe. Remove only tunnel rules to recover; the physical firewall stays installed.", true)
                 else Text("To change modes or authorize new addresses, turn tunnel protection off first. Tunnel filtering stops until you enable it again.",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
-                OutlinedButton(onClick = { remove = true }, enabled = canRemoveTunnel(ui),
-                    shape = TideActionShape, modifier = Modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)) {
-                    Text(if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED) "Remove tunnel rules only" else "Turn tunnel protection off")
-                }
+                TideOutlinedButton(if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
+                    "Remove tunnel rules only" else "Turn tunnel protection off", { remove = true },
+                    enabled = canRemoveTunnel(ui), loading = ui.working(TideOperation.REMOVE_TUNNEL),
+                    loadingLabel = "Removing…")
                 if (state.tunnelFilter == FirewallClient.TunnelFilter.ON) {
                     TextButton(onClick = actions.refreshTunnelHooks, contentPadding = PaddingValues(vertical = 8.dp),
                         shape = RectangleShape,
                         enabled = !ui.busy && !ui.verificationInDoubt &&
-                        state.rootReady && state.protection == FirewallClient.Protection.ACTIVE) { Text("Refresh tunnel hooks") }
+                        state.rootReady && state.protection == FirewallClient.Protection.ACTIVE) {
+                        TideActionContent("Refresh tunnel hooks", ui.working(TideOperation.REFRESH_TUNNEL), "Refreshing…")
+                    }
                     Text("For added or removed WireGuard interfaces. Does not change pinned addresses. Earlier Android/OEM ACCEPT rules may bypass tunnel hooks.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)
                 }

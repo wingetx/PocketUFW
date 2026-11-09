@@ -1,5 +1,44 @@
 # PocketUFW current handoff (2026-11-08)
 
+## Isolated loading-feedback follow-up
+
+This follow-up is on `fix/tide-operation-progress`, based on `144f739`, in the
+separate `~/toolbox/projects/PocketUFW-tide-loading` worktree. Claude's acceptance
+checkout and its evidence remain untouched on `feature/tunnel-inbound-filter`.
+The change has not been merged into that baseline.
+
+Recheck (toolbar, home and Kernel rules), firewall on/off, counter refresh/reset,
+Tailscale port refresh, tunnel enable/refresh/removal and partial-rule recovery
+show a 20 dp Material 3 indeterminate indicator inside the requested control.
+Labels say Checking, Activating, Deactivating, Refreshing, Resetting or Removing.
+The existing busy guard still serializes requests; operation identity only
+selects presentation. Confirmation dialogs are unchanged and dismiss before
+work starts. Inline feedback replaces the redundant busy banner for these
+operations so it cannot push the active control below the viewport. Result and
+error messages keep their existing placement and dismissal behavior.
+
+Idle and busy labels are measured together to keep control bounds stable.
+Hidden measurement labels and the decorative arc are excluded from accessibility;
+the control exposes its action name, contextual state, indeterminate progress and
+a polite live region. Progress is cleared in the existing `finally` blocks.
+Coroutine cancellation keeps verification uncertain and propagates after cleanup,
+preventing a cancelled request from scheduling a follow-up inspection. No new
+cancel action is offered, nor is a stopped UI coroutine claimed to undo a root
+operation. Existing timeout/recheck behavior is preserved.
+
+Validation: **261 Android JVM tests** (including 18 focused progress tests),
+**23 Python UI/tile contracts**, Android lint with no errors, and Android test
+compilation pass. The focused tests hold gateway calls open, check immediate
+feedback and duplicate-tap rejection, cover success/failure/timeout/cancellation,
+verify exact gateway calls and stable large-text bounds, and compare animation
+frames. Light/dark and 200% text host renders are in this worktree's
+`android/app/build/reports/tide-progress/`; displayed counters are test fixtures.
+Real TalkBack announcements and animation smoothness still need the next supervised
+device check, after acceptance of the separate baseline. No device access,
+signing, deployment, push, merge, dependencies, polling or engine changes.
+
+## UI acceptance baseline
+
 Current local work is on `feature/tunnel-inbound-filter`, including the unmerged
 uninstall lifecycle changes. The follow-up to Claude's independent review at
 `ebe9019` added explicit deny-only tunnel filtering, separate stale-pin/connectivity

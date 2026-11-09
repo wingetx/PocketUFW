@@ -132,13 +132,14 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
         }
         if (!verifiedOff) {
             val refresh: @Composable (Modifier) -> Unit = { modifier ->
-                TidePrimaryButton(if (ui.counterRefreshing) "Refreshing…" else "Refresh counters",
-                    actions.refreshCounters, modifier, enabled = verified && ui.snapshot.rootReady && !ui.busy)
+                TidePrimaryButton("Refresh counters", actions.refreshCounters, modifier,
+                    enabled = verified && ui.snapshot.rootReady && !ui.busy,
+                    loading = ui.counterRefreshing, loadingLabel = "Refreshing…")
             }
             val reset: @Composable (Modifier) -> Unit = { modifier ->
-                OutlinedButton(onClick = { resetConfirmation = true }, enabled = canReset,
-                    shape = TideActionShape, modifier = modifier.fillMaxWidth().heightIn(min = TideActionMinHeight)
-                        .testTag("reset-counters")) { Text("Reset counters") }
+                TideOutlinedButton("Reset counters", { resetConfirmation = true }, enabled = canReset,
+                    modifier = modifier.testTag("reset-counters"),
+                    loading = ui.working(TideOperation.RESET_COUNTERS), loadingLabel = "Resetting…")
             }
             if (large) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 refresh(Modifier); reset(Modifier)

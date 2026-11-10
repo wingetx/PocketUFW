@@ -6,6 +6,7 @@ package io.github.pocketufw
  * screens against a fake without root. It adds no capability of its own.
  */
 internal interface FirewallGateway {
+    fun inspectDrops(request: InsightsRequest, recovery: Boolean = false): InsightsResult
     fun inspectDashboard(): FirewallClient.Dashboard
     fun refreshCounterActivity(): FirewallClient.RuleActivity
     fun changeProtection(activate: Boolean): FirewallClient.Operation

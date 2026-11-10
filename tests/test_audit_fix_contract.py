@@ -82,7 +82,7 @@ class TideAuditContractTests(unittest.TestCase):
         self.assertIn('registerOnSharedPreferenceChangeListener(listener)', main)
         self.assertIn('unregisterOnSharedPreferenceChangeListener(listener)', main)
         block = main[main.index('val listener = SharedPreferences'):
-                     main.index('onDispose {')]
+                     main.index('onDispose {', main.index('val listener = SharedPreferences'))]
         self.assertIn('windowInfo.isWindowFocused', block)
         self.assertIn('TileStatusStore.SOURCE_APP', block)
         self.assertNotIn('client.', block)

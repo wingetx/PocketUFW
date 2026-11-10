@@ -13,6 +13,8 @@
 
 **Latest signed beta:** [PocketUFW 0.1.0-beta5](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5) is published as an **experimental prerelease**, with Tide, optional tunnel filtering, and audited engine fixes. [Download the APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/PocketUFW-0.1.0-beta5.apk) and [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/SHA256SUMS.txt). Its source is tagged `v0.1.0-beta5` at commit `508cb29`; later documentation edits do not change that release.
 
+**Local release candidate:** `0.1.0-beta6` (versionCode 27) adds Insights v1 and the Tide cleanup described in the [Beta 6 notes](docs/releases/0.1.0-beta6.md). It is unsigned and awaiting independent review; the published release above remains Beta 5.
+
 ## What it does
 
 | Feature | Behavior |
@@ -20,13 +22,14 @@
 | **Physical inbound firewall** | Drops unsolicited IPv4 and IPv6 input on supported Wi-Fi, cellular, and CLAT interfaces |
 | **Optional tunnel protection** | Independently filters incoming traffic on Android `tun*` interfaces and detected kernel WireGuard interfaces |
 | **Outgoing connections** | Leaves Android's outbound firewall rules unchanged |
-| **Statistics** | Shows real packets and bytes matched by PocketUFW's DROP and established/related rules, separated by physical/tunnel and IPv4/IPv6 |
+| **Activity** | Shows real packets and bytes matched by PocketUFW's DROP and established/related rules, separated by physical/tunnel and IPv4/IPv6 |
+| **Insights** | Samples DROP matches on demand for up to 10 seconds / 256 records; shows sources, protocols, physical/tunnel classification and possible traffic purposes |
 | **Live rule inspection** | Shows the verified rule chains, exceptions, incomplete coverage, and raw kernel rules |
 | **Quick Settings tile** | Deliberate toggle with a fresh state check; long-press opens PocketUFW |
 | **Boot restoration** | Optional one-shot **Magisk** restore for physical filtering only |
 | **Network compatibility** | Does not use `VpnService`, leaving the VPN slot available for apps such as Tailscale or Proton VPN |
 
-Tide includes a single primary firewall switch, an expandable **Statistics** pill, a labeled **Recheck** action, progress indicators, and separate controls for advanced tunnel and VPN settings. Resetting counters clears PocketUFW-owned measurements without rebuilding the firewall or changing Android/OEM rules.
+Tide includes a single primary firewall switch, an **Activity** page for all counters, an **Insights** sampling page, a labeled **Recheck** action, progress indicators, and separate controls for advanced tunnel and VPN settings. Resetting counters clears PocketUFW-owned measurements without rebuilding the firewall or changing Android/OEM rules.
 
 PocketUFW has **no accounts, ads, analytics, or application telemetry**. It does not continuously capture packets, retain traffic history, or run a persistent Android foreground service.
 
@@ -65,7 +68,7 @@ Physical firewall allowances can preserve verified Tailscale UDP listeners. List
 
 This is a compatibility feature, **not** a general-purpose open-port editor.
 
-## Understanding Statistics
+## Understanding Activity and Insights
 
 - **Dropped** means a packet matched one of PocketUFW's actual kernel DROP rules, not necessarily that an attacker was stopped.
 - **Established/related** counts recognized return traffic that reached PocketUFW's chains. It isn't a count of *all* packets arriving on the phone.
@@ -73,6 +76,8 @@ This is a compatibility feature, **not** a general-purpose open-port editor.
 - **Reset** zeroes the counters owned by PocketUFW, not other Android or VPN counters. New packets can increment them immediately.
 
 **Seeing zero drops is normal.** Home routers, carriers, Android, and VPNs may stop unsolicited traffic before PocketUFW ever sees it. Deliberate IPv4/IPv6 Wi-Fi and cellular probes have verified that supported rules drop matching traffic on a test phone, but a quiet counter is not proof of either failure or total protection.
+
+Insights describes only a short, local sample of actual DROP matches. It does not explain historical totals or identify applications or malicious intent. **Android/OEM rule changes can cause Insights to withhold an otherwise useful sample**; strict verification remains enabled. Cleanup and independent protection verification still run after a refused collection. Qualified sampling is not implemented. See [Insights behavior and limits](docs/insights-v1.md).
 
 PocketUFW does **not** currently provide per-app outbound blocking, domain/ad blocking, live DNS interception, or a PCAP-style traffic log. These are possible future directions, **not features in this beta**.
 
@@ -141,7 +146,7 @@ Recheck both filter tables and the Magisk service hook before trusting the resul
 
 ## Build from source
 
-PocketUFW is written in Kotlin/Jetpack Compose with a small root-side shell engine. A local debug APK requires Java 17 and an Android SDK with API 36:
+PocketUFW is written in Kotlin/Jetpack Compose with a small root-side shell engine and a native C++ Insights helper. A local debug APK requires Java 17 and an Android SDK with API 36, NDK 27.2.12479018 and CMake 3.22.1:
 
 ```sh
 cd android

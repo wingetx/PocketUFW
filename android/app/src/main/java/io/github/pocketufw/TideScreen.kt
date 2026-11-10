@@ -45,12 +45,14 @@ internal data class TideUiState(
     val removalDetail: String = "",
     /** Only routine successful reads/resets expire. Warnings and operation notices stay. */
     val transientMessage: Boolean = false,
+    val insights: InsightsResult? = null,
+    val insightsStopping: Boolean = false,
     val operation: TideOperation? = null
 )
 
 /** Presentation identity only; busy remains the single operation guard. */
 internal enum class TideOperation {
-    CHECK, ACTIVATE, DEACTIVATE, REFRESH_COUNTERS, RESET_COUNTERS, REFRESH_PORTS,
+    SAMPLE, RECOVER_INSIGHTS, CHECK, ACTIVATE, DEACTIVATE, REFRESH_COUNTERS, RESET_COUNTERS, REFRESH_PORTS,
     ENABLE_PINNED, ENABLE_DENY_ONLY, REMOVE_TUNNEL, REFRESH_TUNNEL, REMOVE_PARTIAL
 }
 internal fun TideUiState.working(operation: TideOperation) = busy && this.operation == operation
@@ -60,6 +62,10 @@ private enum class TideCheckControl { TOOLBAR, FIREWALL, KERNEL }
 internal enum class TideRemoval { NONE, CLEAN, INCOMPLETE }
 
 internal data class TideActions(
+    val sampleDrops: () -> Unit = {},
+    val cancelSample: () -> Unit = {},
+    val recoverInsights: () -> Unit = {},
+    val clearInsights: () -> Unit = {},
     val recheck: () -> Unit = {},
     val changeProtection: (Boolean) -> Unit = {},
     val changeBootRestoration: (Boolean) -> Unit = {},
@@ -80,6 +86,7 @@ internal data class TideActions(
 internal enum class TideDestination(val label: String, val icon: Int) {
     FIREWALL("Firewall", R.drawable.tide_power),
     ACTIVITY("Activity", R.drawable.tide_activity),
+    INSIGHTS("Insights", R.drawable.tide_search),
     SETTINGS("Settings", R.drawable.tide_settings)
 }
 internal enum class TideInspection(val label: String) { COUNTERS("Counters"), RULES("Kernel rules") }
@@ -171,20 +178,24 @@ internal fun TideScreen(
         bottomBar = {
             Column(Modifier.background(Background).navigationBarsPadding()) {
                 TideDivider()
-                Row(Modifier.fillMaxWidth().selectableGroup().padding(horizontal = 12.dp)) {
-                    TideDestination.entries.forEach { item ->
-                        val selected = destination == item
-                        Column(Modifier.weight(1f).clickable(role = Role.Tab) {
-                            destination = item; exceptions = false
-                        }.semantics { this.selected = selected }.padding(horizontal = 2.dp)
-                            .heightIn(min = 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.width(30.dp).height(3.dp)
-                                .background(if (selected) Mint else Color.Transparent))
-                            Spacer(Modifier.height(13.dp))
-                            TideIcon(item.icon, tint = if (selected) Mint else Muted)
-                            Text(item.label, color = if (selected) Mint else Muted,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(top = 5.dp, bottom = 10.dp))
+                // Four labels need two rows at enlarged text sizes, without shrinking text.
+                val rows = TideDestination.entries.chunked(if (density.fontScale > 1.3f) 2 else 4)
+                rows.forEach { items ->
+                    Row(Modifier.fillMaxWidth().selectableGroup().padding(horizontal = 12.dp)) {
+                        items.forEach { item ->
+                            val selected = destination == item
+                            Column(Modifier.weight(1f).clickable(role = Role.Tab) {
+                                destination = item; exceptions = false
+                            }.semantics { this.selected = selected }.padding(horizontal = 2.dp)
+                                .heightIn(min = 76.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(Modifier.width(30.dp).height(3.dp)
+                                    .background(if (selected) Mint else Color.Transparent))
+                                Spacer(Modifier.height(13.dp))
+                                TideIcon(item.icon, tint = if (selected) Mint else Muted)
+                                Text(item.label, color = if (selected) Mint else Muted,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(top = 5.dp, bottom = 10.dp))
+                            }
                         }
                     }
                 }
@@ -222,6 +233,7 @@ internal fun TideScreen(
                     requestDisable = { offConfirmOpen = true },
                     showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
                     showSettings = { destination = TideDestination.SETTINGS })
+                destination == TideDestination.INSIGHTS -> TideInsights(ui, actions)
                 destination == TideDestination.ACTIVITY -> {
                     TideHeading(if (inspection == TideInspection.COUNTERS) "Activity." else "Kernel rules.")
                     TideTabs(TideInspection.entries.map { it.label }, inspection.ordinal) {
@@ -286,18 +298,26 @@ internal fun TideScreen(
 /**
  * The kernel's names mean little on their own, so say what each one is when that's known.
  * Only Android's VPN record names an owner. Other names are described by kind, because a
- * tunnel's name doesn't say whose it is: `ipsec` has turned out to be carrier Wi-Fi calling.
+ * tunnel's name doesn't say whose it is. Carrier calling is named only when Android's own
+ * network record identifies that interface as carrier IMS; any other `ipsec` stays unidentified.
  * The kernel's name stays, so it can be matched against the rules.
  */
 internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): String {
     val owner = state.vpnProvider?.removePrefix("Connected via ")?.takeIf { it != "Unrecognized VPN" }
     return when {
         name == state.vpnInterface && owner != null -> "traffic inside $owner ($name)"
+        isCarrierIms(name, state) -> "carrier calling network ($name)"
         name.startsWith("tun") -> "VPN tunnel $name"
-        name.startsWith("ipsec") -> "carrier or VPN tunnel $name"
+        name.startsWith("ipsec") -> "unidentified IPsec tunnel $name"
         else -> name
     }
 }
+// Android's VPN record outranks IMS evidence for the same name.
+private fun isCarrierIms(name: String, state: FirewallClient.Snapshot) =
+    name in state.carrierImsInterfaces && name != state.vpnInterface
+
+internal const val CARRIER_IMS_NOTICE =
+    "Carrier calling network is managed separately from PocketUFW. This is normal and does not indicate a firewall failure."
 
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String, checkingAction: Boolean,
@@ -384,6 +404,8 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
     if (active && state.uncoveredInterfaces.isNotEmpty()) {
         TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") { uncoveredLabel(it, state) } + ".", true)
+        // Explains, never excuses: the gap above and the partial-coverage status both remain.
+        if (state.uncoveredInterfaces.any { isCarrierIms(it, state) }) TideNotice(CARRIER_IMS_NOTICE)
     }
     if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
     if (coverageUnknown) TideNotice("Coverage information is incomplete. Recheck to inspect interfaces and earlier INPUT rules.", true)
@@ -438,7 +460,11 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     if (state.protection == FirewallClient.Protection.DEGRADED) {
         TideLink("Inspect kernel rules", onClick = showRules)
         if (state.rootReady && !ui.verificationInDoubt) {
-            if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
+            if (hasInsightsResidue(ui.report)) {
+                TideNotice("Temporary Insights probes detected. Recover those probes before repairing other rules.", true)
+                TideOutlinedButton("Recover Insights probes", actions.recoverInsights, enabled = !ui.busy,
+                    loading = ui.working(TideOperation.RECOVER_INSIGHTS), loadingLabel = "Verifying cleanup…")
+            } else if (state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
                 TideOutlinedButton("Remove tunnel rules only", requestTunnelRemoval, enabled = !ui.busy,
                     loading = ui.working(TideOperation.REMOVE_TUNNEL), loadingLabel = "Removing…")
             else TideOutlinedButton("Remove partial PocketUFW rules", requestRemoval, enabled = !ui.busy,
@@ -456,7 +482,6 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         })
         TidePolicyRow(R.drawable.tide_up, "Outgoing", "Unchanged")
     }
-    TideStatistics(ui, actions)
     if (active) {
         TideSettingLink("Restore after reboot", bootLabel(state.bootRestore) + " · Magisk", showSettings)
     }

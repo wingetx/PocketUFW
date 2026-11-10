@@ -49,7 +49,7 @@ class TideFeedbackTest {
     @Test fun counterResetAndRefreshConfirmationsExpireWithoutChangingCountersOrRules() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = tunnelActivity())
         open(fake)
-        click("Statistics"); click("Reset counters")
+        compose.onNodeWithText("Activity").performClick(); click("Reset counters")
         compose.onNodeWithTag("confirm-reset-counters").performClick()
         compose.settle { compose.hasText(BridgeMessages.RESET_OK) }
         advance(6_500)
@@ -65,7 +65,7 @@ class TideFeedbackTest {
     @Test fun policyChangeWarningsRemainUntilDismissed() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = tunnelActivity().copy(tailnetPin4 = "100.64.0.9/32"))
         open(fake)
-        click("Statistics"); click("Refresh counters")
+        compose.onNodeWithText("Activity").performClick(); click("Refresh counters")
         compose.settle { compose.hasText("Counters read, but tunnel policy changed.", true) }
         advance(60_000)
         compose.onNodeWithTag("banner-failed").assertExists()

@@ -116,7 +116,7 @@ class TideProgressTest {
 
     @Test fun counterRefreshShowsProgressAndMakesOnlyTheLightweightRequest() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = tunnelActivity()); open(fake)
-        click("Statistics"); val gate = hold(fake)
+        compose.onNodeWithText("Activity").performClick(); val gate = hold(fake)
         click("Refresh counters")
         compose.settle { fake.count("counters") == 1 }
         loading("Refresh counters", "Refreshing…")
@@ -130,7 +130,7 @@ class TideProgressTest {
 
     @Test fun resetConfirmationCancellationDoesNoWorkAndResetThenCleansUp() {
         val fake = FakeGateway(tunnelDashboard()); open(fake)
-        click("Statistics"); click("Reset counters"); node("Cancel").performClick()
+        compose.onNodeWithText("Activity").performClick(); click("Reset counters"); node("Cancel").performClick()
         compose.onAllNodes(progress).assertCountEquals(0)
         assertEquals(listOf("inspect"), fake.calls.toList())
         val gate = hold(fake)
@@ -263,7 +263,7 @@ class TideProgressTest {
 
     private fun cancelledRequest(request: String) {
         val fake = FakeGateway(); open(fake)
-        if (request != "inspect") click("Statistics")
+        if (request != "inspect") compose.onNodeWithText("Activity").performClick()
         val gate = hold(fake)
         fake.requestFailure = CancellationException("Test cancelled request")
         when (request) {

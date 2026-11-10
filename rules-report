@@ -105,8 +105,9 @@ emit_family() {
   emit_rules main "$fam" "$main" 12 || return 1
   if [ "$has_tunnel" -eq 1 ]; then
     main_lines=$(printf '%s\n' "$main" | grep -c '^-A ') || main_lines=0
-    # Its three deny-only or four pinned rules, in the same numbered list the app reads.
-    emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 4))" "$main_lines" || return 1
+    # Include up to two temporary diagnostic probes so an interrupted sample can
+    # be recognized by the UI. This is reporting only; engine verification stays strict.
+    emit_rules tunnel "$fam" "$tunnel" "$((main_lines + 6))" "$main_lines" || return 1
   else
     printf 'report_tunnel%s_count=0\n' "$fam"
   fi

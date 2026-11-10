@@ -3,7 +3,6 @@ package io.github.pocketufw
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import io.github.pocketufw.FirewallClient.Protection
@@ -50,9 +49,9 @@ class MainActivityLaunchTest {
         }
         compose.waitForIdle()
     }
-    private fun tapStatistics() {
+    private fun tapTab(name: String) {
         // Hit testing is intentional: performClick() invokes semantics, bypassing touch routing.
-        compose.onNodeWithTag("statistics-pill").performScrollTo().performTouchInput { click(center) }
+        compose.onNodeWithText(name).performTouchInput { click(center) }
     }
     @Test fun bothEntryPointsResolveToTheSameSingleTaskActivity() {
         val context = RuntimeEnvironment.getApplication()
@@ -65,20 +64,18 @@ class MainActivityLaunchTest {
             assertEquals(ActivityInfo.LAUNCH_SINGLE_TASK, info.launchMode)
         }
     }
-    @Test fun repeatedMainAndTileIntentsPreserveStatisticsAndNeverMutate() {
+    @Test fun repeatedMainAndTileIntentsPreserveActivityAndNeverMutate() {
         open()
         repeat(3) {
             actions.forEach { action ->
                 relaunch(action)
                 assertEquals(action, screen.get().intent.action)
-                tapStatistics()
-                compose.onNodeWithTag("statistics-pill").assert(SemanticsMatcher.expectValue(
-                    SemanticsProperties.StateDescription, "Expanded"))
+                tapTab("Activity")
+                compose.onNodeWithText("Counters").assertIsDisplayed()
                 relaunch(action)
-                // A launch must not reconstruct the composition or collapse its saved state.
-                compose.onNodeWithTag("statistics-pill").assert(SemanticsMatcher.expectValue(
-                    SemanticsProperties.StateDescription, "Expanded"))
-                tapStatistics()
+                // A launch must not reconstruct the composition or reset its saved destination.
+                compose.onNodeWithText("Counters").assertIsDisplayed()
+                tapTab("Firewall")
             }
         }
         assertEquals(listOf("inspect"), fake.calls.toList())
@@ -91,7 +88,7 @@ class MainActivityLaunchTest {
         compose.waitForIdle()
         assertEquals(listOf("inspect"), fake.calls.toList())
         screen.resume()
-        tapStatistics()
+        tapTab("Activity")
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
     @Test fun relaunchDuringOperationPreservesBusyStateAndDoesNotQueueAnotherEnable() {
@@ -103,12 +100,12 @@ class MainActivityLaunchTest {
             relaunch(it)
             compose.onNodeWithTag("firewall-action").assertIsNotEnabled()
             compose.onNodeWithText("Activating…").assertIsDisplayed()
-            tapStatistics(); tapStatistics()
+            tapTab("Activity"); tapTab("Firewall")
         }
         assertEquals(listOf("inspect", "enable"), fake.calls.toList())
         fake.gate = null; gate.countDown()
         compose.settle { compose.hasText("Turn firewall on") }
-        tapStatistics()
+        tapTab("Activity")
         assertEquals(listOf("inspect", "enable"), fake.calls.toList())
     }
     @Test fun relaunchKeepsNavigationAndBackReturnsToFirewall() {
@@ -116,11 +113,12 @@ class MainActivityLaunchTest {
         compose.onNodeWithText("Settings").performTouchInput { click(center) }
         actions.forEach { relaunch(it); compose.onNodeWithText("Tunnel protection").assertExists() }
         compose.runOnIdle { screen.get().onBackPressedDispatcher.onBackPressed() }
-        tapStatistics()
+        compose.onNodeWithTag("firewall-action").assertExists()
+        tapTab("Activity")
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
 
-    @Test fun statisticsAfterShutdownAndRepeatedLaunchesCannotReactivate() {
+    @Test fun activityAfterShutdownAndRepeatedLaunchesCannotReactivate() {
         open()
         fake.dashboard = activeDashboard()
         compose.onNodeWithTag("recheck-status").performClick()
@@ -129,7 +127,7 @@ class MainActivityLaunchTest {
         compose.onNodeWithTag("firewall-action").performTouchInput { click(center) }
         compose.onNodeWithTag("confirm-turn-firewall-off").performClick()
         compose.settle { compose.hasText("Turn firewall on") }
-        repeat(3) { actions.forEach { relaunch(it); tapStatistics(); tapStatistics() } }
+        repeat(3) { actions.forEach { relaunch(it); tapTab("Activity"); tapTab("Firewall") } }
         assertEquals(listOf("inspect", "inspect", "disable"), fake.calls.toList())
     }
 }

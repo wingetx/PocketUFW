@@ -7,6 +7,33 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+/**
+ * What Android's own record says about one network. Only booleans and the interface name are
+ * kept: no addresses, subscription or carrier identity.
+ */
+internal data class NetworkFacts(
+    val interfaceName: String?, val cellular: Boolean, val vpn: Boolean,
+    val ims: Boolean, val internet: Boolean, val notRestricted: Boolean
+)
+
+/**
+ * Interfaces Android positively identifies as the carrier's calling (IMS) network: cellular,
+ * IMS-capable, restricted from ordinary apps, no internet capability and not a VPN. A name such
+ * as `ipsec995` proves nothing alone; any other record naming the same interface vetoes it.
+ * This only changes how an uncovered interface is described. It never makes it covered.
+ */
+internal fun carrierImsInterfaces(networks: List<NetworkFacts>): Set<String> {
+    val valid = Regex("[A-Za-z0-9_.-]{1,15}")
+    fun qualifies(n: NetworkFacts) = n.cellular && n.ims && !n.vpn && !n.internet && !n.notRestricted
+    val named = networks.filter { it.interfaceName?.matches(valid) == true }
+    val vetoed = named.filterNot(::qualifies).mapNotNull { it.interfaceName }.toSet()
+    return named.filter(::qualifies).mapNotNull { it.interfaceName }.filterNot { it in vetoed }.toSet()
+}
+
+/** Only interfaces the root inventory already lists as uncovered can be described this way. */
+internal fun FirewallClient.Dashboard.withCarrierIms(identified: Set<String>): FirewallClient.Dashboard =
+    copy(snapshot = snapshot.copy(carrierImsInterfaces = snapshot.uncoveredInterfaces.filter { it in identified }.toSet()))
+
 /** Exit status for "we stopped waiting". The root shell itself may still be running. */
 private const val ROOT_TIMEOUT_EXIT = 124
 private const val LIFECYCLE_BUSY_EXIT = 75
@@ -130,6 +157,8 @@ internal class FirewallClient(
         val uncoveredInterfaces: List<String> = emptyList(),
         /** Empty interface lists only mean no known gaps after a successful inventory. */
         val interfaceInventoryAvailable: Boolean = false,
+        /** Uncovered interfaces Android identifies as carrier IMS. Still uncovered; described calmly. */
+        val carrierImsInterfaces: Set<String> = emptySet(),
         /** The interface Android's own record gives the active VPN, when it says. */
         val vpnInterface: String? = null,
         /** Session-only. ON verifies installed hooks, not all interfaces or ownership. */
@@ -297,6 +326,15 @@ internal class FirewallClient(
         return shell.run("/system/bin/sh " + quote(path) + " " + quotedArgs, 32)
     }
 
+    override fun inspectDrops(request: InsightsRequest, recovery: Boolean): InsightsResult = synchronized(ROOT_SESSION) {
+        prepareEngine()
+        val helper = File(context.applicationInfo.nativeLibraryDir, "libpufw_insights.so")
+        if (!helper.isFile) return@synchronized InsightsResult(error = "Native Insights helper is unavailable for this installation.")
+        val action = if (recovery) "recover" else "capture"
+        val command = "exec " + quote(helper.absolutePath) + " " + action + " " + quote(script.absolutePath)
+        parseInsights(request.run(command), recovery)
+    }
+
     private fun vpnIsActive(): Boolean {
         val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         return manager.activeNetwork?.let { network ->
@@ -309,6 +347,33 @@ internal class FirewallClient(
     } catch (_: Exception) {
         false
     }
+
+    /** Read after the root inventory, so both describe the same moment. No evidence means none. */
+    @Suppress("DEPRECATION") // allNetworks is the synchronous view; callbacks would add a listener.
+    private fun readNetworkFacts(): List<NetworkFacts> = try {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        manager.allNetworks.map { network ->
+            val name = manager.getLinkProperties(network)?.interfaceName
+            // A record without capabilities is still a record naming the interface: it vetoes.
+            val caps = manager.getNetworkCapabilities(network)
+                ?: return@map NetworkFacts(name, cellular = false, vpn = false, ims = false, internet = false, notRestricted = false)
+            NetworkFacts(name, caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_IMS),
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED))
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    /** Parse, then describe any uncovered carrier IMS interface. Coverage itself is unchanged. */
+    private fun observedDashboard(exitCode: Int, text: String, vpn: Boolean): Dashboard =
+        dashboardFromOutput(exitCode, text, vpn).let { dashboard ->
+            val uncovered = dashboard.snapshot.uncoveredInterfaces
+            if (uncovered.isEmpty()) dashboard
+            else dashboard.withCarrierIms(carrierImsInterfaces(readNetworkFacts()))
+        }
 
     /** Identify VPN service ownership, never infer a provider from installed apps. */
     internal fun vpnProviderLabel(ownerPackage: String?): String = when (ownerPackage) {
@@ -339,7 +404,7 @@ internal class FirewallClient(
             }
         }
         val mainCount = count("main", 12) ?: return null
-        val tunnelCount = count("tunnel", 4) ?: return null
+        val tunnelCount = count("tunnel", 6) ?: return null
         val hooks = lines("hook${fam}_", count("hook", 12) ?: return null) ?: return null
         val inbound = lines("main${fam}_", mainCount + tunnelCount) ?: return null
         val vpn = lines("vpn${fam}_", count("vpn", 3) ?: return null) ?: return null
@@ -554,7 +619,7 @@ internal class FirewallClient(
             prepareEngine()
             val result = bridge("inspect")
             timedOut = result.timedOut
-            dashboardFromOutput(result.exitCode, result.text, vpn).also { dashboard ->
+            observedDashboard(result.exitCode, result.text, vpn).also { dashboard ->
                 if (dashboard.snapshot.rootReady &&
                     dashboard.snapshot.bootRestore == BootRestore.ENABLED) setBootOptIn(true)
             }
@@ -594,7 +659,7 @@ internal class FirewallClient(
                 preferences.edit()
                     .putLong("last_counter_reset_at", System.currentTimeMillis()).apply()
             }
-            val dashboard = dashboardFromOutput(result.exitCode, result.text, vpn)
+            val dashboard = observedDashboard(result.exitCode, result.text, vpn)
             val success = dashboard.snapshot.rootReady && values["operation"] == "SUCCESS"
             val message = when {
                 result.exitCode == ROOT_OUTPUT_INCOMPLETE_EXIT -> ROOT_OUTPUT_DETAILS

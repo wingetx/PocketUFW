@@ -101,6 +101,8 @@ internal class FakeGateway(
     /** While set, requests block here so UI tests can observe progress before completion. */
     @Volatile var gate: java.util.concurrent.CountDownLatch? = null
     @Volatile var requestFailure: Exception? = null
+    /** Fail the follow-up status read without failing the preceding operation. */
+    @Volatile var inspectionFailure: Exception? = null
     /** The result of the next firewall switch, boot switch or removal. */
     @Volatile var operationSuccess = true
     @Volatile var operationMessage = "done"
@@ -114,9 +116,18 @@ internal class FakeGateway(
         requestFailure?.let { throw it }
     }
 
+    @Volatile var lastInsightsRequest: InsightsRequest? = null
+    @Volatile var insightsResult = InsightsResult(error = "NFLOG unavailable")
+    override fun inspectDrops(request: InsightsRequest, recovery: Boolean): InsightsResult {
+        lastInsightsRequest = request
+        calls += if (recovery) "insights-recover" else "insights-capture"
+        waitAtGate()
+        return insightsResult
+    }
     override fun inspectDashboard(): Dashboard {
         calls += "inspect"
         waitAtGate()
+        inspectionFailure?.let { throw it }
         return publish(nextInspections.poll() ?: dashboard)
     }
     override fun refreshCounterActivity(): RuleActivity { calls += "counters"; waitAtGate(); return counterRead }

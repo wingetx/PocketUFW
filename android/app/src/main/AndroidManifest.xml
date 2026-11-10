@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Only so the tile can stop claiming last boot's state. See BootTileReceiver. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 13+ platform back dispatch; earlier versions keep AndroidX BackHandler. -->
     <application
+        tools:targetApi="33"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
         android:label="PocketUFW"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:icon="@mipmap/ic_launcher"

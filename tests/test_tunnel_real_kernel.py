@@ -857,7 +857,8 @@ class TunnelKernelTests(unittest.TestCase):
         say state "$(field state)"
         say uncovered_on "$(field uncovered_ifaces)"
         say report "$(field rules_report)"
-        say hook4 "$(field hook4_04)"
+        # Find the tunnel target rather than assuming how many physical hooks precede it.
+        say hook4 "$(field 'hook4_[0-9][0-9]' | grep -- '-j POCKETUFW_VPN$')"
         say main4 "$(field main4_12)"
         say filter "$(field tunnel_filter)"
         say blocked "$(field ipv4_tunnel_blocked)"

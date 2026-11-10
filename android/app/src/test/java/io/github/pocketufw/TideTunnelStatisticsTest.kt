@@ -133,17 +133,27 @@ class TideTunnelStatisticsTest {
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
 
-    @Test fun statisticsPillUsesExistingMeasurementsAndRefreshIsCounterOnly() {
+    @Test fun activityOwnsStatisticsAndRefreshIsCounterOnly() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = tunnelActivity())
         open(fake)
-        node("Statistics").performScrollTo()
-        shot("statistics-collapsed")
+        node("Statistics").assertDoesNotExist()
+        compose.onNodeWithTag("statistics-pill").assertDoesNotExist()
+        node("Refresh counters").assertDoesNotExist()
+        node("Reset counters").assertDoesNotExist()
         node("Physical interfaces").assertDoesNotExist()
-        click("Statistics")
+        shot("firewall-without-statistics")
+        compose.onNodeWithText("Activity").performClick()
         node("Physical interfaces").assertExists()
         node("Tunnel interfaces").assertExists()
         node("Drop-rule matches: 153").assertExists()
+        node("IPv4 replies").assertExists()
+        node("IPv6 replies").assertExists()
+        node("84,112").assertExists()
+        node("20,377").assertExists()
+        node("Reply counts by address family").assertDoesNotExist()
+        node("Hide reply counts by family").assertDoesNotExist()
         node("IPv4 tunnel replies").assertExists()
+        node("IPv6 tunnel replies").assertExists()
         node("115").assertExists()
         node("148").assertExists()
         node("Return traffic").performScrollTo()
@@ -154,11 +164,20 @@ class TideTunnelStatisticsTest {
         click("Refresh counters")
         compose.settle { fake.count("counters") == 1 }
         assertEquals(listOf("inspect", "counters"), fake.calls.toList())
+        node("Insights").performClick()
+        node("COUNTER SNAPSHOT").assertDoesNotExist()
+        node("Refresh counters").assertDoesNotExist()
+        node("Reset counters").assertDoesNotExist()
+        node("Settings").performClick()
+        node("Statistics").assertDoesNotExist()
+        node("Refresh counters").assertDoesNotExist()
+        node("Reset counters").assertDoesNotExist()
+        assertEquals(listOf("inspect", "counters"), fake.calls.toList())
     }
 
-    @Test fun pillResetUsesTheExistingSingleResetForEveryOwnedCounter() {
+    @Test fun activityResetUsesTheExistingSingleResetForEveryOwnedCounter() {
         val fake = FakeGateway(tunnelDashboard())
-        open(fake); click("Statistics"); click("Reset counters")
+        open(fake); compose.onNodeWithText("Activity").performClick(); click("Reset counters")
         node("all owned physical and tunnel", true).assertExists()
         compose.onNodeWithTag("confirm-reset-counters").performClick()
         compose.settle { fake.count("reset-counters") == 1 }
@@ -167,7 +186,7 @@ class TideTunnelStatisticsTest {
 
     @Test fun changedPinsOnLightweightRefreshInvalidateOldAuthorization() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = tunnelActivity().copy(tailnetPin4 = "100.64.0.9/32"))
-        open(fake); click("Statistics"); click("Refresh counters")
+        open(fake); compose.onNodeWithText("Activity").performClick(); click("Refresh counters")
         compose.settle { compose.hasText("tunnel policy changed", true) }
         node("Last known reading only.", true).assertExists()
         compose.onNodeWithTag("reset-counters").assertIsNotEnabled()
@@ -177,7 +196,7 @@ class TideTunnelStatisticsTest {
     @Test fun physicalOnlyCounterRefreshDoesNotRequireAnOwnershipRecheck() {
         val fake = FakeGateway(off(), counterRead = sampleActivity().copy(
             tunnelFilter = TunnelFilter.OFF, tunnelMode = TunnelMode.OFF))
-        open(fake); click("Statistics"); click("Refresh counters")
+        open(fake); compose.onNodeWithText("Activity").performClick(); click("Refresh counters")
         compose.settle { compose.hasText("Counters refreshed at", true) }
         node("Tunnel filtering is off; no current tunnel measurement.").assertExists()
         compose.onNodeWithTag("reset-counters").assertIsEnabled()
@@ -186,7 +205,7 @@ class TideTunnelStatisticsTest {
 
     @Test fun failedRefreshKeepsBothCounterPlanesAsHistoricalReadings() {
         val fake = FakeGateway(tunnelDashboard(), counterRead = RuleActivity(error = "Tunnel counters unavailable."))
-        open(fake); click("Statistics"); click("Refresh counters")
+        open(fake); compose.onNodeWithText("Activity").performClick(); click("Refresh counters")
         compose.settle { compose.hasText("Tunnel counters unavailable.") }
         node("Drop-rule matches: 153").assertExists()
         node("Last known reading only.", true).assertExists()
@@ -196,7 +215,7 @@ class TideTunnelStatisticsTest {
         val d = activeDashboard()
         val fake = FakeGateway(d.copy(snapshot = d.snapshot.copy(physicalFilter = PhysicalFilter.ACTIVE)))
         open(fake, fontScale = 2f, width = 320)
-        click("Statistics")
+        compose.onNodeWithText("Activity").performClick()
         node("Tunnel counters unavailable.").performScrollTo()
         shot("statistics-large-text")
         node("Tunnel counters unavailable.").assertExists()

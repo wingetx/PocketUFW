@@ -240,7 +240,7 @@ class TideWordingTest {
         assertEquals("VPN tunnel tun0", uncoveredLabel("tun0", active.copy(vpnActive = true, vpnProvider = "Proton VPN")))
         val unknown = active.copy(vpnActive = true, vpnProvider = "Unrecognized VPN", vpnInterface = "tun0")
         assertEquals("VPN tunnel tun0", uncoveredLabel("tun0", unknown))
-        assertEquals("carrier or VPN tunnel ipsec7", uncoveredLabel("ipsec7", proton))
+        assertEquals("unidentified IPsec tunnel ipsec7", uncoveredLabel("ipsec7", proton))
         assertEquals("wg-home", uncoveredLabel("wg-home", proton))
         assertEquals("eth0", uncoveredLabel("eth0", active))
         // A provider that owns a kernel interface gets the same plain words.
@@ -251,7 +251,32 @@ class TideWordingTest {
     @Test fun severalTunnelsAreListedTogether() {
         show(ui(active.copy(vpnActive = true, vpnProvider = "Connected via Tailscale", vpnInterface = "tun1",
             uncoveredInterfaces = listOf("US-DEN-315", "tun1", "ipsec7"))))
-        node("Not filtered: US-DEN-315, traffic inside Tailscale (tun1), carrier or VPN tunnel ipsec7.").assertExists()
+        node("Not filtered: US-DEN-315, traffic inside Tailscale (tun1), unidentified IPsec tunnel ipsec7.").assertExists()
+        node(CARRIER_IMS_NOTICE).assertDoesNotExist()
+    }
+
+    @Test fun androidIdentifiedCarrierImsIsExplainedCalmlyButStillListedAsNotFiltered() {
+        // Frankenpixel's case: Android names ipsec995 as carrier IMS; ipsec7 has no such record.
+        show(ui(active.copy(uncoveredInterfaces = listOf("ipsec995", "ipsec7"), carrierImsInterfaces = setOf("ipsec995"))))
+        node("Not filtered: carrier calling network (ipsec995), unidentified IPsec tunnel ipsec7.").assertExists()
+        node(CARRIER_IMS_NOTICE).assertExists()
+        // The partial-coverage warning is preserved, never replaced by reassurance.
+        node("RULES VERIFIED · NOT ALL TRAFFIC FILTERED").assertExists()
+        node("Partly filtered¹").assertExists()
+        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+        node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
+    }
+
+    @Test fun carrierImsWordingNeedsAndroidEvidenceAndNeverOverridesTheVpnRecord() {
+        // The name alone is not evidence.
+        assertEquals("unidentified IPsec tunnel ipsec995", uncoveredLabel("ipsec995", active))
+        // IMS evidence for the interface Android's VPN record owns is not believed.
+        val vpnOwned = active.copy(vpnActive = true, vpnProvider = "Unrecognized VPN", vpnInterface = "ipsec995",
+            carrierImsInterfaces = setOf("ipsec995"), uncoveredInterfaces = listOf("ipsec995"))
+        assertEquals("unidentified IPsec tunnel ipsec995", uncoveredLabel("ipsec995", vpnOwned))
+        show(ui(vpnOwned))
+        node(CARRIER_IMS_NOTICE).assertDoesNotExist()
+        node("Not filtered: unidentified IPsec tunnel ipsec995.").assertExists()
     }
 
     @Test fun uncoveredInterfacesAreNamedAndTheHeadlineStopsImplyingFullCoverage() {

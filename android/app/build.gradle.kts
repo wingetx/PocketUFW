@@ -6,13 +6,18 @@ plugins {
 android {
     namespace = "io.github.pocketufw"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
+    packaging { jniLibs { useLegacyPackaging = true } }
 
     defaultConfig {
         applicationId = "io.github.pocketufw"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.1.0-beta5"
+        versionCode = 27
+        versionName = "0.1.0-beta6"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

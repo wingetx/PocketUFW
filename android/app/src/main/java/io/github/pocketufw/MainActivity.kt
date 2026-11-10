@@ -22,6 +22,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
 import java.text.DateFormat
 import java.util.Date
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
 
 /**
  * Authoritative firewall state and user operations. Tide owns only presentation.
- * No change is made to the tile, boot scripts, netfilter engine, or root behavior.
+ * Existing firewall operations retain their gateway; Insights adds a bounded root sample.
  *
  * Exposed to JVM tests through FirewallGateway rather than running root commands.
  */
@@ -86,6 +87,9 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
     var outsideWritePending by remember { mutableStateOf(false) }
     var supersededRechecks by remember { mutableStateOf(0) }
     var removal by remember { mutableStateOf(TideRemoval.NONE) }
+    var insights by remember { mutableStateOf<InsightsResult?>(null) }
+    var insightsRequest by remember { mutableStateOf<InsightsRequest?>(null) }
+    var insightsStopping by remember { mutableStateOf(false) }
     var removalDetail by remember { mutableStateOf("") }
 
     // Preserve Claude's tested guarantee that observable UI state is written
@@ -223,6 +227,44 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
         }
     }
 
+    fun sampleDrops(recovery: Boolean = false) {
+        if (busy || firstRead || !state.rootReady || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        if (!recovery && (verificationInDoubt || state.protection != FirewallClient.Protection.ACTIVE)) return
+        val request = InsightsRequest()
+        insightsRequest = request
+        insightsStopping = false
+        busy = true
+        operation = if (recovery) TideOperation.RECOVER_INSIGHTS else TideOperation.SAMPLE
+        insights = null
+        scope.launch {
+            try {
+                insights = withContext(Dispatchers.IO) { client.inspectDrops(request, recovery) }
+                // A cleanup failure must never leave a stale verified protection claim.
+                verificationInDoubt = true
+            } catch (error: Exception) {
+                verificationInDoubt = true
+                insights = InsightsResult(error = "Insights interrupted. Recheck status and recover leftover probes if needed.")
+                if (error is CancellationException) throw error
+            } finally {
+                request.cancel()
+                insightsRequest = null
+                insightsStopping = false
+                busy = false
+                operation = null
+            }
+            // Refresh existing counter/status views once, after the helper released both locks.
+            recheck()
+        }
+    }
+
+    DisposableEffect(client, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && insightsRequest != null) { insightsRequest?.cancel(); insightsStopping = true }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); insightsRequest?.cancel() }
+    }
+
     LaunchedEffect(client) {
         var finished: FirewallClient.Dashboard? = null
         try {
@@ -337,10 +379,15 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             counterRefreshing = counterRefreshing, counterRefreshNote = counterRefreshNote,
             counterRefreshError = counterRefreshError, verificationInDoubt = verificationInDoubt,
             checkedAt = checkedAt, vpnRefreshing = vpnRefreshing,
+            insights = insights, insightsStopping = insightsStopping,
             removal = removal, removalDetail = removalDetail
         ),
         appVersion = BuildConfig.VERSION_NAME,
         actions = TideActions(
+            sampleDrops = { sampleDrops() },
+            cancelSample = { insightsStopping = true; insightsRequest?.cancel() },
+            recoverInsights = { sampleDrops(recovery = true) },
+            clearInsights = { if (!busy) insights = null },
             recheck = { recheck(showFeedback = true) },
             changeProtection = { next ->
                 if (!busy && !verificationInDoubt && state.rootReady &&

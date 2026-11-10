@@ -1,13 +1,11 @@
 package io.github.pocketufw
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
@@ -17,27 +15,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-internal fun TideStatistics(ui: TideUiState, actions: TideActions) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = { expanded = !expanded }, shape = RoundedCornerShape(50),
-            modifier = Modifier.heightIn(min = 48.dp).testTag("statistics-pill")
-                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }) {
-            TideIcon(R.drawable.tide_activity, tint = Mint)
-            Spacer(Modifier.width(8.dp))
-            Text("Statistics")
-            Spacer(Modifier.width(8.dp))
-            TideDisclosureIcon(expanded)
-        }
-        // Opening the pill uses the last measured snapshot; no root request or polling.
-        if (expanded) TideCounters(ui, actions, compact = true)
-    }
-}
-
-@Composable
-internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolean = false) {
+internal fun TideCounters(ui: TideUiState, actions: TideActions) {
     var resetConfirmation by rememberSaveable { mutableStateOf(false) }
-    var repliesExpanded by rememberSaveable { mutableStateOf(false) }
     val active = ui.snapshot.protection == FirewallClient.Protection.ACTIVE
     val verified = active && !ui.verificationInDoubt
     val verifiedOff = ui.snapshot.protection == FirewallClient.Protection.INACTIVE &&
@@ -63,14 +42,12 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
                     ?: "Bytes unavailable"
                 if (large) {
                     Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
-                        fontSize = if (compact) 28.sp else 48.sp,
-                        lineHeight = if (compact) 36.sp else 54.sp)
+                        fontSize = 48.sp, lineHeight = 54.sp)
                     Text(bytes, style = MaterialTheme.typography.bodySmall, fontFamily = TideMono, color = Muted)
                 } else Row(verticalAlignment = Alignment.Bottom) {
                     Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
-                        fontSize = if (compact) 28.sp else 56.sp,
-                        lineHeight = if (compact) 36.sp else 64.sp,
-                        letterSpacing = if (compact) 0.sp else (-2).sp, modifier = Modifier.weight(1f))
+                        fontSize = 56.sp, lineHeight = 64.sp,
+                        letterSpacing = (-2).sp, modifier = Modifier.weight(1f))
                     Text(bytes, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall,
                         fontFamily = TideMono, color = Muted)
                 }
@@ -90,16 +67,8 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions, compact: Boolea
                 }
                 Text(count(activity.totalReplies), fontFamily = TideMono, fontSize = 28.sp, lineHeight = 34.sp)
             }
-            TextButton(onClick = { repliesExpanded = !repliesExpanded },
-                modifier = Modifier.heightIn(min = 48.dp)
-                    .semantics { stateDescription = if (repliesExpanded) "Expanded" else "Collapsed" },
-                contentPadding = PaddingValues(vertical = 8.dp), shape = RectangleShape) {
-                Text(if (repliesExpanded) "Hide reply counts by family" else "Reply counts by address family")
-            }
-            if (repliesExpanded) {
-                TidePolicyRow(R.drawable.tide_reply, "IPv4 replies", count(activity.ipv4Replies), TideMono)
-                TidePolicyRow(R.drawable.tide_reply, "IPv6 replies", count(activity.ipv6Replies), TideMono)
-            }
+            TidePolicyRow(R.drawable.tide_reply, "IPv4 replies", count(activity.ipv4Replies), TideMono)
+            TidePolicyRow(R.drawable.tide_reply, "IPv6 replies", count(activity.ipv6Replies), TideMono)
             TideDivider()
             Text("Tunnel interfaces", style = MaterialTheme.typography.titleMedium)
             val tunnel = activity.tunnel

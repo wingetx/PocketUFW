@@ -1,5 +1,13 @@
 # PocketUFW Android beta
 
+**Beta 6 candidate:** `0.1.0-beta6` (versionCode 27) adds bounded native Insights
+DROP sampling, verified cleanup/recovery, carrier IMS wording and Tide cleanup.
+Activity is the single home for counters; Insights shows sampled traffic.
+Strict verification can withhold samples during Android/OEM rule changes.
+See [release notes](../docs/releases/0.1.0-beta6.md) and
+[implementation, limits and validation](../docs/insights-v1.md).
+This candidate is unsigned and awaits independent review; published Beta 5 is unchanged.
+
 **Beta 5 update:** The Tide interface provides optional **PINNED** and
 **DENY-ONLY** tunnel filtering in Settings, off by default, with separate physical
 and tunnel counters. It reports pinned and observed tailnet destinations,
@@ -8,10 +16,11 @@ Tunnel rules are not restored after reboot. See [tunnel policy and limitations](
 and the [signed Beta 5 release](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5).
 
 
-**0.1.0-beta5 (versionCode 26)** is a testing release of the one-switch
-Android root firewall, not a production security guarantee. Pixel 9a and
-Moto G 5G (2024) have been hardware tested; other Android variants may
-behave differently. Root and legacy iptables/ip6tables support are required.
+**0.1.0-beta6 (versionCode 27)** is a testing candidate of the one-switch
+Android root firewall, not a production security guarantee. Earlier builds were
+hardware tested on Pixel 9a and Moto G 5G (2024); the final Beta 6 candidate
+has not been installed or device-tested. Other Android variants may behave
+differently. Root and legacy iptables/ip6tables support are required.
 
 For F-Droid, the simplest route is source-tagged builds signed by F-Droid.
 The published GitHub beta2 and newer APKs use PocketUFW's release signing
@@ -153,7 +162,8 @@ No changes to root operations, Android tile behavior, or kernel rules.
 Install a Java 17 JDK and Android SDK with Android API level 36. Set the
 `ANDROID_HOME` environment variable or configure an **ignored**
 `android/local.properties` with `sdk.dir=/path/to/android-sdk`.
-The wrapper uses Gradle 8.9.
+The wrapper uses Gradle 8.9. Insights also requires NDK 27.2.12479018 and
+CMake 3.22.1. For an unsigned release, see the [Beta 6 build procedure](../docs/releases/0.1.0-beta6.md#unsigned-build).
 
 ```sh
 cd android

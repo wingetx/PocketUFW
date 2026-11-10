@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -24,7 +23,7 @@ import org.junit.runner.RunWith
 class MainActivityEntryPointTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun mainAndTileLaunchesReuseOneScreenAndStatisticsNeverRequestsRoot() {
+    @Test fun mainAndTileLaunchesReuseOneScreenAndActivityNeverRequestsRoot() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val app = instrumentation.targetContext.applicationContext as Application
         val fake = OffGateway()
@@ -70,11 +69,10 @@ class MainActivityEntryPointTest {
                         compose.waitForIdle()
                         assertEquals(listOf(original), created.toList())
                         assertEquals(action, original.intent.action)
-                        val pill = compose.onNodeWithTag("statistics-pill")
-                        pill.performScrollTo().performTouchInput { click(center) }
-                        pill.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-                        pill.performTouchInput { click(center) }
-                        pill.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+                        compose.onNodeWithText("Activity").performTouchInput { click(center) }
+                        compose.onNodeWithText("Counters").assertIsDisplayed()
+                        compose.onNodeWithText("Firewall").performTouchInput { click(center) }
+                        compose.onNodeWithText("Turn firewall on").assertIsDisplayed()
                         assertEquals(listOf("inspect"), fake.calls.toList())
                     }
                 }
@@ -88,6 +86,7 @@ class MainActivityEntryPointTest {
 }
 
 private class OffGateway : FirewallGateway {
+    override fun inspectDrops(request: InsightsRequest, recovery: Boolean) = InsightsResult(error = "Unavailable in test")
     val calls = CopyOnWriteArrayList<String>()
     override fun inspectDashboard(): FirewallClient.Dashboard {
         calls += "inspect"

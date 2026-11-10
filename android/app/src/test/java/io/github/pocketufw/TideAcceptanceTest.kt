@@ -127,25 +127,29 @@ class TideAcceptanceTest {
         node("Tunnel protection").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
     }
 
-    @Test fun statisticsDisclosuresDescribeTheirStateInDarkMode() {
+    @Test fun activityShowsBothReplyFamiliesDirectlyInDarkMode() {
         show(TideUiState(snapshot = tunnelDashboard().snapshot,
-            counters = tunnelActivity().copy(lastManualResetAt = READ_AT)),
-            destination = TideDestination.FIREWALL, dark = true)
-        val pill = compose.onNodeWithTag("statistics-pill")
-        pill.performScrollTo().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
-        shot("statistics-collapsed-dark")
-        pill.performClick().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-        click("Reply counts by address family")
-        node("Hide reply counts by family").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-        node("IPv6 replies").performScrollTo()
-        shot("statistics-physical-dark")
+            counters = tunnelActivity().copy(lastManualResetAt = READ_AT)), dark = true)
+        compose.onNodeWithTag("statistics-pill").assertDoesNotExist()
+        node("Reply counts by address family").assertDoesNotExist()
+        node("IPv4 replies").performScrollTo().assertIsDisplayed()
+        node("IPv6 replies").performScrollTo().assertIsDisplayed()
+        node("84,112").assertExists()
+        node("20,377").assertExists()
+        shot("activity-physical-dark")
+        node("IPv4 tunnel replies").performScrollTo().assertIsDisplayed()
+        node("IPv6 tunnel replies").performScrollTo().assertIsDisplayed()
         node("IPv6 tailnet matches").performScrollTo()
-        shot("statistics-tunnel-dark")
+        shot("activity-tunnel-dark")
     }
 
     @Test fun largeTextKeepsCounterDescriptionsAndActionsAccessible() {
         show(TideUiState(snapshot = tunnelDashboard().snapshot, counters = tunnelActivity()), fontScale = 2f, width = 320)
         compose.onAllNodesWithText("Family").assertCountEquals(0) // Stacked rows have inline labels.
+        node("Reply counts by address family").assertDoesNotExist()
+        node("IPv4 replies").performScrollTo().assertIsDisplayed()
+        node("IPv6 replies").performScrollTo().assertIsDisplayed()
+        shot("activity-physical-large-light")
         compose.onNodeWithContentDescription("Tunnel IPv4: 71 dropped packets, 930 bytes")
             .performScrollTo().assertIsDisplayed()
         shot("statistics-tunnel-large-light")

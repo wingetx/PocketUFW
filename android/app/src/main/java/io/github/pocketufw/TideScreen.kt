@@ -313,7 +313,7 @@ internal fun uncoveredLabel(name: String, state: FirewallClient.Snapshot): Strin
     }
 }
 // Android's VPN record outranks IMS evidence for the same name.
-private fun isCarrierIms(name: String, state: FirewallClient.Snapshot) =
+internal fun isCarrierIms(name: String, state: FirewallClient.Snapshot) =
     name in state.carrierImsInterfaces && name != state.vpnInterface
 
 internal const val CARRIER_IMS_NOTICE =
@@ -326,44 +326,39 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
                          showRules: () -> Unit, showSettings: () -> Unit) {
     val state = ui.snapshot
     val active = state.protection == FirewallClient.Protection.ACTIVE
-    val verified = active && !ui.verificationInDoubt
+    val notVerified = ui.verificationInDoubt || (active && !state.rootReady)
+    val verified = active && !notVerified
     val checking = state.protection == FirewallClient.Protection.CHECKING
-    val attention = ui.verificationInDoubt || state.protection in listOf(
+    val attention = notVerified || state.protection in listOf(
         FirewallClient.Protection.DEGRADED, FirewallClient.Protection.ROOT_REQUIRED)
-    // Rules can verify while traffic still goes around them. The state stays ACTIVE;
-    // only what it's allowed to imply changes.
-    val bypass = bypassRules(ui.report)
-    val coverageGap = active && (state.uncoveredInterfaces.isNotEmpty() || bypass.isNotEmpty())
-    val coverageUnknown = active && (ui.report == null || !state.interfaceInventoryAvailable)
-    val accent = if (coverageGap || coverageUnknown || attention) Amber else if (verified) Mint else Muted
-    val title = if (ui.verificationInDoubt) "Not\nverified." else when (state.protection) {
+    // Installed-rule verification and traffic coverage are distinct findings.
+    val accent = if (attention) Amber else if (verified) VerifiedProtection else Muted
+    val title = if (notVerified) "Not\nverified." else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> "Active."
         FirewallClient.Protection.INACTIVE -> "Off."
         FirewallClient.Protection.CHECKING -> "Checking…"
         FirewallClient.Protection.DEGRADED -> "Needs\nattention."
         FirewallClient.Protection.ROOT_REQUIRED -> "Root\nrequired."
     }
-    val label = if (ui.verificationInDoubt) "Recheck required" else when (state.protection) {
-        FirewallClient.Protection.ACTIVE ->
-            if (coverageGap) "Rules verified · not all traffic filtered"
-            else if (coverageUnknown) "Rules verified · coverage unknown" else "Kernel rules verified"
+    val label = if (notVerified) "Recheck required" else when (state.protection) {
+        FirewallClient.Protection.ACTIVE -> "Protection active · rules verified"
         FirewallClient.Protection.INACTIVE -> "PocketUFW is inactive"
         FirewallClient.Protection.CHECKING -> "Reading kernel state"
         FirewallClient.Protection.DEGRADED -> "Protection not verified"
         FirewallClient.Protection.ROOT_REQUIRED -> "Root permission needed"
     }
-    val icon = if (ui.verificationInDoubt || coverageGap || coverageUnknown) R.drawable.tide_warning else when (state.protection) {
+    val icon = if (notVerified) R.drawable.tide_warning else when (state.protection) {
         FirewallClient.Protection.ACTIVE -> R.drawable.tide_check
         FirewallClient.Protection.INACTIVE -> R.drawable.tide_off
         FirewallClient.Protection.CHECKING -> R.drawable.tide_refresh
         FirewallClient.Protection.DEGRADED -> R.drawable.tide_warning
         FirewallClient.Protection.ROOT_REQUIRED -> R.drawable.tide_key
     }
-    Column(Modifier.semantics(mergeDescendants = true) {
+    Column(Modifier.testTag("protection-status").semantics(mergeDescendants = true) {
+        heading()
         stateDescription = when {
-            ui.verificationInDoubt -> "Not verified; recheck required"
-            coverageGap -> "Active; not all traffic filtered"
-            coverageUnknown -> "Active; coverage unknown"
+            notVerified -> "Not verified; recheck required"
+            verified -> "Protection active; rules verified. ${coverageSummary(ui)}."
             else -> state.protection.name.replace('_', ' ')
         }
         liveRegion = LiveRegionMode.Polite
@@ -394,40 +389,21 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     }
     Text(when {
         checking -> "Reading firewall rules and Magisk boot status. Protection has not yet been verified."
-        ui.verificationInDoubt -> "A later read failed or the Quick Settings tile changed. " +
+        notVerified -> "A later read failed or the Quick Settings tile changed. " +
             "Last known status is not proof of current protection. Recheck the kernel."
-        coverageGap -> "Unsolicited incoming traffic is blocked only where PocketUFW's rules see it."
-        coverageUnknown -> "PocketUFW's rules are installed, but traffic coverage could not be fully inspected."
-        active -> "Unsolicited incoming traffic is blocked on supported physical interfaces."
+        active -> "Filtering is active on configured hooks. This verifies installed rules, not complete traffic coverage."
         state.protection == FirewallClient.Protection.INACTIVE -> "PocketUFW rules are not installed. Android’s own firewall remains unchanged."
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
-    if (active && state.uncoveredInterfaces.isNotEmpty()) {
-        TideNotice("Not filtered: " + state.uncoveredInterfaces.joinToString(", ") { uncoveredLabel(it, state) } + ".", true)
-        // Explains, never excuses: the gap above and the partial-coverage status both remain.
-        if (state.uncoveredInterfaces.any { isCarrierIms(it, state) }) TideNotice(CARRIER_IMS_NOTICE)
-    }
-    if (active && bypass.isNotEmpty()) TideNotice("$BYPASS_NOTICE See Kernel rules.", true)
-    if (coverageUnknown) TideNotice("Coverage information is incomplete. Recheck to inspect interfaces and earlier INPUT rules.", true)
-    if (state.rootReady && !ui.verificationInDoubt) when (state.tunnelFilter) {
-        FirewallClient.TunnelFilter.ON -> TideNotice(
-            if (state.tunnelMode == FirewallClient.TunnelMode.DENY_ONLY)
-                "Tunnel rules are on for listed hooks, until restart. Deny-only has no tailnet exemption: unsolicited peer connections remain filtered if Tailscale starts later."
-            else "Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.", true)
-        FirewallClient.TunnelFilter.DEGRADED -> TideNotice("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.", true)
-        FirewallClient.TunnelFilter.OFF -> Text("Tunnel filtering is off.",
-            style = MaterialTheme.typography.bodySmall, color = Muted)
-        FirewallClient.TunnelFilter.UNKNOWN -> Unit
-    }
+    if (active) TideCoverageDetails(ui, showRules)
+    if (state.rootReady && !ui.verificationInDoubt && state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
+        TideNotice("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.", true)
     if (state.rootReady && !ui.verificationInDoubt && state.tunnelMode == FirewallClient.TunnelMode.PINNED) {
-        Text("Pinned tailnet destinations: ${state.tailnetPin4 ?: "unknown"}, ${state.tailnetPin6 ?: "unknown"}.",
-            style = MaterialTheme.typography.bodySmall, color = Muted)
         when (state.tailnetConnectivity) {
             FirewallClient.TailnetConnectivity.REAUTHORIZE -> TideNotice(
                 "Tailnet connectivity: REAUTHORIZE. Last verified addresses are ${state.tailnetObserved4 ?: "unknown"}, ${state.tailnetObserved6 ?: "unknown"}. Installed protection is unchanged. In Settings, turn tunnel protection off, then enable PINNED to verify and authorize the new addresses.", true)
-            FirewallClient.TailnetConnectivity.MATCH -> Text("At the last full inspection, tailnet pins matched verified addresses; reachability has not been tested.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
-            else -> TideNotice("Tailnet connectivity could not be verified. Existing pinned destinations were kept; this does not change the enforcement verdict.", true)
+            FirewallClient.TailnetConnectivity.MATCH -> Unit
+            else -> TideNotice("Tailnet connectivity could not be verified. Existing pinned destinations were kept; this does not change the enforcement verdict. Recheck status before relying on tailnet access.", true)
         }
     }
     restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
@@ -436,7 +412,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     TidePrimaryButton(
         label = when {
             checking -> "Checking kernel protection"
-            attention && ui.verificationInDoubt -> "Recheck status"
+            notVerified -> "Recheck status"
             active -> "Turn firewall off"
             state.protection == FirewallClient.Protection.INACTIVE -> "Turn firewall on"
             state.protection == FirewallClient.Protection.ROOT_REQUIRED -> "Check root access"
@@ -474,9 +450,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TidePolicyRow(R.drawable.tide_down, "Physical protection", physicalStatus(ui))
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {
-            verified && coverageGap -> "Partly filtered¹"
-            verified && coverageUnknown -> "Coverage unknown"
-            verified -> "Matched deny policy¹"
+            verified -> "Filtering active"
             !ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE -> "Not installed"
             else -> "Not verified"
         })
@@ -493,6 +467,4 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             else -> "Root access not confirmed · $appVersion"
         }, style = MaterialTheme.typography.bodySmall, color = Muted)
     }
-    Text("¹ Physical filtering covers supported interfaces. Tunnel filtering is separate and optional. Earlier Android/OEM rules may accept traffic before PocketUFW’s hooks.",
-        style = MaterialTheme.typography.bodySmall, color = Muted)
 }

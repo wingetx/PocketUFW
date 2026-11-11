@@ -54,6 +54,8 @@ class TideWordingTest {
         compose.waitForIdle()
     }
 
+    private fun expandCoverage() = node("Coverage details").performScrollTo().performClick()
+
     private val active = activeDashboard().snapshot
     private fun ui(snapshot: Snapshot, report: FirewallClient.KernelReport? = sampleReport(), doubt: Boolean = false) =
         TideUiState(snapshot = snapshot, counters = sampleActivity(), report = report,
@@ -62,7 +64,9 @@ class TideWordingTest {
     // ---- Firewall tab headline ----
 
     @Test fun tunnelFilteringDisclosesSessionAndTrustLimits() {
-        show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON)))
+        show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
+            tunnelMode = FirewallClient.TunnelMode.PINNED, tailnetConnectivity = FirewallClient.TailnetConnectivity.MATCH)))
+        expandCoverage()
         node("Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.").assertExists()
         node("Settings").performClick()
         node("Restores physical filtering only; tunnel filtering never restores.", substring = true).assertExists()
@@ -75,6 +79,7 @@ class TideWordingTest {
             tailnetPin4 = "100.64.0.1/32", tailnetPin6 = "fd7a:115c:a1e0::1/128",
             tailnetObserved4 = "100.64.0.9/32", tailnetObserved6 = "fd7a:115c:a1e0::9/128")))
         node("Active.").assertExists()
+        expandCoverage()
         node("Pinned tailnet destinations: 100.64.0.1/32, fd7a:115c:a1e0::1/128.").assertExists()
         node("Tailnet connectivity: REAUTHORIZE.", substring = true).assertExists()
         node("100.64.0.9/32", substring = true).assertExists()
@@ -84,6 +89,7 @@ class TideWordingTest {
     @Test fun denyOnlyWarnsAboutTailscaleStartingLater() {
         show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
             tunnelMode = FirewallClient.TunnelMode.DENY_ONLY)))
+        expandCoverage()
         node("Deny-only has no tailnet exemption", substring = true).assertExists()
         node("unsolicited peer connections remain filtered if Tailscale starts later", substring = true).assertExists()
         node("Only pinned Tailscale destinations", substring = true).assertDoesNotExist()
@@ -92,8 +98,8 @@ class TideWordingTest {
     private data class Headline(val title: String, val label: String, val body: String, val button: String)
 
     private val headlines = listOf(
-        Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "RULES VERIFIED · COVERAGE UNKNOWN",
-            "PocketUFW's rules are installed, but traffic coverage could not be fully inspected.", "Turn firewall off"),
+        Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "PROTECTION ACTIVE · RULES VERIFIED",
+            "Filtering is active on configured hooks. This verifies installed rules, not complete traffic coverage.", "Turn firewall off"),
         Snapshot(Protection.INACTIVE, rootReady = true) to Headline("Off.", "POCKETUFW IS INACTIVE",
             "PocketUFW rules are not installed. Android’s own firewall remains unchanged.", "Turn firewall on"),
         Snapshot(Protection.DEGRADED, rootReady = true, details = "Incomplete firewall.") to Headline(
@@ -152,26 +158,26 @@ class TideWordingTest {
             "Last known status is not proof of current protection. Recheck the kernel.").assertExists()
         node("Recheck status").assertExists()
         node("Active.").assertDoesNotExist()
-        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
         node("Turn firewall off").assertDoesNotExist()
-        node("Matched deny policy¹").assertDoesNotExist()
+        node("Filtering active").assertDoesNotExist()
     }
 
     @Test fun policyRowOnlyClaimsTheDenyPolicyWhenVerified() {
         show(ui(active))
-        node("Matched deny policy¹").assertExists()
+        node("Filtering active").assertExists()
     }
 
     @Test fun policyRowIsHonestWhenOff() {
         show(ui(Snapshot(Protection.INACTIVE, rootReady = true)))
         node("Not installed").assertExists()
-        node("Matched deny policy¹").assertDoesNotExist()
+        node("Filtering active").assertDoesNotExist()
     }
 
     @Test fun policyRowIsHonestWhenUnverified() {
         show(ui(Snapshot(Protection.DEGRADED, rootReady = true)))
         compose.onAllNodesWithText("Not verified").assertCountEquals(2)
-        node("Matched deny policy¹").assertDoesNotExist()
+        node("Filtering active").assertDoesNotExist()
     }
 
     // ---- failed boot restoration ----
@@ -225,9 +231,10 @@ class TideWordingTest {
     @Test fun aVpnTunnelAloneIsNamedAndTheHeadlineStopsImplyingFullCoverage() {
         show(ui(active.copy(vpnActive = true, vpnProvider = "Proton VPN", vpnInterface = "tun0",
             uncoveredInterfaces = listOf("tun0"))))
+        expandCoverage()
         node("Not filtered: traffic inside Proton VPN (tun0).").assertExists()
-        node("RULES VERIFIED · NOT ALL TRAFFIC FILTERED").assertExists()
-        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+        node("Coverage inspected · known limitations").assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
     }
 
     @Test fun everyKindOfTunnelIsDescribedWithoutGuessingItsOwner() {
@@ -251,6 +258,7 @@ class TideWordingTest {
     @Test fun severalTunnelsAreListedTogether() {
         show(ui(active.copy(vpnActive = true, vpnProvider = "Connected via Tailscale", vpnInterface = "tun1",
             uncoveredInterfaces = listOf("US-DEN-315", "tun1", "ipsec7"))))
+        expandCoverage()
         node("Not filtered: US-DEN-315, traffic inside Tailscale (tun1), unidentified IPsec tunnel ipsec7.").assertExists()
         node(CARRIER_IMS_NOTICE).assertDoesNotExist()
     }
@@ -258,12 +266,13 @@ class TideWordingTest {
     @Test fun androidIdentifiedCarrierImsIsExplainedCalmlyButStillListedAsNotFiltered() {
         // Frankenpixel's case: Android names ipsec995 as carrier IMS; ipsec7 has no such record.
         show(ui(active.copy(uncoveredInterfaces = listOf("ipsec995", "ipsec7"), carrierImsInterfaces = setOf("ipsec995"))))
+        expandCoverage()
         node("Not filtered: carrier calling network (ipsec995), unidentified IPsec tunnel ipsec7.").assertExists()
         node(CARRIER_IMS_NOTICE).assertExists()
-        // The partial-coverage warning is preserved, never replaced by reassurance.
-        node("RULES VERIFIED · NOT ALL TRAFFIC FILTERED").assertExists()
-        node("Partly filtered¹").assertExists()
-        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+        // Known limits remain available without changing the verified protection verdict.
+        node("Coverage inspected · known limitations").assertExists()
+        node("Filtering active").assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
     }
 
@@ -275,18 +284,20 @@ class TideWordingTest {
             carrierImsInterfaces = setOf("ipsec995"), uncoveredInterfaces = listOf("ipsec995"))
         assertEquals("unidentified IPsec tunnel ipsec995", uncoveredLabel("ipsec995", vpnOwned))
         show(ui(vpnOwned))
+        expandCoverage()
         node(CARRIER_IMS_NOTICE).assertDoesNotExist()
         node("Not filtered: unidentified IPsec tunnel ipsec995.").assertExists()
     }
 
     @Test fun uncoveredInterfacesAreNamedAndTheHeadlineStopsImplyingFullCoverage() {
         show(ui(active.copy(uncoveredInterfaces = listOf("eth0", "usb0"))))
+        expandCoverage()
         node("Not filtered: eth0, usb0.").assertExists()
         node("Active.").assertExists() // The state itself stays.
-        node("KERNEL RULES VERIFIED").assertDoesNotExist()
-        node("RULES VERIFIED · NOT ALL TRAFFIC FILTERED").assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
+        node("Coverage inspected · known limitations").assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
-        node("Matched deny policy¹").assertDoesNotExist()
+        node("Filtering active").assertExists()
         node("Turn firewall off").assertExists()
     }
 
@@ -294,7 +305,7 @@ class TideWordingTest {
         show(ui(active))
         node("Not filtered", substring = true).assertDoesNotExist()
         node(bypassWarning, substring = true).assertDoesNotExist()
-        node("KERNEL RULES VERIFIED").assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
     }
 
     @Test fun uncoveredIsOnlyDisclosedWhenActive() {
@@ -304,13 +315,15 @@ class TideWordingTest {
 
     @Test fun aBypassRuleIsDisclosedOnTheFirewallTab() {
         show(ui(active, report = bypassReport()))
+        expandCoverage()
         node(bypassWarning, substring = true).assertExists()
         node("Active.").assertExists()
-        node("KERNEL RULES VERIFIED").assertDoesNotExist()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
     }
 
     @Test fun aBypassRuleInEitherFamilyIsDisclosed() {
         show(ui(active, report = bypassReport(rule4 = null, rule6 = "-A INPUT -i wlan0 -j ACCEPT")))
+        expandCoverage()
         node(bypassWarning, substring = true).assertExists()
     }
 
@@ -376,7 +389,7 @@ class TideWordingTest {
     @Test fun nothingIsStrandedUnderTheBannerAtFullScroll() {
         show(ui(active).copy(message = BridgeMessages.VPN_COMMITTED), qualifiers = "w360dp-h640dp-xxhdpi")
         scrollToEnd()
-        val footnote = node("Physical filtering covers supported interfaces", substring = true).fetchSemanticsNode().boundsInRoot
+        val footnote = node("Root access granted", substring = true).fetchSemanticsNode().boundsInRoot
         val banner = compose.onNodeWithTag("banner").fetchSemanticsNode().boundsInRoot
         assertTrue("footnote ${footnote.bottom} runs under banner ${banner.top}", footnote.bottom <= banner.top)
     }

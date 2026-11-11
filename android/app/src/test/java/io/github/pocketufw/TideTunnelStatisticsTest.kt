@@ -145,7 +145,7 @@ class TideTunnelStatisticsTest {
         compose.onNodeWithText("Activity").performClick()
         node("Physical interfaces").assertExists()
         node("Tunnel interfaces").assertExists()
-        node("Drop-rule matches: 153").assertExists()
+        compose.onNodeWithContentDescription("Tunnel Drop-rule matches: 153 packets.", substring = true).assertExists()
         node("IPv4 replies").assertExists()
         node("IPv6 replies").assertExists()
         node("84,112").assertExists()
@@ -156,7 +156,7 @@ class TideTunnelStatisticsTest {
         node("IPv6 tunnel replies").assertExists()
         node("115").assertExists()
         node("148").assertExists()
-        node("Return traffic").performScrollTo()
+        compose.onNodeWithTag("Physical-Return traffic").performScrollTo()
         shot("statistics-physical")
         node("IPv6 tailnet matches").performScrollTo()
         shot("statistics-tunnel")
@@ -207,7 +207,7 @@ class TideTunnelStatisticsTest {
         val fake = FakeGateway(tunnelDashboard(), counterRead = RuleActivity(error = "Tunnel counters unavailable."))
         open(fake); compose.onNodeWithText("Activity").performClick(); click("Refresh counters")
         compose.settle { compose.hasText("Tunnel counters unavailable.") }
-        node("Drop-rule matches: 153").assertExists()
+        compose.onNodeWithContentDescription("Tunnel Drop-rule matches: 153 packets.", substring = true).assertExists()
         node("Last known reading only.", true).assertExists()
     }
 

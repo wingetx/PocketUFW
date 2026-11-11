@@ -28,72 +28,53 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
     }
     val activity = ui.counters
     val large = LocalDensity.current.fontScale > 1.2f ||
-        listOf(activity?.totalBlocked, activity?.totalReplies, activity?.ipv4Blocked, activity?.ipv6Blocked)
+        listOf(activity?.totalBlocked, activity?.totalReplies, activity?.ipv4Blocked, activity?.ipv6Blocked,
+            activity?.tunnel?.let { counterSum(it.ipv4Blocked, it.ipv6Blocked) },
+            activity?.tunnel?.let { counterSum(it.ipv4Replies, it.ipv6Replies) })
             .any { count(it).length > 8 }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (ui.verificationInDoubt) TideNotice(
             "Last known reading only. Current kernel protection is not verified; recheck before acting.", true)
         if (active && activity?.measured == true) {
             Text("Physical interfaces", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("PACKETS MATCHED DROP RULES", style = MaterialTheme.typography.labelSmall,
-                    color = Muted, letterSpacing = 1.sp)
-                val bytes = counterSum(activity.ipv4Bytes, activity.ipv6Bytes)?.let { byteCount(it) }
-                    ?: "Bytes unavailable"
-                if (large) {
-                    Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
-                        fontSize = 48.sp, lineHeight = 54.sp)
-                    Text(bytes, style = MaterialTheme.typography.bodySmall, fontFamily = TideMono, color = Muted)
-                } else Row(verticalAlignment = Alignment.Bottom) {
-                    Text(count(activity.totalBlocked), color = Foreground, fontFamily = TideMono,
-                        fontSize = 56.sp, lineHeight = 64.sp,
-                        letterSpacing = (-2).sp, modifier = Modifier.weight(1f))
-                    Text(bytes, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall,
-                        fontFamily = TideMono, color = Muted)
-                }
-            }
+            CounterTotal("Physical", "Drop-rule matches", activity.totalBlocked,
+                counterSum(activity.ipv4Bytes, activity.ipv6Bytes)?.let { byteCount(it) } ?: "Bytes unavailable", large)
             if (!large) CounterHeader()
             CounterFamily("Physical", "IPv4", activity.ipv4Blocked, activity.ipv4Bytes, large)
             CounterFamily("Physical", "IPv6", activity.ipv6Blocked, activity.ipv6Bytes, large)
             TideDivider()
-            if (large) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Return traffic", style = MaterialTheme.typography.titleMedium)
-                Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
-                Text(count(activity.totalReplies), fontFamily = TideMono, fontSize = 30.sp, lineHeight = 36.sp)
-            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Return traffic", style = MaterialTheme.typography.titleMedium)
-                    Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
-                }
-                Text(count(activity.totalReplies), fontFamily = TideMono, fontSize = 28.sp, lineHeight = 34.sp)
-            }
+            CounterTotal("Physical", "Return traffic", activity.totalReplies, "Established / related packets", large)
             TidePolicyRow(R.drawable.tide_reply, "IPv4 replies", count(activity.ipv4Replies), TideMono)
             TidePolicyRow(R.drawable.tide_reply, "IPv6 replies", count(activity.ipv6Replies), TideMono)
             TideDivider()
             Text("Tunnel interfaces", style = MaterialTheme.typography.titleMedium)
             val tunnel = activity.tunnel
             if (activity.tunnelFilter == FirewallClient.TunnelFilter.ON && tunnel != null) {
-                Text("Drop-rule matches: ${count(counterSum(tunnel.ipv4Blocked, tunnel.ipv6Blocked))}",
-                    style = MaterialTheme.typography.bodyLarge, color = Foreground, fontFamily = TideMono)
+                CounterTotal("Tunnel", "Drop-rule matches", counterSum(tunnel.ipv4Blocked, tunnel.ipv6Blocked),
+                    counterSum(tunnel.ipv4Bytes, tunnel.ipv6Bytes)?.let { byteCount(it) } ?: "Bytes unavailable", large)
                 if (!large) CounterHeader()
                 CounterFamily("Tunnel", "IPv4", tunnel.ipv4Blocked, tunnel.ipv4Bytes, large)
                 CounterFamily("Tunnel", "IPv6", tunnel.ipv6Blocked, tunnel.ipv6Bytes, large)
-                Text("Established / related packets", style = MaterialTheme.typography.bodySmall, color = Muted)
+                TideDivider()
+                CounterTotal("Tunnel", "Return traffic", counterSum(tunnel.ipv4Replies, tunnel.ipv6Replies),
+                    "Established / related packets", large)
                 TidePolicyRow(R.drawable.tide_reply, "IPv4 tunnel replies", count(tunnel.ipv4Replies), TideMono)
                 TidePolicyRow(R.drawable.tide_reply, "IPv6 tunnel replies", count(tunnel.ipv6Replies), TideMono)
                 if (activity.tunnelMode == FirewallClient.TunnelMode.PINNED) {
+                    TideDivider()
+                    Text("Tailnet exemptions", style = MaterialTheme.typography.titleMedium)
                     TidePolicyRow(R.drawable.tide_check, "IPv4 tailnet matches", count(tunnel.ipv4Tailnet), TideMono)
                     TidePolicyRow(R.drawable.tide_check, "IPv6 tailnet matches", count(tunnel.ipv6Tailnet), TideMono)
-                    Text("Tailnet-exempt packets match before the established-reply rule.",
+                    Text("Tailnet-exempt packets match before the established-reply rule. They are separate from Return traffic.",
                         style = MaterialTheme.typography.bodySmall, color = Muted)
                 }
             } else Text(if (activity.tunnelFilter == FirewallClient.TunnelFilter.OFF)
                 "Tunnel filtering is off; no current tunnel measurement."
                 else "Tunnel counters unavailable.", style = MaterialTheme.typography.bodySmall, color = Muted)
             Text("Last checked: " + readTime(activity.checkedAt), style = MaterialTheme.typography.bodySmall,
-                color = Muted, fontFamily = TideMono)
+                color = Muted)
             if (activity.lastManualResetAt > 0L) Text("Last manual counter reset: " + readTime(activity.lastManualResetAt),
-                style = MaterialTheme.typography.bodySmall, color = Muted, fontFamily = TideMono)
+                style = MaterialTheme.typography.bodySmall, color = Muted)
         } else {
             TideNotice(if (verifiedOff) "No counters exist because PocketUFW’s rules aren’t installed."
                 else if (!active) "Counters unavailable while protection is not verified."
@@ -137,6 +118,27 @@ internal fun TideCounters(ui: TideUiState, actions: TideActions) {
         },
         dismissButton = { TextButton(onClick = { resetConfirmation = false }) { Text("Cancel") } }
     )
+}
+
+/** The same hierarchy in both planes; accessibility keeps the scope attached to each total. */
+@Composable
+private fun CounterTotal(scope: String, label: String, total: Long?, detail: String, large: Boolean) {
+    val modifier = Modifier.fillMaxWidth().testTag("$scope-$label").clearAndSetSemantics {
+        contentDescription = "$scope $label: " +
+            (total?.let { "${count(it)} packets" } ?: "unavailable") + ". $detail"
+    }
+    val description: @Composable () -> Unit = {
+        Text(label, style = MaterialTheme.typography.titleMedium)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+    if (large) Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        description()
+        Text(count(total), fontFamily = TideMono, fontSize = 30.sp, lineHeight = 36.sp)
+    } else Row(modifier, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f)) { description() }
+        Text(count(total), fontFamily = TideMono, fontSize = 28.sp, lineHeight = 34.sp)
+    }
 }
 
 @Composable

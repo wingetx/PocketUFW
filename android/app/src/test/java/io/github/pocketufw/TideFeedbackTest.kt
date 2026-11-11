@@ -58,7 +58,7 @@ class TideFeedbackTest {
         compose.settle { compose.hasText("Counters refreshed at", true) }
         advance(6_500)
         compose.onNodeWithTag("banner").assertDoesNotExist()
-        compose.onNodeWithText("Drop-rule matches: 153").assertExists()
+        compose.onNodeWithContentDescription("Tunnel Drop-rule matches: 153 packets.", substring = true).assertExists()
         assertEquals(listOf("inspect", "reset-counters", "counters"), fake.calls.toList())
     }
 

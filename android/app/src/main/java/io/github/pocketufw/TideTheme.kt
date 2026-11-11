@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -83,4 +84,7 @@ internal val Border: Color @Composable get() = MaterialTheme.colorScheme.outline
 internal val Foreground: Color @Composable get() = MaterialTheme.colorScheme.onSurface
 internal val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 internal val Mint: Color @Composable get() = MaterialTheme.colorScheme.primary
+// Protection has its own success color; navigation and actions retain Tide's blue.
+internal val VerifiedProtection: Color @Composable get() =
+    if (Background.luminance() < 0.5f) Color(0xFF85DEB4) else Color(0xFF176443)
 internal val Amber: Color @Composable get() = MaterialTheme.colorScheme.secondary

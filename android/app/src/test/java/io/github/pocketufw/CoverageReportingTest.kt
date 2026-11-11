@@ -29,8 +29,9 @@ class CoverageReportingTest {
         val fake = FakeGateway(parse(bridgeOutput(reportStatus = "UNAVAILABLE")))
         screens += compose.launchScreen(fake)
         compose.settle { fake.count("inspect") == 1 && compose.hasText("Active.") }
-        compose.onNodeWithText("Coverage unknown").assertExists()
-        compose.onNodeWithText("Matched deny policy¹").assertDoesNotExist()
+        compose.onNodeWithText("Coverage unknown · inspection incomplete").assertExists()
+        compose.onNodeWithText("Filtering active").assertExists()
+        compose.onNodeWithText("Coverage inspected · no gaps reported").assertDoesNotExist()
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
 
@@ -40,16 +41,21 @@ class CoverageReportingTest {
         val fake = FakeGateway(dashboard)
         screens += compose.launchScreen(fake)
         compose.settle { compose.hasText("Active.") }
-        compose.onNodeWithText("RULES VERIFIED · COVERAGE UNKNOWN").assertExists()
-        compose.onNodeWithText("Matched deny policy¹").assertDoesNotExist()
+        compose.onNodeWithText("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
+        compose.onNodeWithText("Coverage unknown · inspection incomplete").assertExists()
+        compose.onNodeWithText("Coverage inspected · no gaps reported").assertDoesNotExist()
+        compose.onNodeWithText("Coverage details").performScrollTo().performClick()
+        compose.onNodeWithText("Interface coverage unknown. Recheck status to inspect current interfaces.").assertExists()
     }
 
     @Test fun knownGapsRemainVisibleWhenTheRestOfCoverageIsUnknown() {
         val fake = FakeGateway(parse(bridgeOutput(uncovered = "eth0", reportStatus = "UNAVAILABLE")))
         screens += compose.launchScreen(fake)
         compose.settle { compose.hasText("Active.") }
-        compose.onNodeWithText("Partly filtered¹").assertExists()
-        compose.onNodeWithText("Coverage information is incomplete.", substring = true).assertExists()
+        compose.onNodeWithText("Filtering active").assertExists()
+        compose.onNodeWithText("Known limits · additional coverage unknown").assertExists()
+        compose.onNodeWithText("Coverage details").performScrollTo().performClick()
+        compose.onNodeWithText("Earlier Android/OEM rule coverage unknown.", substring = true).assertExists()
         compose.onNodeWithText("Not filtered: eth0.").assertExists()
     }
 

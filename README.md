@@ -11,9 +11,9 @@
 > [!WARNING]
 > **Experimental beta, not a security guarantee.** PocketUFW requires root and a compatible `iptables`/`ip6tables` backend. Coverage varies by device, kernel, interface naming, and Android/OEM rules. It is not a replacement for Android's security model.
 
-**Latest signed beta:** [PocketUFW 0.1.0-beta5](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5) is published as an **experimental prerelease**, with Tide, optional tunnel filtering, and audited engine fixes. [Download the APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/PocketUFW-0.1.0-beta5.apk) and [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta5/SHA256SUMS.txt). Its source is tagged `v0.1.0-beta5` at commit `508cb29`; later documentation edits do not change that release.
+**Latest signed beta:** [PocketUFW 0.1.0-beta6](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta6) is published as an **experimental prerelease** (versionCode 27), adding on-demand Insights sampling, safer diagnostic recovery, improved carrier coverage explanations, and Tide UI cleanup. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta6/PocketUFW-0.1.0-beta6.apk) and [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta6/SHA256SUMS.txt). Its audited source is tagged `v0.1.0-beta6` at commit `4d963a1`; this README update is documentation-only.
 
-**Local release candidate:** `0.1.0-beta6` (versionCode 27) adds Insights v1 and the Tide cleanup described in the [Beta 6 notes](docs/releases/0.1.0-beta6.md). It is unsigned and awaiting independent review; the published release above remains Beta 5.
+**Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. The existing firewall keeps protecting supported interfaces, and strict cleanup and verification remain enabled. See the [Beta 6 release notes](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta6) for tested coverage and known limitations.
 
 ## What it does
 

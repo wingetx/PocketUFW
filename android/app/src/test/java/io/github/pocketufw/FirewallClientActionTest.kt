@@ -1,6 +1,7 @@
 package io.github.pocketufw
 
 import android.content.Context
+import io.github.pocketufw.FirewallClient.Operation
 import io.github.pocketufw.FirewallClient.Protection
 import io.github.pocketufw.FirewallClient.Snapshot
 import java.io.File
@@ -239,6 +240,79 @@ class FirewallClientActionTest {
         assertFalse(result.success)
         assertEquals("Operation failed: broken pipe", result.explanation)
         assertEquals(Protection.DEGRADED, result.dashboard.snapshot.protection)
+    }
+
+    // ---- the tile cache across a firewall change ----
+
+    /** Each call starts from a verified ON and records what the tile cache held while root ran. */
+    private fun cacheDuringRootCommand(action: () -> Operation): Pair<TileStatusStore.LastChecked?, Operation> {
+        TileStatusStore.publish(app, Snapshot(Protection.ACTIVE, rootReady = true))
+        assertNotNull(TileStatusStore.read(app))
+        var seen: TileStatusStore.LastChecked? = null
+        shell.respond = {
+            seen = TileStatusStore.read(app)
+            ShellResult(0, bridgeOutput(state = "INACTIVE", boot = "DISABLED"))
+        }
+        val operation = action()
+        return seen to operation
+    }
+
+    private val ruleChanges: List<Pair<String, () -> Operation>> = listOf(
+        "disable" to { client.changeProtection(false) },
+        "enable" to { client.changeProtection(true) },
+        "toggle" to { client.toggleProtection(Protection.ACTIVE) },
+        "remove-partial" to { client.removePartialRules() },
+        "prepare-uninstall" to { client.prepareUninstall() },
+        "tunnel-on" to { client.enableTunnelProtection(FirewallClient.TunnelMode.PINNED) },
+        "tunnel-off" to { client.removeTunnelRules() },
+        "tunnel-refresh" to { client.refreshTunnelHooks() },
+        "vpn-refresh" to { client.refreshVerifiedPorts() },
+        "set-ports" to { client.updateUdpExceptions("41641", "", false) },
+        "use-auto" to { client.restoreAutomaticUdpExceptions() },
+    )
+
+    @Test fun everyRuleChangeForgetsTheVerifiedStateBeforeRootRuns() {
+        for ((name, action) in ruleChanges) {
+            val (during, operation) = cacheDuringRootCommand(action)
+            // Had the app died here, this is what the tile would go on showing.
+            assertNull("$name: the tile must not keep the old state while rules may change", during)
+            assertEquals("$name ran", name, shell.actions.last().substringBefore(' '))
+            // The operation's own verified result is then published, not refused as stale.
+            assertFalse("$name: its own result is not superseded", operation.dashboard.superseded)
+            assertEquals(name, Protection.INACTIVE, TileStatusStore.read(app)?.protection)
+        }
+    }
+
+    @Test fun countersAndBootFilesOnlyKeepTheVerifiedState() {
+        for ((name, action) in listOf<Pair<String, () -> Operation>>(
+            "reset-counters" to { client.resetCounters() },
+            "boot-enable" to { client.changeBootRestoration(true) },
+            "boot-disable" to { client.changeBootRestoration(false) })) {
+            val (during, _) = cacheDuringRootCommand(action)
+            assertEquals(name, Protection.ACTIVE, during?.protection)
+        }
+    }
+
+    /** Not an Exception, so nothing after the root command runs: what process death leaves. */
+    private class ProcessDied : Error()
+
+    @Test fun dyingWhileOffOrRemoveRunsLeavesTheTileNotVerified() {
+        for (action in listOf<() -> Operation>({ client.changeProtection(false) }, { client.prepareUninstall() },
+                { FirewallClient(app, TileStatusStore.SOURCE_TILE, shell).toggleProtection(Protection.ACTIVE) })) {
+            TileStatusStore.publish(app, Snapshot(Protection.ACTIVE, rootReady = true))
+            shell.respond = { throw ProcessDied() }
+            assertThrows(ProcessDied::class.java) { action() }
+            assertNull("a green tile would outlive a firewall that was turned off", TileStatusStore.read(app))
+        }
+    }
+
+    @Test fun aReadFromBeforeAChangeCannotRepublishItsOlderState() {
+        val olderRead = System.currentTimeMillis()
+        Thread.sleep(5)
+        shell.respond = { ShellResult(0, bridgeOutput(state = "INACTIVE", boot = "DISABLED")) }
+        client.changeProtection(false)
+        assertFalse(TileStatusStore.publish(app, Snapshot(Protection.ACTIVE, rootReady = true), olderRead))
+        assertEquals(Protection.INACTIVE, TileStatusStore.read(app)?.protection)
     }
 
     @Test fun inspectionsPublishTheirResultToTheTile() {

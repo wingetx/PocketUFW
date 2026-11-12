@@ -269,6 +269,9 @@ internal class FirewallClient(
          */
         val ROOT_SESSION = Any()
 
+        /** Actions that touch counters or boot files only, never a firewall rule. */
+        val RULES_UNCHANGED = setOf("reset-counters", "boot-enable", "boot-disable")
+
         const val ROOT_TIMEOUT_DETAILS =
             "A root command timed out and may still finish. Recheck before relying on the firewall."
         const val ROOT_TIMEOUT_MESSAGE =
@@ -654,6 +657,12 @@ internal class FirewallClient(
     /** A single root session performs the action and audits its final state. */
     private fun performAction(action: String, args: List<String> = emptyList()): Operation = synchronized(ROOT_SESSION) {
         val vpn = readVpn()
+        // The root command can finish after this process dies (swiped away, force-stopped,
+        // killed for memory), and then no result reaches the tile. Forget the last verified
+        // state before rules can change, so that case reads as not verified, never as the
+        // state before the change. This also outdates any read that started earlier.
+        if (action !in RULES_UNCHANGED) TileStatusStore.invalidate(context, source)
+        // Taken after that, so this operation's own result is not mistaken for an older read.
         val readStartedAt = System.currentTimeMillis()
         var timedOut = false
         val operation = try {

@@ -93,16 +93,25 @@ class TidePolishTest {
         val background = if (dark) Color(0xFF141B29) else Color(0xFFF7F6EF)
         val luminances = listOf(green.luminance(), background.luminance()).sorted()
         assertTrue("Status text meets 4.5:1 contrast", (luminances[1] + .05f) / (luminances[0] + .05f) >= 4.5f)
-        val limited = base.copy(snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("ipsec995", "eth0"),
-            carrierImsInterfaces = setOf("ipsec995")), report = base.report!!.let {
-            it.copy(ipv4 = it.ipv4.copy(bypass = listOf("-A INPUT -i wlan0 -j ACCEPT")))
-        })
-        for ((name, state) in listOf("verified" to base, "limited" to limited,
+        val client = FirewallClient(RuntimeEnvironment.getApplication(), shell = FakeShell())
+        val parsed = client.dashboardFromOutput(0, bridgeOutput(uncovered = "eth0,usb0",
+            bypass4 = listOf("-A INPUT -i wlan0 -j ACCEPT")).replace("rules_report=READY",
+                "physical_state=ACTIVE\ntunnel_filter=OFF\ntailnet_trust=OFF\nrules_report=READY"), false)
+        val limited = TideUiState(snapshot = parsed.snapshot, report = parsed.kernelReport)
+        val carrier = base.copy(snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("ipsec995"),
+            carrierImsInterfaces = setOf("ipsec995")))
+        for ((name, state) in listOf("verified" to base, "carrier" to carrier, "limited" to limited,
             "unknown" to base.copy(report = null, snapshot = base.snapshot.copy(interfaceInventoryAvailable = false)),
             "limited-unknown" to limited.copy(report = null))) {
             compose.runOnIdle { model.value = state }
             node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
-            node("Filtering active").assertExists()
+            node(when (name) {
+                "verified" -> "Filtering active"
+                "carrier" -> "Carrier calling excluded"
+                "unknown" -> "Coverage unknown"
+                else -> "Coverage limited"
+            }).assertExists()
+            if (name != "verified") node("Filtering active").assertDoesNotExist()
             assertEquals(green, layouts("Active.").layoutInput.style.color)
             assertEquals(if (dark) Color(0xFFB3BDCE) else Color(0xFF59606B),
                 layouts(coverageSummary(state)).layoutInput.style.color)
@@ -113,17 +122,33 @@ class TidePolishTest {
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
                     "Protection active; rules verified. ${coverageSummary(state)}."))
             assertNoClippedText()
+            compose.onNodeWithTag("protection-status").performScrollTo()
             shot("$name-${if (dark) "dark" else "light"}-$scale")
+            if (name in listOf("verified", "carrier")) {
+                compose.onNodeWithTag("coverage-notice").assertDoesNotExist()
+            } else {
+                val notice = when (name) {
+                    "limited" -> "Coverage limited — not filtered: eth0, usb0; earlier Android rules can bypass PocketUFW. Review Coverage details."
+                    "unknown" -> "Coverage unknown. Recheck status to inspect interfaces and earlier Android rules."
+                    else -> "Coverage limited — not filtered: eth0, usb0. Other coverage is unknown; recheck status."
+                }
+                compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
+                node(notice).performScrollTo().assertIsDisplayed()
+                assertEquals(if (dark) Color(0xFFF3C99B) else Color(0xFF793C10), layouts(notice).layoutInput.style.color)
+                shot("$name-notice-${if (dark) "dark" else "light"}-$scale")
+            }
         }
-        compose.runOnIdle { model.value = limited }
+        compose.runOnIdle { model.value = base.copy(report = limited.report,
+            snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("ipsec995", "eth0", "usb0"),
+                carrierImsInterfaces = setOf("ipsec995"))) }
         click("Coverage details")
         node("Coverage details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
         node(CARRIER_IMS_NOTICE).performScrollTo().assertIsDisplayed()
         node(BYPASS_NOTICE).assertExists()
-        node("Not filtered: carrier calling network (ipsec995), eth0.").assertExists()
+        node("Not filtered: carrier calling network (ipsec995), eth0, usb0.").assertExists()
         assertNoClippedText()
         shot("coverage-${if (dark) "dark" else "light"}-$scale")
-        node("Another tunnel can inject tailnet-source packets into these local destinations; PINNED does not authenticate packet ingress.")
+        node("Another tun* interface can inject tailnet-source packets into these local destinations; PINNED does not authenticate packet ingress.")
             .performScrollTo().assertIsDisplayed()
         node("At the last full inspection, tailnet pins matched verified addresses; reachability has not been tested.").assertExists()
         click("Coverage details")
@@ -146,12 +171,16 @@ class TidePolishTest {
         compose.runOnIdle { model.value = base.copy(snapshot = base.snapshot.copy(rootReady = false)) }
         node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
         node("Recheck status").assertIsEnabled()
-        compose.runOnIdle { model.value = base.copy(snapshot = base.snapshot.copy(
-            protection = Protection.DEGRADED, tunnelFilter = TunnelFilter.DEGRADED)) }
+        val parsed = FirewallClient(RuntimeEnvironment.getApplication(), shell = FakeShell()).dashboardFromOutput(0,
+            bridgeOutput(state = "DEGRADED").replace("rules_report=READY",
+                "physical_state=ACTIVE\ntunnel_filter=DEGRADED\nrules_report=READY"), false)
+        compose.runOnIdle { model.value = TideUiState(snapshot = parsed.snapshot, report = parsed.kernelReport) }
         assertEquals(Color(0xFF8F4915), layouts("Needs\nattention.").layoutInput.style.color)
         node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
         node("Physical firewall rules are verified, but tunnel protection is degraded. " +
-            "Recheck status and inspect kernel rules before relying on protection.").assertExists()
+            "Recheck status and inspect kernel rules before relying on tunnel protection.").assertExists()
+        node("Firewall state could not be verified. Some rules may be installed. Don't assume " +
+            "packets are being filtered, or that they aren't.").assertDoesNotExist()
         node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
         node("Remove tunnel rules only").performScrollTo().assertIsDisplayed().assertIsEnabled()
         assertNoClippedText()

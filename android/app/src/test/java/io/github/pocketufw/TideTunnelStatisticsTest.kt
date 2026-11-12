@@ -77,7 +77,7 @@ class TideTunnelStatisticsTest {
         val fake = FakeGateway(off()).apply { operationSuccess = false; operationMessage = "Ownership unverified." }
         open(fake); settings(); click("Enable PINNED")
         node("no fallback is used", true).assertExists()
-        node("Another tunnel can inject", true).assertExists()
+        node("Another tun* interface can inject", true).assertExists()
         compose.onNodeWithTag("confirm-enable-tunnel").performClick()
         compose.settle { compose.hasText("Ownership unverified.") }
         assertEquals(listOf("inspect", "tunnel-on:PINNED"), fake.calls.toList())

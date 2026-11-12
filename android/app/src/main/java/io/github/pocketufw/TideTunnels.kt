@@ -65,7 +65,7 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
             TideNotice(connectivity, state.tailnetConnectivity != FirewallClient.TailnetConnectivity.MATCH)
             Text("Tailnet status is from the last full inspection. Counter refresh does not recheck addresses.",
                 style = MaterialTheme.typography.bodySmall, color = Muted)
-            Text("Pins are address trust, not packet authentication. Another tunnel can inject tailnet-source packets into a local pinned destination. A WireGuard interface named tun* can share this exemption.",
+            Text("Pins are address trust, not packet authentication. Another tun* interface can inject tailnet-source packets into a local pinned destination. A WireGuard interface named tun* can share this exemption.",
                 style = MaterialTheme.typography.bodySmall, color = Muted)
         }
         if (state.tunnelMode == FirewallClient.TunnelMode.DENY_ONLY) Text(
@@ -113,7 +113,7 @@ internal fun TideTunnelSettings(ui: TideUiState, actions: TideActions) {
             onDismissRequest = { requested = null }, title = { Text("Enable ${mode.name.replace('_', '-')}?") },
             text = { Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(if (mode == FirewallClient.TunnelMode.PINNED)
-                    "Tailscale must be running with verified ownership and both node addresses. Failed verification enables nothing; no fallback is used. Pins allow automatic reconnection with the same addresses. Another tunnel can inject tailnet-source packets into these local destinations; this does not authenticate packet ingress."
+                    "Tailscale must be running with verified ownership and both node addresses. Failed verification enables nothing; no fallback is used. Pins allow automatic reconnection with the same addresses. Another tun* interface can inject tailnet-source packets into these local destinations; this does not authenticate packet ingress."
                 else "No Tailscale traffic is exempted. Unsolicited incoming Tailscale peer connections will be filtered, including when Tailscale connects later. Use this for Proton-only or WireGuard-only configurations.")
                 Text("Tunnel filtering lasts until turned off or restarted. Physical filtering and boot restoration are unchanged.")
             } },

@@ -4,6 +4,7 @@ Detailed UI behavior is exercised in TideAuditRegressionTest under Robolectric.
 These inexpensive checks also run when only the Python suite is available.
 """
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,10 +46,24 @@ class TideAuditContractTests(unittest.TestCase):
 
     def test_unknown_firewall_state_never_claims_active_or_off(self):
         main = SCREENS["MainActivity.kt"]
-        screen = SCREENS["TideScreen.kt"]
+        screen = SCREENS["TideScreen.kt"].split('private fun TideFirewall(', 1)[1]
         self.assertIn('verificationInDoubt = true', main)
-        self.assertIn('val verified = active && !ui.verificationInDoubt', screen)
-        self.assertIn('if (ui.verificationInDoubt) "Not', screen)
+        # Follow the guard used by the title instead of requiring its old inline
+        # spelling. It must cover both stale states and missing root evidence.
+        title = re.search(r'val title = if \((\w+)\) "Not\\nverified\." else when \(state.protection\)', screen)
+        self.assertIsNotNone(title, 'Uncertainty must override both ACTIVE and INACTIVE titles')
+        guard = re.escape(title.group(1))
+        self.assertRegex(screen, rf'val {guard} = ui\.verificationInDoubt \|\| \(active && !state\.rootReady\)')
+        self.assertIn('val active = state.protection == FirewallClient.Protection.ACTIVE', screen)
+        self.assertRegex(screen, rf'val verified = active && !{guard}\b')
+        self.assertRegex(screen, rf'val label = if \({guard}\) "Recheck required" else when')
+        # The primary action must recheck before either on/off path can be chosen.
+        action = screen.split('TidePrimaryButton(', 1)[1].split('}, icon =', 1)[0]
+        recheck = action.index(f'{title.group(1)} -> "Recheck status"')
+        self.assertLess(recheck, action.index('active -> "Turn firewall off"'))
+        self.assertLess(recheck, action.index('Protection.INACTIVE -> "Turn firewall on"'))
+        self.assertRegex(screen, rf'val attention = {guard} \|\|')
+        self.assertIn('if (attention) actions.recheck()', screen)
         self.assertIn('Last known status is not proof of current protection', screen)
 
     def test_tile_stamp_recheck_not_unconditional_root_request(self):

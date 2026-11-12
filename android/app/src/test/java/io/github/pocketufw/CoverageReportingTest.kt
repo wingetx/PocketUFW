@@ -30,7 +30,11 @@ class CoverageReportingTest {
         screens += compose.launchScreen(fake)
         compose.settle { fake.count("inspect") == 1 && compose.hasText("Active.") }
         compose.onNodeWithText("Coverage unknown · inspection incomplete").assertExists()
-        compose.onNodeWithText("Filtering active").assertExists()
+        compose.onNodeWithText("Coverage unknown").assertExists()
+        compose.onNodeWithText("Coverage unknown. Recheck status to inspect interfaces and earlier Android rules.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
+        compose.onNodeWithText("Filtering active").assertDoesNotExist()
         compose.onNodeWithText("Coverage inspected · no gaps reported").assertDoesNotExist()
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
@@ -43,6 +47,10 @@ class CoverageReportingTest {
         compose.settle { compose.hasText("Active.") }
         compose.onNodeWithText("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
         compose.onNodeWithText("Coverage unknown · inspection incomplete").assertExists()
+        compose.onNodeWithText("Coverage unknown").assertExists()
+        compose.onNodeWithText("Coverage unknown. Recheck status to inspect interfaces and earlier Android rules.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
         compose.onNodeWithText("Coverage inspected · no gaps reported").assertDoesNotExist()
         compose.onNodeWithText("Coverage details").performScrollTo().performClick()
         compose.onNodeWithText("Interface coverage unknown. Recheck status to inspect current interfaces.").assertExists()
@@ -52,11 +60,65 @@ class CoverageReportingTest {
         val fake = FakeGateway(parse(bridgeOutput(uncovered = "eth0", reportStatus = "UNAVAILABLE")))
         screens += compose.launchScreen(fake)
         compose.settle { compose.hasText("Active.") }
-        compose.onNodeWithText("Filtering active").assertExists()
+        compose.onNodeWithText("Filtering active").assertDoesNotExist()
         compose.onNodeWithText("Known limits · additional coverage unknown").assertExists()
+        compose.onNodeWithText("Coverage limited").assertExists()
+        compose.onNodeWithText("Coverage limited — not filtered: eth0. Other coverage is unknown; recheck status.").assertExists()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
         compose.onNodeWithText("Coverage details").performScrollTo().performClick()
         compose.onNodeWithText("Earlier Android/OEM rule coverage unknown.", substring = true).assertExists()
         compose.onNodeWithText("Not filtered: eth0.").assertExists()
+    }
+
+    @Test fun uncoveredEthernetAndUsbWithAnEarlierAcceptRemainVisibleWhenCollapsed() {
+        val fake = FakeGateway(parse(bridgeOutput(uncovered = "eth0,usb0",
+            bypass4 = listOf("-A INPUT -i wlan0 -j ACCEPT")).replace("rules_report=READY",
+                "physical_state=ACTIVE\ntunnel_filter=OFF\ntailnet_trust=OFF\nrules_report=READY")))
+        screens += compose.launchScreen(fake)
+        compose.settle { compose.hasText("Active.") }
+        val notice = "Coverage limited — not filtered: eth0, usb0; earlier Android rules can bypass PocketUFW. Review Coverage details."
+        compose.onNodeWithText("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
+        compose.onNodeWithText("Coverage limited").assertExists()
+        compose.onNodeWithText("Filtering active").assertDoesNotExist()
+        compose.onNodeWithText("Not filtered: eth0, usb0.").assertDoesNotExist()
+        compose.onNodeWithText(notice).performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
+        compose.onNodeWithText("Coverage details").performScrollTo().performClick()
+        compose.onNodeWithText("Not filtered: eth0, usb0.").assertExists()
+        compose.onNodeWithText(BYPASS_NOTICE).assertExists()
+        compose.onNodeWithText("Coverage details").performScrollTo().performClick()
+        compose.onNodeWithText(notice).performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
+        assertEquals(listOf("inspect"), fake.calls.toList())
+    }
+
+    @Test fun nonCarrierExclusionsAndEarlierAcceptsIndependentlyNeedAttention() {
+        val fake = FakeGateway(parse(bridgeOutput(uncovered = "usb0")))
+        screens += compose.launchScreen(fake)
+        compose.settle { compose.hasText("Active.") }
+        compose.onNodeWithText("Coverage limited — not filtered: usb0. Review Coverage details.").assertExists()
+        fake.dashboard = parse(bridgeOutput(bypass6 = listOf("-A INPUT -i wlan0 -j ACCEPT")))
+        compose.onNodeWithContentDescription("Recheck firewall status").performClick()
+        compose.settle { compose.hasText("Coverage limited — earlier Android rules can bypass PocketUFW. Review Coverage details.") }
+        compose.onNodeWithText("Coverage limited").assertExists()
+        compose.onNodeWithText("Filtering active").assertDoesNotExist()
+        compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
+    }
+
+    @Test fun carrierCalmnessRequiresPositiveEvidenceAndCannotOverrideVpnOwnership() {
+        val dashboard = parse(bridgeOutput(uncovered = "ipsec995"))
+        val fake = FakeGateway(dashboard.copy(snapshot = dashboard.snapshot.copy(carrierImsInterfaces = setOf("ipsec995"))))
+        screens += compose.launchScreen(fake)
+        compose.settle { compose.hasText("Active.") }
+        compose.onNodeWithText("Carrier calling excluded").assertExists()
+        compose.onNodeWithTag("coverage-notice").assertDoesNotExist()
+        for ((index, state) in listOf(dashboard.snapshot, fake.dashboard.snapshot.copy(vpnInterface = "ipsec995")).withIndex()) {
+            fake.dashboard = dashboard.copy(snapshot = state)
+            compose.onNodeWithContentDescription("Recheck firewall status").performClick()
+            compose.settle { fake.count("inspect") == index + 2 && compose.hasText("Coverage limited") }
+            compose.onNodeWithText("Coverage limited — not filtered: ipsec995. Review Coverage details.").assertExists()
+            compose.onNodeWithText("Carrier calling excluded").assertDoesNotExist()
+        }
     }
 
     @Test fun aReadyMarkerDoesNotHideMissingDuplicateOrMalformedRows() {

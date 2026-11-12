@@ -265,18 +265,30 @@ still needs a later authorized install of the polished build.
 
 ### Carrier calling coverage wording
 
-Uncovered interfaces still come only from the root inventory, and the coverage
-status stays "not all traffic filtered". After each inspection the app also reads
+Uncovered interfaces still come only from the root inventory. In Beta 7, the green
+verified-rules headline is separate from traffic coverage: earlier ACCEPT bypasses
+or uncovered non-carrier interfaces produce **Coverage limited** and one amber
+notice outside Coverage details. Missing report or inventory evidence produces
+**Coverage unknown** with an instruction to recheck; known limits and unknown
+coverage are combined into the same notice when both apply. **Filtering active**
+requires complete report/inventory evidence with no reported gaps, and never means
+universal or end-to-end coverage. After each inspection the app also reads
 Android's own network records through `ConnectivityManager`, with no root and no
 engine or boot-script change. An uncovered interface is described as a **carrier
 calling network** only when Android lists it as a cellular, IMS-capable network
 that is restricted, has no internet capability, isn't a VPN, and that no other
 record contradicts. It also mustn't be the interface Android's VPN record owns.
-Only then does Firewall add: "Carrier calling network is managed separately from
-PocketUFW. This is normal and does not indicate a firewall failure." Any other
+Only then does Coverage details add: "Carrier calling network is managed separately
+from PocketUFW. This is normal and does not indicate a firewall failure." Any other
 `ipsec*` interface reads "unidentified IPsec tunnel". A missing or redacted
-record leaves an interface unidentified, never covered. Whether an unprivileged
-app sees Frankenpixel's `ipsec995` IMS record is unverified: no `ipsec` interface
+record leaves an interface unidentified, never covered. Carrier-IMS-only exclusions
+use the neutral **Carrier calling excluded** row; their names and explanation stay
+available in the expander. Any additional non-carrier gap, bypass or unknown
+evidence gets the visible coverage notice. This presentation exception changes no
+rules and does not exempt carrier churn from Insights verification. PINNED's
+explanation refers precisely to another `tun*` interface injecting tailnet-source
+packets; stale authorization and recovery warnings remain outside the expander.
+Whether an unprivileged app sees Frankenpixel's `ipsec995` IMS record is unverified: no `ipsec` interface
 was up during the 2026-11-10 read-only check, and only an APK on the device can
 tell.
 
@@ -571,11 +583,13 @@ place before sending traffic; do not substitute a standalone helper capture.
    UDP, tunnel counters or native-only history. Other unexercised paths/families
    remain explicitly untested in this APK session.
 4. **Carrier IMS:** if `ipsec995` is available, compare Android's network evidence
-   and the actual app warning. When the app can positively identify restricted
+   and the Coverage details section. When the app can positively identify restricted
    cellular IMS without internet/VPN capability, expect "carrier calling network
    (ipsec995)" and the normal system-managed calling explanation, while retaining
-   **not filtered / not all traffic filtered** coverage wording. Contradictory or
-   app-redacted records must retain the unidentified-IPsec fallback. If absent,
+   **Not filtered** in the expanded details. In Beta 7, a carrier-only exclusion is
+   neutral; any non-carrier exclusion or earlier ACCEPT bypass also shows a visible
+   **Coverage limited** notice. Unknown evidence requires a visible recheck prompt.
+   Contradictory or app-redacted records must retain the unidentified-IPsec fallback. If absent,
    record IMS UI verification as untested; do not toggle cellular/calling or
    manufacture an `ipsec` interface. The name alone is never ownership proof.
 

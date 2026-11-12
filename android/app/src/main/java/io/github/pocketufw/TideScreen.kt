@@ -327,11 +327,16 @@ private fun degradedProtectionDescription(state: FirewallClient.Snapshot): Strin
             else -> "Physical firewall rules are verified, but overall protection is not verified."
         }
     } else ""
-    // A copied ACTIVE summary is not verification evidence. Keep specific failure/recovery details.
-    val detail = state.details.takeUnless { it == "IPv4 and IPv6 rules and hooks verified." }
+    // Generic whole-firewall summaries must not contradict the independently verified scope.
+    // Specific diagnostics (timeouts, conflicts, etc.) retain their recovery instructions.
+    val detail = state.details.takeUnless { it == "IPv4 and IPv6 rules and hooks verified." ||
+        (scope.isNotEmpty() && it == "Firewall state could not be verified. Some rules may be installed. Don't assume " +
+            "packets are being filtered, or that they aren't.") }
         ?.takeIf { it.isNotBlank() }
         ?: (if (scope.isEmpty()) "Protection is not verified. " else "") +
-            "Recheck status and inspect kernel rules before relying on protection."
+            if (scope.isNotEmpty() && state.tunnelFilter in setOf(FirewallClient.TunnelFilter.DEGRADED, FirewallClient.TunnelFilter.UNKNOWN))
+                "Recheck status and inspect kernel rules before relying on tunnel protection."
+            else "Recheck status and inspect kernel rules before relying on protection."
     return listOf(scope, detail).filter { it.isNotEmpty() }.joinToString(" ")
 }
 
@@ -344,6 +349,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     val active = state.protection == FirewallClient.Protection.ACTIVE
     val notVerified = ui.verificationInDoubt || (active && !state.rootReady)
     val verified = active && !notVerified
+    val coverage = coverageStatus(ui)
     val checking = state.protection == FirewallClient.Protection.CHECKING
     val attention = notVerified || state.protection in listOf(
         FirewallClient.Protection.DEGRADED, FirewallClient.Protection.ROOT_REQUIRED)
@@ -412,6 +418,9 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         state.protection == FirewallClient.Protection.DEGRADED -> degradedProtectionDescription(state)
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
+    if (verified) coverage.notice?.let {
+        Box(Modifier.testTag("coverage-notice")) { TideNotice(it, true) }
+    }
     if (active) TideCoverageDetails(ui, showRules)
     if (state.rootReady && !ui.verificationInDoubt && state.tunnelFilter == FirewallClient.TunnelFilter.DEGRADED)
         TideNotice("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.", true)
@@ -467,7 +476,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TidePolicyRow(R.drawable.tide_down, "Physical protection", physicalStatus(ui))
         TidePolicyRow(R.drawable.tide_down, "Unsolicited incoming", when {
-            verified -> "Filtering active"
+            verified -> coverage.incoming
             !ui.verificationInDoubt && state.protection == FirewallClient.Protection.INACTIVE -> "Not installed"
             else -> "Not verified"
         })

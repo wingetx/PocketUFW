@@ -47,7 +47,9 @@ The last two cover cellular and Wi-Fi 464XLAT interface names. The firewall admi
 
 It **does not flush, replace, or change the default policies of** Android/OEM `INPUT`, `OUTPUT`, or `FORWARD` chains. Its hooks are appended after existing Android rules, so an earlier `ACCEPT` may bypass them. Interfaces with different vendor names may also be outside coverage.
 
-A verified ruleset is **not** proof that every incoming path is filtered. If the detailed rule report or interface inventory is missing, the app reports **coverage unknown**; known bypasses and uncovered interfaces are reported as partial coverage.
+A verified ruleset is **not** proof that every incoming path is filtered. In the Beta 7 UI, the green **PROTECTION ACTIVE · RULES VERIFIED** headline describes installed rules. Known earlier ACCEPT bypasses or uncovered non-carrier interfaces show **Coverage limited** and one amber notice outside the expandable **Coverage details** section. Missing rule-report or interface-inventory evidence shows **Coverage unknown** with an instruction to recheck status. Known limits and unknown coverage share that single notice when both apply.
+
+Confirmed carrier-IMS-only exclusions stay neutral: **Carrier calling excluded**, with the uncovered interface names and normal calling-network explanation in Coverage details. A name such as `ipsec995` alone is not IMS evidence, and Android's VPN ownership record takes precedence. **Filtering active** is used only when the report and inventory are complete and neither reports a gap; it still does not claim end-to-end or universal coverage. Degraded tunnel protection is described separately from independently verified physical rules, with warnings and recovery controls kept visible.
 
 ### 2. Optional tunnel protection
 
@@ -60,7 +62,7 @@ VPNs can deliver decrypted packets to virtual interfaces that the physical firew
 
 PINNED retains its authorized destinations across ordinary Tailscale reconnects. If the phone's addresses change, the UI reports **REAUTHORIZE**; it never silently broadens the allowance. A DEGRADED tunnel filter has a **tunnel-only recovery** action that leaves physical protection intact.
 
-**Important trust boundary:** PINNED authenticates addresses during initial setup, **not the source of every subsequent packet**. Another qualifying tunnel could inject a packet claiming a tailnet source and aimed at a pinned local destination. The app documents this limitation, but PINNED is **not equivalent to cryptographically authenticated Tailscale-only ingress**. Earlier Android/OEM accepts can still bypass both modes. See [tunnel policy and threat model](docs/tunnel-filtering.md).
+**Important trust boundary:** PINNED authenticates addresses during initial setup, **not the source of every subsequent packet**. Another `tun*` interface could inject a packet claiming a tailnet source and aimed at a pinned local destination. The app documents this limitation, but PINNED is **not equivalent to cryptographically authenticated Tailscale-only ingress**. Earlier Android/OEM accepts can still bypass both modes. See [tunnel policy and threat model](docs/tunnel-filtering.md).
 
 ### 3. Tailscale UDP exceptions
 

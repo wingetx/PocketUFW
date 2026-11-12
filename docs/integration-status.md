@@ -46,7 +46,7 @@ SHA-256: `7af66751b684c890c0a1fb74ebd3c3e6e8944a5c03ac27f9679950ccf9896c36`.
 
 The next release gate is the planned final independent security review before
 preparing a signed beta. Pinned destinations still do not authenticate packets:
-another tunnel can inject tailnet-source packets into a still-local pinned
+another `tun*` interface can inject tailnet-source packets into a still-local pinned
 destination. Optional tunnel protection remains off by default and does not
 restore after reboot. See [tunnel filtering](tunnel-filtering.md) for that existing
 policy and other documented validation limits. No merge to `main`, push,

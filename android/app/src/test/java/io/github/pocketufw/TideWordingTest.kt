@@ -168,29 +168,56 @@ class TideWordingTest {
         node("Filtering active").assertExists()
     }
 
-    @Test fun degradedDescriptionDistinguishesVerifiedPhysicalRulesFromTunnelProblems() {
-        val state = active.copy(protection = Protection.DEGRADED,
-            physicalFilter = FirewallClient.PhysicalFilter.ACTIVE)
-        val model = mutableStateOf(ui(state))
+    @Test fun uncertaintyOverridesBothCachedActiveAndOffAndOnlyOffersRecheck() {
+        val model = mutableStateOf(ui(active, doubt = true))
+        var rechecks = 0
+        var changes = 0
+        activity().get().setContent { TideTheme { TideScreen(model.value,
+            TideActions(recheck = { rechecks++ }, changeProtection = { changes++ })) } }
+        for (state in listOf(active, Snapshot(Protection.INACTIVE, rootReady = true), active.copy(rootReady = false))) {
+            compose.runOnIdle { model.value = ui(state, doubt = state.rootReady) }
+            node("Not\nverified.").assertExists()
+            node("Active.").assertDoesNotExist()
+            node("Off.").assertDoesNotExist()
+            node("Filtering active").assertDoesNotExist()
+            node("Turn firewall on").assertDoesNotExist()
+            node("Turn firewall off").assertDoesNotExist()
+            node("Recheck status").performScrollTo().performClick()
+        }
+        assertEquals(3, rechecks)
+        assertEquals(0, changes)
+    }
+
+    @Test fun degradedDescriptionDistinguishesParsedPhysicalRulesFromTunnelProblems() {
+        val client = FirewallClient(RuntimeEnvironment.getApplication(), shell = FakeShell())
+        fun parsed(extra: String) = client.dashboardFromOutput(0,
+            bridgeOutput(state = "DEGRADED").replace("rules_report=READY",
+                "physical_state=ACTIVE\n$extra\nrules_report=READY"), false).snapshot
+        val model = mutableStateOf(ui(parsed("tunnel_filter=DEGRADED")))
         activity().get().setContent { TideTheme { TideScreen(model.value, TideActions()) } }
         for ((tunnel, problem) in listOf(
-            FirewallClient.TunnelFilter.DEGRADED to "tunnel protection is degraded",
-            FirewallClient.TunnelFilter.UNKNOWN to "tunnel protection is not verified",
-            FirewallClient.TunnelFilter.OFF to "overall protection is not verified")) {
-            compose.runOnIdle { model.value = ui(state.copy(tunnelFilter = tunnel)) }
+            "DEGRADED" to "tunnel protection is degraded",
+            "UNKNOWN" to "tunnel protection is not verified",
+            "OFF" to "overall protection is not verified")) {
+            val snapshot = parsed("tunnel_filter=$tunnel")
+            assertEquals(FirewallClient.PhysicalFilter.ACTIVE, snapshot.physicalFilter)
+            assertEquals(client.protectionDetails(Protection.DEGRADED), snapshot.details)
+            compose.runOnIdle { model.value = ui(snapshot) }
+            val recovery = if (tunnel == "OFF") "protection" else "tunnel protection"
             node("Physical firewall rules are verified, but $problem. " +
-                "Recheck status and inspect kernel rules before relying on protection.").assertExists()
-            node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
+                "Recheck status and inspect kernel rules before relying on $recovery.").assertExists()
+            node("Firewall state could not be verified.", substring = true).assertDoesNotExist()
+            node("Don't assume packets", substring = true).assertDoesNotExist()
             node("PROTECTION NOT VERIFIED").assertExists()
             node("Recheck status").assertIsEnabled()
-            if (tunnel == FirewallClient.TunnelFilter.DEGRADED) {
+            if (tunnel == "DEGRADED") {
                 node("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.").assertExists()
                 node("Remove tunnel rules only").assertIsEnabled()
             }
         }
-        val recovery = "Rename the conflicting tunnel interface or turn tunnel filtering off, then recheck."
-        compose.runOnIdle { model.value = ui(state.copy(tunnelFilter = FirewallClient.TunnelFilter.UNKNOWN, details = recovery)) }
-        node(recovery, substring = true).assertExists()
+        compose.runOnIdle { model.value = ui(parsed("tunnel_filter=ON\ntailnet_wireguard=CONFLICT")) }
+        node("Physical firewall rules are verified, but tunnel protection is not verified.", substring = true).assertExists()
+        node("rename that interface or turn tunnel filtering off, then recheck.", substring = true).assertExists()
     }
 
     @Test fun degradedDescriptionNeverUsesOldSuccessTextAsVerificationEvidence() {
@@ -315,7 +342,8 @@ class TideWordingTest {
         node(CARRIER_IMS_NOTICE).assertExists()
         // Known limits remain available without changing the verified protection verdict.
         node("Coverage inspected · known limitations").assertExists()
-        node("Filtering active").assertExists()
+        node("Coverage limited").assertExists()
+        node("Filtering active").assertDoesNotExist()
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
     }
@@ -341,7 +369,8 @@ class TideWordingTest {
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
         node("Coverage inspected · known limitations").assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
-        node("Filtering active").assertExists()
+        node("Coverage limited").assertExists()
+        node("Filtering active").assertDoesNotExist()
         node("Turn firewall off").assertExists()
     }
 

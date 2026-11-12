@@ -385,7 +385,7 @@ SIGTERM-ignoring VPN observations, and bounded boot contention/cancellation. Dis
 packet checks cover deny-only traffic, including WireGuard named `tun*`. No phone
 was accessed, no APK was signed or deployed, and nothing was pushed or merged.
 
-**Residual trust remains:** in pinned mode, another tunnel can inject a packet
+**Residual trust remains:** in pinned mode, another `tun*` interface can inject a packet
 claiming a tailnet source and addressed to a still-local pinned destination. The
 rule does not authenticate its source or current ingress owner. A later kernel
 WireGuard renamed `tun*` can exploit the same match; detecting DEGRADED on the next

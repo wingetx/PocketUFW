@@ -99,7 +99,7 @@ class TideWordingTest {
 
     private val headlines = listOf(
         Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "PROTECTION ACTIVE · RULES VERIFIED",
-            "Filtering is active on configured hooks. This verifies installed rules, not complete traffic coverage.", "Turn firewall off"),
+            "Your firewall is active with verified rules. See Coverage details for protection limits.", "Turn firewall off"),
         Snapshot(Protection.INACTIVE, rootReady = true) to Headline("Off.", "POCKETUFW IS INACTIVE",
             "PocketUFW rules are not installed. Android’s own firewall remains unchanged.", "Turn firewall on"),
         Snapshot(Protection.DEGRADED, rootReady = true, details = "Incomplete firewall.") to Headline(
@@ -166,6 +166,50 @@ class TideWordingTest {
     @Test fun policyRowOnlyClaimsTheDenyPolicyWhenVerified() {
         show(ui(active))
         node("Filtering active").assertExists()
+    }
+
+    @Test fun degradedDescriptionDistinguishesVerifiedPhysicalRulesFromTunnelProblems() {
+        val state = active.copy(protection = Protection.DEGRADED,
+            physicalFilter = FirewallClient.PhysicalFilter.ACTIVE)
+        val model = mutableStateOf(ui(state))
+        activity().get().setContent { TideTheme { TideScreen(model.value, TideActions()) } }
+        for ((tunnel, problem) in listOf(
+            FirewallClient.TunnelFilter.DEGRADED to "tunnel protection is degraded",
+            FirewallClient.TunnelFilter.UNKNOWN to "tunnel protection is not verified",
+            FirewallClient.TunnelFilter.OFF to "overall protection is not verified")) {
+            compose.runOnIdle { model.value = ui(state.copy(tunnelFilter = tunnel)) }
+            node("Physical firewall rules are verified, but $problem. " +
+                "Recheck status and inspect kernel rules before relying on protection.").assertExists()
+            node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
+            node("PROTECTION NOT VERIFIED").assertExists()
+            node("Recheck status").assertIsEnabled()
+            if (tunnel == FirewallClient.TunnelFilter.DEGRADED) {
+                node("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.").assertExists()
+                node("Remove tunnel rules only").assertIsEnabled()
+            }
+        }
+        val recovery = "Rename the conflicting tunnel interface or turn tunnel filtering off, then recheck."
+        compose.runOnIdle { model.value = ui(state.copy(tunnelFilter = FirewallClient.TunnelFilter.UNKNOWN, details = recovery)) }
+        node(recovery, substring = true).assertExists()
+    }
+
+    @Test fun degradedDescriptionNeverUsesOldSuccessTextAsVerificationEvidence() {
+        val state = active.copy(protection = Protection.DEGRADED, tunnelFilter = FirewallClient.TunnelFilter.DEGRADED)
+        val model = mutableStateOf(ui(state))
+        activity().get().setContent { TideTheme { TideScreen(model.value, TideActions()) } }
+        for (physical in listOf(FirewallClient.PhysicalFilter.UNKNOWN,
+            FirewallClient.PhysicalFilter.INACTIVE, FirewallClient.PhysicalFilter.DEGRADED)) {
+            compose.runOnIdle { model.value = ui(state.copy(physicalFilter = physical)) }
+            node("Physical firewall rules are verified", substring = true).assertDoesNotExist()
+            node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
+            node("Protection is not verified. Recheck status and inspect kernel rules before relying on protection.").assertExists()
+        }
+        compose.runOnIdle { model.value = ui(state.copy(rootReady = false, physicalFilter = FirewallClient.PhysicalFilter.ACTIVE)) }
+        node("Physical firewall rules are verified", substring = true).assertDoesNotExist()
+        node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
+        compose.runOnIdle { model.value = ui(state.copy(physicalFilter = FirewallClient.PhysicalFilter.ACTIVE), doubt = true) }
+        node("Physical firewall rules are verified", substring = true).assertDoesNotExist()
+        node("RECHECK REQUIRED").assertExists()
     }
 
     @Test fun policyRowIsHonestWhenOff() {

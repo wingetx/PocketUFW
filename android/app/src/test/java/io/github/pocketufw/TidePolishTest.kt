@@ -150,6 +150,9 @@ class TidePolishTest {
             protection = Protection.DEGRADED, tunnelFilter = TunnelFilter.DEGRADED)) }
         assertEquals(Color(0xFF8F4915), layouts("Needs\nattention.").layoutInput.style.color)
         node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
+        node("Physical firewall rules are verified, but tunnel protection is degraded. " +
+            "Recheck status and inspect kernel rules before relying on protection.").assertExists()
+        node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
         node("Remove tunnel rules only").performScrollTo().assertIsDisplayed().assertIsEnabled()
         assertNoClippedText()
         shot("degraded-recovery")

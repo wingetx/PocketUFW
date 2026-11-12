@@ -319,6 +319,22 @@ internal fun isCarrierIms(name: String, state: FirewallClient.Snapshot) =
 internal const val CARRIER_IMS_NOTICE =
     "Carrier calling network is managed separately from PocketUFW. This is normal and does not indicate a firewall failure."
 
+private fun degradedProtectionDescription(state: FirewallClient.Snapshot): String {
+    val scope = if (state.rootReady && state.physicalFilter == FirewallClient.PhysicalFilter.ACTIVE) {
+        when (state.tunnelFilter) {
+            FirewallClient.TunnelFilter.DEGRADED -> "Physical firewall rules are verified, but tunnel protection is degraded."
+            FirewallClient.TunnelFilter.UNKNOWN -> "Physical firewall rules are verified, but tunnel protection is not verified."
+            else -> "Physical firewall rules are verified, but overall protection is not verified."
+        }
+    } else ""
+    // A copied ACTIVE summary is not verification evidence. Keep specific failure/recovery details.
+    val detail = state.details.takeUnless { it == "IPv4 and IPv6 rules and hooks verified." }
+        ?.takeIf { it.isNotBlank() }
+        ?: (if (scope.isEmpty()) "Protection is not verified. " else "") +
+            "Recheck status and inspect kernel rules before relying on protection."
+    return listOf(scope, detail).filter { it.isNotEmpty() }.joinToString(" ")
+}
+
 @Composable
 private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: String, checkingAction: Boolean,
                          requestRemoval: () -> Unit, requestDisable: () -> Unit,
@@ -391,8 +407,9 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         checking -> "Reading firewall rules and Magisk boot status. Protection has not yet been verified."
         notVerified -> "A later read failed or the Quick Settings tile changed. " +
             "Last known status is not proof of current protection. Recheck the kernel."
-        active -> "Filtering is active on configured hooks. This verifies installed rules, not complete traffic coverage."
+        active -> "Your firewall is active with verified rules. See Coverage details for protection limits."
         state.protection == FirewallClient.Protection.INACTIVE -> "PocketUFW rules are not installed. Android’s own firewall remains unchanged."
+        state.protection == FirewallClient.Protection.DEGRADED -> degradedProtectionDescription(state)
         else -> state.details.ifEmpty { "Grant root access or recheck the kernel state before relying on protection." }
     }, style = MaterialTheme.typography.bodyMedium, color = Muted)
     if (active) TideCoverageDetails(ui, showRules)

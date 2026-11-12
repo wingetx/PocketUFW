@@ -615,11 +615,17 @@ $snapshot
 EOF
 
 # Read-only and best effort: interfaces that can receive traffic but that the
-# wlan+, rmnet+, v4-rmnet+ and v4-wlan+ hooks do not filter. Loopback and dummy carry no
-# inbound traffic. A VPN's tun is listed like its kernel and IPsec equivalents:
-# traffic inside any of them really isn't filtered, and the user should be told.
-# Only the engine's verified report can remove one from this list: with the optional
-# tunnel filter on, a hooked tunnel is filtered. Anything else stays listed.
+# wlan+, rmnet+, v4-rmnet+ and v4-wlan+ hooks do not filter. A VPN's tun is listed
+# like its kernel and IPsec equivalents: traffic inside any of them really isn't
+# filtered, and the user should be told. Only the engine's verified report can remove
+# one from this list: with the optional tunnel filter on, a hooked tunnel is filtered.
+#
+# Reachable means administratively UP with either an address or a carrier. A
+# link-local address answers anyone on that link, and with rp_filter off (as on
+# Android) an interface with no address at all still delivers packets sent to the
+# phone's other addresses. Only loopback and the kernel's dummy driver, which has no
+# receive path, are left out. Dummy is the kernel's own kind from `ip -d`, never a
+# name: a missing or unreadable kind means the interface is listed.
 TUNNEL_HOOKS=''
 if [ "$state" = ACTIVE ]; then
   TUNNEL_HOOKS=$(printf '%s\n' "$snapshot" | sed -n 's/^tunnel_hooks=//p')
@@ -628,6 +634,9 @@ interface_report='interface_report=UNAVAILABLE
 uncovered_ifaces='
 if command -v ip >/dev/null 2>&1; then
   interface_report=$({
+    echo '--kinds--'
+    ip -d -o link 2>/dev/null
+    echo '--links--'
     ip -o link 2>/dev/null && echo '--links-ready--'
     echo '--addresses--'
     ip -o addr 2>/dev/null && echo '--addresses-ready--'
@@ -641,6 +650,17 @@ if command -v ip >/dev/null 2>&1; then
       return 0
     }
     BEGIN { hook_count = split(hooks, hook, ",") }
+    $0 == "--kinds--" { in_kinds = 1; next }
+    $0 == "--links--" { in_kinds = 0; next }
+    # Kinds can only remove a dummy from the list, so they are never trusted further:
+    # oneline details print the kind as the word after a lone backslash.
+    in_kinds {
+      if ($1 ~ /^[0-9]+:$/) {
+        name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
+        for (i = 3; i < NF; i++) if ($i == "\\" && $(i + 1) == "dummy") dummy[name] = 1
+      }
+      next
+    }
     $0 == "--links-ready--" { links_ready = 1; next }
     $0 == "--addresses--" { in_addresses = 1; next }
     $0 == "--addresses-ready--" { addresses_ready = 1; next }
@@ -650,21 +670,27 @@ if command -v ip >/dev/null 2>&1; then
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
       if (name !~ /^[A-Za-z0-9_.-]+$/ || length(name) > 15 || $3 !~ /^<.*>$/) { bad = 1; next }
       link_count++
+      if (!(name in known)) order[++names] = name
       known[name] = 1
       if ($3 ~ /[<,]UP[,>]/) up[name] = 1
+      if ($3 ~ /[<,]LOWER_UP[,>]/) carrier[name] = 1
       next
     }
     {
       name = $2; sub(/:$/, "", name); sub(/@.*$/, "", name)
       if (!(name in known) || ($3 != "inet" && $3 != "inet6") ||
           $4 !~ /^[0-9a-fA-F:.]+\/[0-9]+$/ || $0 !~ / scope [^ ]+/) { bad = 1; next }
-      if ($3 == "inet6" && $0 !~ / scope global /) next
-      if (!(name in up) || (name in listed)) next
-      if (name == "lo" || name ~ /^(wlan|rmnet|v4-rmnet|v4-wlan|dummy)/ || hooked(name)) next
-      listed[name] = 1
-      list = list (list == "" ? "" : ",") name
+      # Only host scope (::1 on lo) stays on the phone. Link-local scope still reaches the link.
+      if ($3 == "inet6" && $0 ~ / scope host /) next
+      addressed[name] = 1
     }
     END {
+      for (n = 1; n <= names; n++) {
+        name = order[n]
+        if (!(name in up) || !((name in addressed) || (name in carrier))) continue
+        if (name == "lo" || (name in dummy) || name ~ /^(wlan|rmnet|v4-rmnet|v4-wlan)/ || hooked(name)) continue
+        list = list (list == "" ? "" : ",") name
+      }
       print "interface_report=" (links_ready && addresses_ready && link_count && !bad ? "READY" : "UNAVAILABLE")
       print "uncovered_ifaces=" list
     }

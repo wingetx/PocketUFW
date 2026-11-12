@@ -62,8 +62,10 @@ class AndroidBridgeTests(unittest.TestCase):
         fake_ip = self.bin / "ip"
         fake_ip.write_text(
             "#!/bin/sh\n"
-            "[ \"$1\" = -o ] || exit 2\n"
             "[ \"${TEST_IP_FAIL:-0}\" = 0 ] || exit 1\n"
+            "# Kernel kinds come from oneline details; by default the phone prints none.\n"
+            "if [ \"$1 $2 $3\" = '-d -o link' ]; then printf '%s' \"${TEST_IP_DETAIL:-}\"; exit 0; fi\n"
+            "[ \"$1\" = -o ] || exit 2\n"
             "case \"$2\" in\n"
             "  link) printf '%s' \"${TEST_IP_LINK:-}\" ;;\n"
             "  addr) printf '%s' \"${TEST_IP_ADDR:-}\" ;;\n"
@@ -1052,13 +1054,59 @@ class AndroidBridgeTests(unittest.TestCase):
         '43: eth0    inet 192.168.60.1/24 scope global eth0\\       valid_lft forever preferred_lft forever\n'
         '44: p2p0    inet6 fe80::1/64 scope link \\       valid_lft forever preferred_lft forever\n'
     )
+    # `ip -d -o link` prints the kernel's kind after a lone backslash. Only dummy0 is one.
+    IP_DETAIL = (
+        '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 \n'
+        '2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:05 brd ff:ff:ff:ff:ff:ff promiscuity 0 \\    dummy addrgenmode eui64 numtxqueues 1 \n'
+        '25: tun0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1280\\    link/none promiscuity 0 \\    tun type tun pi off \n'
+    )
 
     def test_uncovered_interfaces_are_listed_from_real_phone_output(self):
-        result, values = self.run_bridge('inspect', {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR})
+        result, values = self.run_bridge('inspect', {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR,
+                                                     'TEST_IP_DETAIL': self.IP_DETAIL})
         self.assertEqual(result.returncode, 0, result.stderr)
-        # usb0 has NO-CARRIER but is administratively UP; eth0 is down; p2p0 has
-        # only a link-local address; the rest are hooked or excluded by name.
-        self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'rndis0', 'tun0', 'usb0'])
+        # usb0 has NO-CARRIER but is administratively UP with an address; eth0 is down;
+        # p2p0's link-local address still answers its link. dummy0 is the kernel's dummy
+        # driver, lo is loopback, and the rest are hooked.
+        self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'p2p0', 'rndis0', 'tun0', 'usb0'])
+
+    def test_only_the_kernel_dummy_kind_is_left_out_never_a_dummy_name(self):
+        link = ('2: dummy0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:05\n'
+                '3: pufwd0: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:06\n'
+                '4: dummy1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:07\n')
+        addr = ''.join(f'{n}: {name}    inet6 fe80::{n}/64 scope link \\       valid_lft forever\n'
+                       for n, name in ((2, 'dummy0'), (3, 'pufwd0'), (4, 'dummy1')))
+        dummy = '{n}: {name}: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500\\    link/ether x promiscuity 0 \\    dummy addrgenmode eui64 \n'
+        cases = {
+            # The kernel says dummy0 and pufwd0 are dummies; dummy1 is a veth with a misleading name.
+            'kinds read': (dummy.format(n=2, name='dummy0') + dummy.format(n=3, name='pufwd0') +
+                           '4: dummy1: <UP,LOWER_UP> mtu 1500\\    link/ether x \\    veth addrgenmode eui64 \n', 'dummy1'),
+            # Without the kernel's word for it, nothing is a dummy.
+            'kinds unavailable': ('', 'dummy0,pufwd0,dummy1'),
+            # "dummy" as an alternative name, or as a later word, is not a kind.
+            'misleading words': ('2: dummy0: <UP> mtu 1500\\    link/ether x \\    altname dummy \n'
+                                 '3: pufwd0: <UP> mtu 1500\\    link/ether x promiscuity 0 \\    veth dummy \n', 'dummy0,pufwd0,dummy1'),
+        }
+        for case, (detail, expected) in cases.items():
+            with self.subTest(case=case):
+                _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': addr, 'TEST_IP_DETAIL': detail})
+                self.assertEqual(values['interface_report'], 'READY')
+                self.assertEqual(values['uncovered_ifaces'], expected)
+
+    def test_reachable_means_up_with_an_address_or_a_carrier(self):
+        link = ('5: aware_data0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:0b\n'
+                '6: aware_nmi0: <BROADCAST,MULTICAST> mtu 1500\\    link/ether 0a:01:02:03:04:0c\n'
+                '7: nan1: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500\\    link/ether 0a:01:02:03:04:0d\n'
+                '8: bare0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\\    link/ether 0a:01:02:03:04:0e\n'
+                '9: idle0: <BROADCAST,MULTICAST> mtu 1500\\    link/ether 0a:01:02:03:04:0f\n')
+        addr = ('5: aware_data0    inet6 fe80::5/64 scope link \\       valid_lft forever\n'
+                '6: aware_nmi0    inet6 fe80::6/64 scope link \\       valid_lft forever\n'
+                '9: idle0    inet 192.0.2.9/24 scope global idle0\\       valid_lft forever\n')
+        _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': addr})
+        self.assertEqual(values['interface_report'], 'READY')
+        # aware_data0: link-local only, up. bare0: no address, but up with a carrier.
+        # aware_nmi0 and idle0 are down; nan1 is up with neither address nor carrier.
+        self.assertEqual(values['uncovered_ifaces'], 'aware_data0,bare0')
 
     def test_vpn_record_names_the_owners_interface(self):
         record = ('NetworkAgentInfo{network{104} ni{VPN CONNECTED extra: VPN:ch.protonvpn.android} '
@@ -1092,7 +1140,8 @@ class AndroidBridgeTests(unittest.TestCase):
         link = ''.join(line for line in self.IP_LINK.splitlines(True)
                        if line.split()[1].split('@')[0].rstrip(':') in
                        ('lo', 'dummy0', 'rmnet_data0', 'wlan0', 'v4-rmnet_data0'))
-        _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': self.IP_ADDR})
+        _, values = self.run_bridge('inspect', {'TEST_IP_LINK': link, 'TEST_IP_ADDR': self.IP_ADDR,
+                                                'TEST_IP_DETAIL': self.IP_DETAIL})
         self.assertEqual(values['uncovered_ifaces'], '')
 
     def test_names_merely_containing_a_hooked_prefix_are_uncovered(self):
@@ -1106,8 +1155,9 @@ class AndroidBridgeTests(unittest.TestCase):
     def test_uncovered_interfaces_are_read_in_every_full_report(self):
         for action in ('inspect', 'enable', 'disable', 'boot-enable', 'vpn-refresh'):
             with self.subTest(action=action):
-                _, values = self.run_bridge(action, {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR})
-                self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'rndis0', 'tun0', 'usb0'])
+                _, values = self.run_bridge(action, {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR,
+                                                     'TEST_IP_DETAIL': self.IP_DETAIL})
+                self.assertEqual(sorted(values['uncovered_ifaces'].split(',')), ['ccmni0', 'p2p0', 'rndis0', 'tun0', 'usb0'])
 
     def test_counter_refresh_does_not_query_interfaces(self):
         result, values = self.run_bridge('counters', {'TEST_IP_LINK': self.IP_LINK, 'TEST_IP_ADDR': self.IP_ADDR})

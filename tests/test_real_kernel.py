@@ -453,8 +453,9 @@ class RealKernelTests(unittest.TestCase):
         ip link add usb0 type veth peer name usb0far
         ip addr add 10.16.0.1/24 dev usb0
         ip link add p2p0 type veth peer name p2p0far
+        ip link set p2p0far netns "$PEER"
         ip link set p2p0 up
-        ip link set p2p0far up
+        peer ip link set p2p0far up
         sh "$ENG" enable >/dev/null || exit 91
         say listed "$(bridge_value inspect uncovered_ifaces)"
         say state "$(bridge_value inspect state)"
@@ -463,12 +464,95 @@ class RealKernelTests(unittest.TestCase):
         say vpn_inner "$(deliver 4 14 47931 5)"
         ''')
         self.assertEqual(values['state'], 'ACTIVE')
-        # usb0 is down and p2p0 has only a link-local address. tun0 is listed, and this
-        # delivery shows why: traffic inside a VPN tunnel really isn't filtered.
-        self.assertEqual(sorted(values['listed'].split(',')), ['eth0', 'rndis0', 'tun0'])
+        # usb0 is down. p2p0 has only a link-local address, which still answers its link.
+        # tun0 is listed, and this delivery shows why: traffic inside a VPN tunnel really
+        # isn't filtered.
+        self.assertEqual(sorted(values['listed'].split(',')), ['eth0', 'p2p0', 'rndis0', 'tun0'])
         self.assertEqual(values['hooked'], '0')
         self.assertEqual(values['uncovered'], '5')
         self.assertEqual(values['vpn_inner'], '5')
+
+    def test_reachable_interfaces_are_listed_whatever_their_addresses(self):
+        values = self.namespace(r'''
+        link wlan0 9
+        # Android leaves rp_filter off, so an interface also accepts traffic for the
+        # phone's other addresses.
+        for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > "$f"; done
+        # bare: wired to the peer, up with a carrier, IPv6 disabled and no address at all.
+        # aware: wired to the peer, up, with only its automatic link-local address.
+        wire() {
+          ip link add "$1" type veth peer name "$2"
+          ip link set "$2" netns "$PEER"
+          [ "${3:-}" = noipv6 ] && echo 1 > "/proc/sys/net/ipv6/conf/$1/disable_ipv6"
+          ip link set "$1" up
+          peer ip link set "$2" up
+          while ! peer ip -o link show "$2" | grep -q LOWER_UP; do sleep 0.01; done
+        }
+        wire aware_data0 awarefar
+        wire bare0 barefar noipv6
+        # Down, or up without a carrier: nothing can arrive on these now.
+        ip link add aware_nmi0 type veth peer name nmifar
+        ip -6 addr add fe80::66/64 dev aware_nmi0 nodad
+        ip link add nan1 type veth peer name nanfar
+        ip link set nanfar netns "$PEER"
+        ip link set nan1 up
+        # The kernel's dummy driver has no receive path, whatever it is called. A veth
+        # called dummy1 is an ordinary link.
+        ip link add dummy0 type dummy
+        ip link add pufwd0 type dummy
+        ip link set dummy0 up; ip link set pufwd0 up
+        wire dummy1 dummyfar
+        for name in aware_data0 dummy0 pufwd0 dummy1; do
+          tries=0
+          while ! ip -6 -o addr show dev "$name" scope link | grep -q fe80 ||
+                ip -6 -o addr show dev "$name" | grep -q tentative; do
+            tries=$((tries + 1)); [ "$tries" -lt 500 ] || exit 94; sleep 0.01
+          done
+        done
+        for far in awarefar dummyfar; do
+          while peer ip -6 -o addr show dev "$far" | grep -q tentative; do sleep 0.01; done
+        done
+        sh "$ENG" enable >/dev/null || exit 91
+        report=$(sh "$BRIDGE" inspect 2>/dev/null)
+        say state "$(printf '%s\n' "$report" | sed -n 's/^state=//p')"
+        say inventory "$(printf '%s\n' "$report" | sed -n 's/^interface_report=//p')"
+        say listed "$(printf '%s\n' "$report" | sed -n 's/^uncovered_ifaces=//p')"
+        # What the list claims, packets confirm: each listed link delivers unsolicited traffic.
+        linklocal() { ip -6 -o addr show dev "$1" scope link | awk '{sub(/\/.*/, "", $4); print $4; exit}'; }
+        from_link() { # FAR-IFACE DESTINATION FAMILY PORT
+          local mark="$WORK/mark.$RANDOM$RANDOM"
+          $N recv "$3" "$4" 5 "$mark.ready" "$mark.stop" > "$mark.out" &
+          local listener=$!
+          wait_for "$mark.ready"
+          peer python3 -I -c "
+import socket, sys, time
+far, dest, fam, port = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+if fam == '6':
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    target = (dest, port, 0, socket.if_nametoindex(far))
+else:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, 25, far.encode())  # SO_BINDTODEVICE
+    target = (dest, port)
+for _ in range(5):
+    s.sendto(b'unsolicited', target); time.sleep(0.005)
+" "$1" "$2" "$3" "$4"
+          : > "$mark.stop"
+          wait "$listener"
+          cat "$mark.out"
+        }
+        say aware_delivered "$(from_link awarefar "$(linklocal aware_data0)" 6 47951)"
+        say dummy1_delivered "$(from_link dummyfar "$(linklocal dummy1)" 6 47952)"
+        say bare_delivered "$(from_link barefar 10.9.0.1 4 47953)"
+        say wlan_delivered "$(deliver 6 9 47954 5)"
+        ''')
+        self.assertEqual(values['state'], 'ACTIVE')
+        self.assertEqual(values['inventory'], 'READY')
+        self.assertEqual(sorted(values['listed'].split(',')), ['aware_data0', 'bare0', 'dummy1'])
+        self.assertEqual(values['aware_delivered'], '5')
+        self.assertEqual(values['dummy1_delivered'], '5')
+        self.assertEqual(values['bare_delivered'], '5')
+        self.assertEqual(values['wlan_delivered'], '0')
 
     def test_real_kernel_listing_of_rules_passes_verify_and_tampering_does_not(self):
         values = self.namespace(r'''

@@ -866,8 +866,9 @@ class TunnelKernelTests(unittest.TestCase):
         say counters "$(printf '%s\n' "$counters" | grep -c '^ipv6_tunnel_blocked=')"
         say reset "$(bridge_value reset-counters operation)"
         # An unsupported tunnel stays named as not filtered.
+        # A dummy is no stand-in: it can't receive, so it isn't listed.
         ip link add gre9 type ipip local 10.9.0.1 remote 10.9.0.2 2>/dev/null ||
-          ip link add gre9 type dummy
+          ip link add gre9 type veth peer name gre9far
         ip addr add 192.0.2.1/32 dev gre9
         ip link set gre9 up
         say uncovered_other "$(bridge_value inspect uncovered_ifaces)"

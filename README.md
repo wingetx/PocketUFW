@@ -11,9 +11,9 @@
 > [!WARNING]
 > **Experimental beta, not a security guarantee.** PocketUFW requires root and a compatible `iptables`/`ip6tables` backend. Coverage varies by device, kernel, interface naming, and Android/OEM rules. It is not a replacement for Android's security model.
 
-**Latest signed beta:** [PocketUFW 0.1.0-beta6](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta6) is published as an **experimental prerelease** (versionCode 27), adding on-demand Insights sampling, safer diagnostic recovery, improved carrier coverage explanations, and Tide UI cleanup. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta6/PocketUFW-0.1.0-beta6.apk) and [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta6/SHA256SUMS.txt). Its audited source is tagged `v0.1.0-beta6` at commit `4d963a1`; this README update is documentation-only.
+**Latest signed beta:** [PocketUFW 0.1.0-beta7](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta7) is published as an **experimental prerelease** (versionCode 29), with a calmer, more honest Tide interface, matching tunnel return counters, and fixes to coverage detection, root-output collection, and Quick Settings state. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/PocketUFW-0.1.0-beta7.apk), [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/SHA256SUMS.txt), and read the [Beta 7 release notes](docs/releases/0.1.0-beta7.md). Installed rules being verified does not guarantee all incoming traffic is covered; Android/OEM bypass rules and tunnel trust limits remain disclosed.
 
-**Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. The existing firewall keeps protecting supported interfaces, and strict cleanup and verification remain enabled. See the [Beta 6 release notes](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta6) for tested coverage and known limitations.
+**Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. Ordinary firewall enforcement remains in place; strict capture cleanup and verification still apply.
 
 ## What it does
 

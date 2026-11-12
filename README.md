@@ -118,7 +118,7 @@ See [the audited upgrade notes](docs/medium-audit-followup.md). **Never assume A
 
 Prefer **Settings → Remove PocketUFW**. It removes verified PocketUFW-owned rules and Magisk boot files, checks that cleanup completed, and only then opens Android's uninstall screen.
 
-An ordinary uninstall cannot remove already-installed kernel rules immediately. They can remain until the next reboot; a properly disarmed/self-cleaning boot hook then removes its own files rather than restoring rules. **Avoid `pm uninstall -k`:** keeping app data can cause an existing boot hook to keep restoring the firewall.
+An ordinary uninstall cannot remove already-installed kernel rules immediately. They can remain until the next reboot. On that boot an armed Magisk hook waits up to about 180 seconds for Android to finish booting, then asks the package manager whether PocketUFW is still installed. Only when the app and its data are both gone does it remove its own files, without restoring any rules. If Android hasn't finished booting by then, the hook can't check, so it **restores the firewall as usual** and checks again on the next boot. A slow boot can therefore restore rules once more for an app that has already been uninstalled. **Avoid `pm uninstall -k`:** keeping app data can cause an existing boot hook to keep restoring the firewall.
 
 <details>
 <summary>Advanced recovery: manual removal of PocketUFW's kernel rules (root)</summary>

@@ -76,6 +76,11 @@ internal fun collectRootOutput(process: Process, maxSeconds: Long): ShellResult 
     val output = ByteArrayOutputStream(ROOT_OUTPUT_LIMIT)
     val buffer = ByteArray(4096)
     var overflow = false
+    // The last bytes can land, and the process exit, between available() and isAlive.
+    // Once the exit has been seen, everything the process itself wrote is already in
+    // the pipe, so the next empty check is final. A descendant still holding the pipe
+    // open adds no wait, and the deadline and size limit still apply to this drain.
+    var exited = false
     try {
         while (true) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException()
@@ -92,9 +97,11 @@ internal fun collectRootOutput(process: Process, maxSeconds: Long): ShellResult 
                     output.write(buffer, 0, retain)
                     if (read > retain) overflow = true
                 }
-            } else if (!process.isAlive) {
+            } else if (exited) {
                 return if (overflow) ShellResult(ROOT_OUTPUT_INCOMPLETE_EXIT, ROOT_OUTPUT_DETAILS)
                     else ShellResult(process.exitValue(), output.toString("UTF-8"))
+            } else if (!process.isAlive) {
+                exited = true
             } else {
                 process.waitFor(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(10)), TimeUnit.NANOSECONDS)
             }

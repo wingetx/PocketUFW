@@ -19,6 +19,14 @@ class NativeCoreTests(unittest.TestCase):
                             '-fno-omit-frame-pointer', '-no-pie', str(ROOT / 'tests/insights_native_test.cpp'), '-o', binary], check=True)
             subprocess.run([binary], check=True, timeout=10)
 
+    def test_command_runner_keeps_output_that_lands_just_before_exit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            binary = str(Path(folder) / 'command')
+            subprocess.run([COMPILER, '-std=c++17', '-Wall', '-Wextra', '-Werror', '-DPUFW_HOST_TEST',
+                            '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-no-pie',
+                            str(ROOT / 'tests/insights_command_test.cpp'), '-o', binary], check=True)
+            subprocess.run([binary, folder], check=True, timeout=30)
+
 @unittest.skipIf(kernel.UNUSABLE or not COMPILER, kernel.UNUSABLE or 'C++ compiler unavailable')
 class NativeKernelTests(unittest.TestCase):
     namespace = kernel.RealKernelTests.namespace

@@ -80,12 +80,22 @@ std::string command(const Words& args, bool writer = false, int timeout = 3000) 
     std::string result; int status = 0; bool exited = false;
     try {
         while (true) {
+            // The child's last bytes can land, and it can exit, between an empty read and
+            // waitpid. Only a read that began after the exit was seen can prove the pipe
+            // holds nothing more of the child's own output. A descendant keeping the pipe
+            // open adds no wait: an empty read then is final.
+            const bool exitSeen = exited;
             char buf[4096]; ssize_t size = read(input.value, buf, sizeof(buf));
+            bool empty = size == 0;
             if (size > 0) {
                 require(result.size() + size <= 256 * 1024, "Firewall listing exceeds memory limit."); result.append(buf, size);
-            } else if (size < 0) require(errno == EAGAIN || errno == EINTR, "Firewall command read failed.");
+            } else if (size < 0) {
+                const int error = errno;
+                require(error == EAGAIN || error == EINTR, "Firewall command read failed.");
+                empty = error == EAGAIN;
+            }
             if (!exited) { pid_t done = waitpid(pid, &status, WNOHANG); exited = done == pid; require(done >= 0 || errno == EINTR, "Firewall command wait failed."); }
-            if (exited && size <= 0) break;
+            if (exitSeen && empty) break;
             require(now() < deadline, "Firewall command timed out; verify cleanup before retrying.");
             pollfd fd{input.value, POLLIN, 0}; poll(&fd, 1, 10);
         }

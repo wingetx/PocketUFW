@@ -1,5 +1,9 @@
 package io.github.pocketufw
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
@@ -66,6 +70,51 @@ class RootOutputTest {
             assertTrue(result.succeeded)
             assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 1500)
         } finally { ProcessBuilder("kill", "-KILL", child).start().waitFor() }
+    }
+
+    /**
+     * Deterministic: the process's last bytes land, and it exits, exactly between the
+     * empty available() check and the isAlive check.
+     */
+    private class LateExit(first: String, private val late: ByteArray, private val exit: Int = 0) : Process() {
+        private val pending = ArrayDeque(first.toByteArray().toList())
+        private var landed = false
+        private val stream = object : InputStream() {
+            override fun available() = pending.size
+            override fun read(): Int = pending.removeFirstOrNull()?.toInt()?.and(0xff) ?: -1
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (pending.isEmpty()) return -1
+                var n = 0
+                while (n < len && pending.isNotEmpty()) b[off + n++] = pending.removeFirst()
+                return n
+            }
+        }
+        override fun isAlive(): Boolean {
+            if (!landed) { landed = true; late.forEach { pending.addLast(it) } }
+            return false
+        }
+        override fun getInputStream(): InputStream = stream
+        override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
+        override fun getOutputStream(): OutputStream = ByteArrayOutputStream()
+        override fun waitFor() = exit
+        override fun waitFor(timeout: Long, unit: TimeUnit) = true
+        override fun exitValue() = exit
+        override fun destroy() {}
+    }
+
+    @Test fun outputThatLandsJustBeforeTheExitIsNotLost() {
+        val tail = "state=ACTIVE\nboot=ENABLED\nrules_report=READY\n"
+        val result = collectRootOutput(LateExit("root=GRANTED\n", tail.toByteArray()), 3)
+        assertTrue(result.succeeded)
+        assertEquals("root=GRANTED\n" + tail, result.text)
+    }
+
+    @Test fun lateOutputKeepsTheExitStatusAndTheSizeLimit() {
+        val failed = collectRootOutput(LateExit("", "error=late\n".toByteArray(), exit = 7), 3)
+        assertEquals(7, failed.exitCode)
+        assertEquals("error=late\n", failed.text)
+        assertEquals(ROOT_OUTPUT_LIMIT, collectRootOutput(LateExit("", ByteArray(ROOT_OUTPUT_LIMIT), 0), 3).text.length)
+        assertEquals(122, collectRootOutput(LateExit("", ByteArray(ROOT_OUTPUT_LIMIT + 1), 0), 3).exitCode)
     }
 
     @Test fun interruptionOrReadFailureCannotProduceSuccessAndStopsTheProcess() {

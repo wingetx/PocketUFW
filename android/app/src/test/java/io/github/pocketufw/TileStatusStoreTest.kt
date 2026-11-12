@@ -4,6 +4,7 @@ import android.content.Context
 import io.github.pocketufw.FirewallClient.Protection
 import io.github.pocketufw.FirewallClient.Snapshot
 import java.time.Duration
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -95,6 +96,72 @@ class TileStatusStoreTest {
         // Wall time minus uptime moves when uptime no longer matches: a different boot.
         ShadowSystemClock.advanceBy(Duration.ofHours(5))
         assertNull(TileStatusStore.read(app))
+    }
+
+    private val boot = FakeBoot()
+    @After fun realBootIdentity() = boot.restore()
+
+    @Test fun theSameBootReadsItsStateBack() {
+        boot.now(41, FakeBoot.FIRST)
+        TileStatusStore.publish(app, active)
+        assertEquals(Protection.ACTIVE, TileStatusStore.read(app)?.protection)
+    }
+
+    @Test fun aRapidRebootIsANewBootEvenInsideTheOldEpochTolerance() {
+        // No clock moves here, so wall time minus uptime alone would accept the old state.
+        for (next in listOf(42 to FakeBoot.SECOND, 42 to FakeBoot.FIRST, 41 to FakeBoot.SECOND)) {
+            boot.now(41, FakeBoot.FIRST)
+            TileStatusStore.publish(app, active)
+            boot.now(next.first, next.second)
+            assertNull("boot $next must not read the earlier state", TileStatusStore.read(app))
+        }
+    }
+
+    @Test fun anUnreadableBootIdentityTrustsNothing() {
+        boot.now(null, null)
+        TileStatusStore.publish(app, active)
+        assertNull(TileStatusStore.read(app))
+        // Recorded, then unreadable: the part that was recorded can't be checked.
+        boot.now(41, FakeBoot.FIRST)
+        TileStatusStore.publish(app, active)
+        boot.now(null, FakeBoot.FIRST)
+        assertNull(TileStatusStore.read(app))
+        boot.now(41, null)
+        assertNull(TileStatusStore.read(app))
+        boot.now(null, null)
+        assertNull(TileStatusStore.read(app))
+    }
+
+    @Test fun eitherIdentityAloneIsEnoughWhenItIsAllThatWasReadable() {
+        boot.now(41, null)
+        TileStatusStore.publish(app, active)
+        boot.now(41, FakeBoot.FIRST)
+        assertEquals(Protection.ACTIVE, TileStatusStore.read(app)?.protection)
+        boot.now(null, FakeBoot.FIRST)
+        TileStatusStore.publish(app, active)
+        boot.now(41, FakeBoot.FIRST)
+        assertEquals(Protection.ACTIVE, TileStatusStore.read(app)?.protection)
+        boot.now(42, FakeBoot.SECOND)
+        assertNull(TileStatusStore.read(app))
+    }
+
+    @Test fun aCacheWrittenBeforeBootIdentitiesIsNotTrusted() {
+        boot.now(41, FakeBoot.FIRST)
+        val now = System.currentTimeMillis()
+        // Exactly what the previous version saved: state, time and epoch, nothing else.
+        TileStatusStore.preferences(app).edit().clear()
+            .putString("state", "ACTIVE").putLong("checked_at", now)
+            .putLong("boot_epoch", now - android.os.SystemClock.elapsedRealtime())
+            .putLong(TileStatusStore.WRITTEN_AT, now).commit()
+        assertNull(TileStatusStore.read(app))
+    }
+
+    @Test fun invalidationForgetsTheBootIdentityToo() {
+        boot.now(41, FakeBoot.FIRST)
+        TileStatusStore.publish(app, active)
+        TileStatusStore.invalidate(app)
+        val keys = TileStatusStore.preferences(app).all.keys
+        assertFalse(keys.toString(), keys.any { it == "boot_count" || it == "boot_id" || it == "state" })
     }
 
     @Test fun aRejectedWriteLeavesTheCheckedTimeAlone() {

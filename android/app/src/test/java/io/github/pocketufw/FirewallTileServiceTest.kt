@@ -12,6 +12,7 @@ import io.github.pocketufw.FirewallClient.Snapshot
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -318,6 +319,36 @@ class FirewallTileServiceTest {
 
     @Test fun bootReceiverIgnoresOtherBroadcasts() {
         assertEquals(emptyList<String>(), servicesAskedForDuring(Intent(Intent.ACTION_SCREEN_ON)))
+    }
+
+    private val boot = FakeBoot()
+    @After fun realBootIdentity() = boot.restore()
+
+    @Test fun aRapidRebootWithAFailedRestoreIsNotShownAsOn() {
+        boot.now(41, FakeBoot.FIRST)
+        cache(Protection.ACTIVE)
+        // Restarted within seconds; no clock moved. Boot restoration then failed, or was off.
+        boot.now(42, FakeBoot.SECOND)
+        BootTileReceiver().onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
+        val service = tile()
+        service.onStartListening()
+        assertEquals(Tile.STATE_INACTIVE, service.qsTile.state)
+        assertEquals("Not verified this boot · Open app", service.qsTile.subtitle.toString())
+        assertEquals(emptyList<String>(), shell.actions.toList())
+        // A tap now only checks, and shows what the kernel has: no firewall.
+        shell.respond = { ShellResult(0, bridgeOutput(state = "INACTIVE", boot = "ENABLED")) }
+        tap(service)
+        assertEquals(listOf("inspect"), shell.actions.toList())
+        assertEquals(Tile.STATE_INACTIVE, service.qsTile.state)
+        assertTrue(service.qsTile.subtitle.toString(), service.qsTile.subtitle.toString().startsWith("Off · Checked "))
+    }
+
+    @Test fun anUnreadableBootIdentityNeverShowsACachedOn() {
+        boot.now(null, null)
+        cache(Protection.ACTIVE)
+        val shown = rendered(null)
+        assertEquals(Tile.STATE_INACTIVE, shown.state)
+        assertEquals("Not verified this boot · Open app", shown.subtitle.toString())
     }
 
     @Test fun afterARebootTheBoundTileSaysItIsUnverified() {

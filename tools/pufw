@@ -75,6 +75,48 @@ function grouped(v, out) {
     return v out
 }
 function total(suffix) { return add(counter("ipv4_" suffix), counter("ipv6_" suffix)) }
+function statsLine(label, v, formatted) {
+    formatted = grouped(v)
+    # Keep even full-width kernel counters readable in a 40-column terminal.
+    if (length(formatted) > 20) printf "  %s\n    %s\n", label, formatted
+    else printf "  %-17s %s\n", label, formatted
+}
+function statsMetric(label, suffix) {
+    statsLine("IPv4 " label ":", counter("ipv4_" suffix))
+    statsLine("IPv6 " label ":", counter("ipv6_" suffix))
+    statsLine("Total " label ":", total(suffix))
+}
+function statsCounters(prefix) {
+    statsMetric("drops", prefix "blocked")
+    statsMetric("drop bytes", prefix "blocked_bytes")
+    statsMetric("returns", prefix "established_replies")
+}
+function statistics() {
+    print "PocketUFW Statistics · " state
+    if (state == "ACTIVE") print "Rules verified at this inspection."
+    print "\nPHYSICAL"
+    if (state == "ACTIVE") statsCounters("")
+    else {
+        print "  Counters: Unavailable"
+        print "  Protection " state "; no measurements."
+    }
+    print "\nTUNNEL · " (filter == "OFF" ? "OFF" : filter == "ON" ? (mode == "DENY_ONLY" ? "DENY-ONLY" : mode) : "NOT VERIFIED")
+    if (state == "ACTIVE" && filter == "ON") statsCounters("tunnel_")
+    else if (filter == "OFF") print "  Not installed (not zero)"
+    else print "  Counters: Unavailable"
+    if (mode == "DENY_ONLY") print "  No tailnet exemption."
+    if (incomplete) print "Authorization: " auth
+    if (mode == "PINNED") {
+        print "\nPINNED addresses not checked."
+        print "Use pufw tunnel to recheck."
+    }
+    print "\nDrops and returns are packet counts."
+    print "Returns = established/related matches,"
+    print "not all device traffic."
+    print "Counts since install or counter reset."
+    print "Earlier Android rules and unsupported"
+    print "interfaces can bypass filtering."
+}
 function completeCounters(    required, n, fields, i) {
     required = "blocked blocked_bytes established_replies"
     if (filter == "ON") required = required " tunnel_blocked tunnel_blocked_bytes tunnel_established_replies tunnel_tailnet"
@@ -153,35 +195,38 @@ END {
         if (incomplete) print "pufw: Native output contains unavailable measurements or unverified authorization." > "/dev/stderr"
         exit (state == "DEGRADED" || filter == "DEGRADED" || incomplete || attention ? 1 : 0)
     }
-    if (view == "tunnel") print "PocketUFW tunnel diagnostics"
+    if (view == "stats") statistics()
     else {
-        print "● PocketUFW " state
-        print "Physical: " (physical == "ACTIVE" ? "Rules verified" : physical == "INACTIVE" ? "Inactive" : physical == "DEGRADED" ? "Degraded" : "Not verified")
-    }
-    print "Tunnel: " (filter == "OFF" ? "OFF (optional)" : filter == "ON" ? (mode == "DENY_ONLY" ? "DENY-ONLY" : mode) " (rules verified)" : filter == "DEGRADED" ? "DEGRADED / full ruleset not verified" : "Not verified")
-    print "Authorization: " auth
-    if (view == "tunnel") {
-        if (mode == "PINNED") {
-            print "Saved destinations: " (pin4(value("tailnet_pin4")) ? value("tailnet_pin4") : "Unavailable") ", " (pin6(value("tailnet_pin6")) ? value("tailnet_pin6") : "Unavailable")
-            print "Observed addresses: " (pin4(value("tailnet_observed4")) ? value("tailnet_observed4") : "Unavailable") ", " (pin6(value("tailnet_observed6")) ? value("tailnet_observed6") : "Unavailable")
-            print "PINNED trusts addresses, not individual packets or ingress interface ownership."
-        }
-        print "Session only; tunnel filtering never restores after reboot."
-    } else {
-        print "Coverage: " (physical == "ACTIVE" ? "Filtered where supported" : physical == "INACTIVE" ? "Inactive" : "Not verified")
-        print ""
-        if (state != "ACTIVE") print "Counters: Unavailable (protection " state "; no measurements claimed)"
+        if (view == "tunnel") print "PocketUFW tunnel diagnostics"
         else {
-            print "Physical drops: " grouped(total("blocked")) " packets" (view == "stats" ? " / " grouped(total("blocked_bytes")) " bytes" : "")
-            print "Physical return traffic: " grouped(total("established_replies")) " packets"
-            if (filter == "ON") {
-                print "Tunnel drops: " grouped(total("tunnel_blocked")) " packets" (view == "stats" ? " / " grouped(total("tunnel_blocked_bytes")) " bytes" : "")
-                print "Tunnel return traffic: " grouped(total("tunnel_established_replies")) " packets"
-            } else print "Tunnel counters: Not installed (not zero)"
+            print "● PocketUFW " state
+            print "Physical: " (physical == "ACTIVE" ? "Rules verified" : physical == "INACTIVE" ? "Inactive" : physical == "DEGRADED" ? "Degraded" : "Not verified")
         }
-        print "Return traffic = established/related rule matches, not all device traffic."
+        print "Tunnel: " (filter == "OFF" ? "OFF (optional)" : filter == "ON" ? (mode == "DENY_ONLY" ? "DENY-ONLY" : mode) " (rules verified)" : filter == "DEGRADED" ? "DEGRADED / full ruleset not verified" : "Not verified")
+        print "Authorization: " auth
+        if (view == "tunnel") {
+            if (mode == "PINNED") {
+                print "Saved destinations: " (pin4(value("tailnet_pin4")) ? value("tailnet_pin4") : "Unavailable") ", " (pin6(value("tailnet_pin6")) ? value("tailnet_pin6") : "Unavailable")
+                print "Observed addresses: " (pin4(value("tailnet_observed4")) ? value("tailnet_observed4") : "Unavailable") ", " (pin6(value("tailnet_observed6")) ? value("tailnet_observed6") : "Unavailable")
+                print "PINNED trusts addresses, not individual packets or ingress interface ownership."
+            }
+            print "Session only; tunnel filtering never restores after reboot."
+        } else {
+            print "Coverage: " (physical == "ACTIVE" ? "Filtered where supported" : physical == "INACTIVE" ? "Inactive" : "Not verified")
+            print ""
+            if (state != "ACTIVE") print "Counters: Unavailable (protection " state "; no measurements claimed)"
+            else {
+                print "Physical drops: " grouped(total("blocked")) " packets"
+                print "Physical return traffic: " grouped(total("established_replies")) " packets"
+                if (filter == "ON") {
+                    print "Tunnel drops: " grouped(total("tunnel_blocked")) " packets"
+                    print "Tunnel return traffic: " grouped(total("tunnel_established_replies")) " packets"
+                } else print "Tunnel counters: Not installed (not zero)"
+            }
+            print "Return traffic = established/related rule matches, not all device traffic."
+        }
+        print "At this inspection only. Earlier Android rules and unsupported interfaces can bypass filtering."
     }
-    print "At this inspection only. Earlier Android rules and unsupported interfaces can bypass filtering."
     if (incomplete) print "pufw: Some details are unavailable or unverified; recheck before relying on them." > "/dev/stderr"
     exit (state == "DEGRADED" || filter == "DEGRADED" || incomplete || attention ? 1 : 0)
 }'

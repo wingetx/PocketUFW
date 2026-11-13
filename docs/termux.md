@@ -36,7 +36,7 @@ or the app. No APK installation is part of this procedure.
 | --- | --- |
 | `pufw` | One native `pocketufw inspect`: verified physical/ruleset state, tunnel mode, current PINNED address evidence, and counters |
 | `pufw tunnel` | One native `pocketufw tunnel-status`: tunnel ruleset verification, saved pins, and current address authorization |
-| `pufw stats` | One native `pocketufw activity`: physical/tunnel DROP packets and bytes, plus established/related return packets |
+| `pufw stats` | One native `pocketufw activity`: separate physical/tunnel statistics, with IPv4, IPv6, and combined counts for DROP packets, dropped bytes, and established/related return packets |
 | `pufw raw` | The native `pocketufw inspect` key/value output, without summary formatting |
 
 Each invocation uses one `su` session and one engine command. `inspect` and
@@ -47,12 +47,22 @@ address evidence in its existing bounded probe. The helper allows at most
 never inactive.
 No background polling or automatic retries are scheduled.
 
+`pufw` remains the quick overview. `pufw stats` is the detailed numbers view:
+**PHYSICAL** and **TUNNEL** sections each show IPv4, IPv6, and total drops,
+dropped bytes, and returns. Drops and returns are packet counts. Totals combine
+IPv4 and IPv6 within that section; physical and tunnel counters are kept separate.
+Counts are kernel rule matches since installation or a counter reset, not rates
+or unique connections. The rows fit a narrow terminal; very large numbers move
+onto their own indented line without rounding or truncation.
+
 `ACTIVE` describes installed rules and hooks verified during that inspection,
 not universal traffic coverage. Physical rules may remain verified when tunnel
 or overall protection is degraded; the default view preserves that distinction.
 An inactive firewall has unavailable counters, not fabricated zeros. An absent
 tunnel is reported as not installed. Missing or malformed measurements remain
-unavailable. Return traffic means matches of established/related rules, not all
+unavailable. Because `activity` has no completion marker, `pufw stats` withholds
+all numbers and reports **UNKNOWN** if any required counter is missing or invalid.
+Return traffic means matches of established/related rules, not all
 device traffic or unique connections. DROP bytes are available in `pufw stats`;
 the native engine does not expose established/related byte totals here.
 
@@ -97,5 +107,7 @@ engine files, boot preferences, counters, firewall rules, or network state.
 Native inspections may create/use the engine's existing synchronization lock;
 this is not a service or a firewall/network change.
 
-Beta8 validation is host-side with fake root/native responses and an isolated
-mock kernel. Live Termux/Magisk device validation is still pending.
+Initial `pufw`, `pufw tunnel`, and `pufw stats` checks were reported successful
+on Frankenpixel (Pixel 9a, Android 17, Magisk 31.1). The redesigned statistics
+display is validated on the host with fake root/native responses and an isolated
+mock kernel; this layout has not yet been rechecked on the phone.

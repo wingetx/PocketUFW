@@ -39,7 +39,7 @@ internal fun TideInsights(ui: TideUiState, actions: TideActions) {
             enabled = !ui.insightsStopping, modifier = Modifier.testTag("stop-sample"))
         if (!sampling && (ui.verificationInDoubt || ui.snapshot.protection != FirewallClient.Protection.ACTIVE))
             InsightDetail(if (residue) "Recover the detected Insights probes, then recheck protection before sampling."
-                else "Sampling requires verified ACTIVE protection. Recheck status; recovery tools are available under Troubleshooting.")
+                else "Sampling requires verified ACTIVE protection. Recheck status, or open “Sample interrupted?” to check for leftover rules.")
     }
     ui.insights?.error?.let { TideNotice(it, error = true) }
     // Recovery also succeeds when nothing was left behind, so state what was verified, not what was removed.
@@ -92,7 +92,7 @@ internal fun TideInsights(ui: TideUiState, actions: TideActions) {
         TideOutlinedButton("Clear sample", actions.clearInsights, enabled = !ui.busy)
     }
     if (!residue) {
-        TideSettingExpander("Troubleshooting", "Optional recovery tools", troubleshootingOpen) {
+        TideSettingExpander("Sample interrupted?", "Check for leftover temporary rules", troubleshootingOpen) {
             troubleshootingOpen = !troubleshootingOpen
         }
         if (troubleshootingOpen) InsightRecovery(ui, actions, residue = false)
@@ -103,8 +103,8 @@ internal fun TideInsights(ui: TideUiState, actions: TideActions) {
     InsightPanel {
         Text(if (residue) "Insights cleanup needed" else "Insights recovery", style = MaterialTheme.typography.titleMedium)
         if (residue) TideNotice("Leftover Insights probes detected. Recover them before sampling again.", error = true)
-        InsightDetail("Force-stopping a process can leave temporary logging probes behind. Their following DROP rules still apply. Recovery removes only fully recognized Insights probes and verifies protection; it does not repair unrelated policy damage. If it finds an unrecognized probe, it changes nothing and never disables or rebuilds the firewall: review the named rule under Activity › Kernel rules.")
-        TideOutlinedButton("Recover Insights probes", actions.recoverInsights, modifier = Modifier.testTag("recover-insights"),
+        InsightDetail("If a traffic sample was interrupted, PocketUFW can check for temporary monitoring rules and safely remove any it recognizes.")
+        TideOutlinedButton("Check sample cleanup", actions.recoverInsights, modifier = Modifier.testTag("recover-insights"),
             enabled = !ui.busy && ui.snapshot.rootReady, loading = ui.working(TideOperation.RECOVER_INSIGHTS), loadingLabel = "Verifying cleanup…")
     }
 }

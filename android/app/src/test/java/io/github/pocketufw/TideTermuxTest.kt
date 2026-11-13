@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -41,19 +43,23 @@ class TideTermuxTest {
         override fun setText(annotatedString: AnnotatedString) { writes += annotatedString.text }
     }
 
-    private fun open(dark: Boolean = false, fontScale: Float = 1f): Pair<FakeGateway, Clipboard> {
+    private fun open(dark: Boolean = false, fontScale: Float = 1f): Triple<FakeGateway, Clipboard, List<String>> {
         RuntimeEnvironment.setQualifiers("w320dp-h800dp-${if (dark) "night" else "notnight"}-xxhdpi")
         RuntimeEnvironment.setFontScale(fontScale)
         val fake = FakeGateway(tunnelDashboard())
         val clipboard = Clipboard()
+        val urls = mutableListOf<String>()
+        val uriHandler = object : UriHandler {
+            override fun openUri(uri: String) { urls += uri }
+        }
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup().also { screens += it }
         controller.get().setContent {
-            CompositionLocalProvider(LocalClipboardManager provides clipboard) {
+            CompositionLocalProvider(LocalClipboardManager provides clipboard, LocalUriHandler provides uriHandler) {
                 TideTheme(dark) { PocketScreen(fake) }
             }
         }
         compose.settle { fake.count("inspect") == 1 && compose.hasText("Active.") }
-        return fake to clipboard
+        return Triple(fake, clipboard, urls)
     }
 
     @Test fun disclosureIsOptionalCollapsedAndDoesNotInspectOrInstallAnything() {
@@ -65,9 +71,23 @@ class TideTermuxTest {
         click("Termux quick commands")
         node("Termux quick commands").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
         node("Install the optional helper first. These commands are unavailable until it is installed in Termux.").assertExists()
-        node(TERMUX_INSTALL).assertExists()
-        compose.onNodeWithText("Separate from the experimental pufw-inspect", substring = true).assertExists()
         for (command in listOf("pufw", "pufw tunnel", "pufw stats", "pufw raw")) node(command).assertExists()
+        node("Install the helper").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        node(TERMUX_INSTALL).assertDoesNotExist()
+        click("Install the helper")
+        node("Install the helper").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+        compose.onNodeWithText("Once the release is published, download pufw and pufw.sha256", substring = true).assertExists()
+        node("GitHub Releases").assertExists()
+        node(TERMUX_STORAGE).assertExists()
+        node(TERMUX_PREPARE).assertExists()
+        node(TERMUX_INSTALL).assertExists()
+        node("Verify and install. Continue only if the checksum reports pufw: OK. A failed check prevents installation.").assertExists()
+        compose.onNodeWithText("source folder", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("tools/pufw", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Separate from the experimental pufw-inspect", substring = true).assertExists()
+        click("Install the helper")
+        node(TERMUX_INSTALL).assertDoesNotExist()
+        node("pufw").assertExists()
         click("Termux quick commands")
         node("pufw").assertDoesNotExist()
         assertTrue(clipboard.writes.isEmpty())
@@ -77,7 +97,8 @@ class TideTermuxTest {
     @Test fun commandTextCopiesExactlyAndAnnouncesEachCopyWithoutRootWork() {
         val (fake, clipboard) = open()
         click("Termux quick commands")
-        val commands = listOf(TERMUX_INSTALL, "pufw", "pufw tunnel", "pufw stats", "pufw raw", "pufw raw")
+        click("Install the helper")
+        val commands = listOf(TERMUX_STORAGE, TERMUX_PREPARE, TERMUX_INSTALL, "pufw", "pufw tunnel", "pufw stats", "pufw raw", "pufw raw")
         for (command in commands) {
             node(command).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
             assertEquals("Copy command", node(command).fetchSemanticsNode().config[SemanticsActions.OnClick].label)
@@ -93,13 +114,38 @@ class TideTermuxTest {
         node("Copied: pufw raw").assertDoesNotExist()
     }
 
+    @Test fun releaseLinkOpensOnlyTheProjectReleasesPageWithoutInstallingOrRequestingRoot() {
+        val (fake, clipboard, urls) = open()
+        click("Termux quick commands")
+        click("Install the helper")
+        assertTrue(urls.isEmpty())
+        click("GitHub Releases")
+        assertEquals(listOf("https://github.com/wingetx/PocketUFW/releases"), urls)
+        assertTrue(clipboard.writes.isEmpty())
+        assertEquals(listOf("inspect"), fake.calls.toList())
+    }
+
+    private fun shot(name: String) {
+        val view = screens.last().get().window.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        compose.runOnIdle { view.draw(Canvas(bitmap)) }
+        val directory = File("build/reports/tide-termux").also { it.mkdirs() }
+        File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+    }
+
     private fun largeText(dark: Boolean) {
         val (fake, _) = open(dark, 2f)
         click("Termux quick commands")
-        for (command in listOf(TERMUX_INSTALL, "pufw", "pufw tunnel", "pufw stats", "pufw raw")) {
+        click("Install the helper")
+        val appearance = if (dark) "dark" else "light"
+        compose.onNodeWithText("Once the release is published", substring = true).performScrollTo()
+        shot("$appearance-setup-large")
+        for (command in listOf(TERMUX_STORAGE, TERMUX_PREPARE, TERMUX_INSTALL, "pufw", "pufw tunnel", "pufw stats", "pufw raw")) {
             node(command).performScrollTo().assertIsDisplayed()
             val bounds = node(command).getUnclippedBoundsInRoot()
             assertTrue("Copy target remains at least 48dp high", (bounds.bottom - bounds.top).value >= 48f)
+            if (command == TERMUX_INSTALL) shot("$appearance-install-large")
         }
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult), useUnmergedTree = true)
             .fetchSemanticsNodes().forEach { node ->
@@ -116,14 +162,7 @@ class TideTermuxTest {
             }
         click("pufw stats")
         node("Copied: pufw stats").performScrollTo().assertIsDisplayed()
-        val view = screens.last().get().window.decorView
-        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
-        compose.runOnIdle { view.draw(Canvas(bitmap)) }
-        val directory = File("build/reports/tide-termux").also { it.mkdirs() }
-        File(directory, "${if (dark) "dark" else "light"}-large.png").outputStream().use {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
-        }
-        bitmap.recycle()
+        shot("$appearance-large")
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
     @Test fun largeLightCommandsWrapAndRemainAccessible() = largeText(false)

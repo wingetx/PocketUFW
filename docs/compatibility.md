@@ -44,6 +44,13 @@ It prints only verified port numbers. An ambiguous or unverifiable listener is a
 
 ## Before wider release
 
+PocketUFW does not automatically repair firewall rules or monitor VPN changes in
+the background. Use **Recheck** for a current inspection and the app's explicit
+refresh or recovery controls when needed. Installed rules keep working while the
+app is closed, but a previous inspection does not prove that later VPN addresses,
+listeners, or rules are unchanged. See [tunnel filtering](tunnel-filtering.md) for
+the detailed authorization and refresh limitations.
+
 1. Validate root and firewall backends on Magisk, KernelSU, and APatch devices.
 2. Expand verified VPN socket handling and automatically monitor Tailscale port changes without requiring manual `refresh`.
 3. Recovery that works after process death, reboot, route changes, and partial iptables failure.

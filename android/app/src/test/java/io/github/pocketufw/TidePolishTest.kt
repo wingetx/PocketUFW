@@ -248,6 +248,29 @@ class TidePolishTest {
     @Test fun activityTotalsFitLargeLightText() = largeActivity(false)
     @Test fun activityTotalsFitLargeDarkText() = largeActivity(true)
 
+    private fun settingsFooter(dark: Boolean, scale: Float) {
+        show(mutableStateOf(fixture()), dark, scale, TideDestination.SETTINGS)
+        val neutral = if (dark) Color(0xFFB3BDCE) else Color(0xFF59606B)
+        val title = "PocketUFW · Experimental Beta"
+        val note = "Some features may be incomplete or behave unexpectedly. Please review known limitations before relying on protection."
+        val version = "Version ${BuildConfig.VERSION_NAME}"
+        for (text in listOf(title, note, version)) {
+            node(text).performScrollTo().assertIsDisplayed()
+            assertEquals(neutral, layouts(text).layoutInput.style.color)
+        }
+        node(title).assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        assertTrue(node(version).fetchSemanticsNode().boundsInRoot.top >= node(note).fetchSemanticsNode().boundsInRoot.bottom)
+        node("QUICK ACCESS").assertDoesNotExist()
+        node("Quick Settings tile").assertDoesNotExist()
+        assertNoClippedText()
+        shot("settings-footer-${if (dark) "dark" else "light"}-$scale")
+    }
+
+    @Test fun settingsFooterIsNeutralInLightMode() = settingsFooter(false, 1f)
+    @Test fun settingsFooterIsNeutralInDarkMode() = settingsFooter(true, 1f)
+    @Test fun settingsFooterFitsLargeLightText() = settingsFooter(false, 2f)
+    @Test fun settingsFooterFitsLargeDarkText() = settingsFooter(true, 2f)
+
     @Test fun disclosureAndRuleNavigationNeverReadRootOrChangeRules() {
         val fake = FakeGateway(tunnelDashboard())
         screens += compose.launchScreen(fake)

@@ -16,7 +16,7 @@
 
 **Latest signed beta:** [PocketUFW 0.1.0-beta7](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta7) is published as an **experimental prerelease** (versionCode 29), with a calmer, more honest Tide interface, matching tunnel return counters, and fixes to coverage detection, root-output collection, and Quick Settings state. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/PocketUFW-0.1.0-beta7.apk), [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/SHA256SUMS.txt), and read the [Beta 7 release notes](docs/releases/0.1.0-beta7.md). Installed rules being verified does not guarantee all incoming traffic is covered; Android/OEM bypass rules and tunnel trust limits remain disclosed.
 
-**Beta 8 in development:** The local, unsigned [Beta 8 release candidate](docs/releases/0.1.0-beta8.md) improves startup-toggle feedback, simplifies coverage wording, and adds an optional read-only [Termux companion](docs/termux.md). It has not replaced the signed Beta 7 release.
+**Beta 8 in prepublication testing:** The locally signed [Beta 8 candidate](docs/releases/0.1.0-beta8.md) is installed privately on Frankenpixel and improves startup-toggle feedback, simplifies coverage wording, and adds an optional read-only [Termux companion](docs/termux.md). Beta 7 remains the latest **public** release.
 
 **Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. Ordinary firewall enforcement remains in place; strict capture cleanup and verification still apply.
 
@@ -109,11 +109,12 @@ See [hardware validation](docs/hardware-validation.md), [compatibility notes](do
 
 For initial testing, keep a trusted recovery route (such as USB ADB), especially when your phone depends on cellular, Wi-Fi calling, local services, or VPN connectivity. Installing or opening PocketUFW does not itself install firewall rules.
 
-### Optional Termux companion (Beta8 source)
+### Optional Termux companion (Beta8)
 
 The optional `pufw` helper offers four read-only terminal views: quick status,
-`pufw tunnel`, `pufw stats`, and `pufw raw`. It must be installed separately in
-Termux; the app's **Termux quick commands** disclosure provides copyable commands
+`pufw tunnel`, `pufw stats`, and `pufw raw`. A standalone helper and checksum are
+prepared for the upcoming GitHub Release; they must be downloaded and installed
+separately in Termux. The app's **Termux quick commands** disclosure provides copyable commands
 and setup guidance. See [installation, verification limits, and usage](docs/termux.md).
 It does not sample packets or run in the background.
 

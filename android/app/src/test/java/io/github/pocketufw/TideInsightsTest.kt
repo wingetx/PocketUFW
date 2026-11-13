@@ -3,6 +3,7 @@ package io.github.pocketufw
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import org.junit.After
@@ -45,7 +46,9 @@ class TideInsightsTest {
         compose.onNodeWithText("Reset counters").assertDoesNotExist()
         compose.onNodeWithText("What’s being dropped now?").assertIsDisplayed()
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
-        compose.onNodeWithText("Interrupted sample?").assertDoesNotExist()
+        compose.onNodeWithText("Sample interrupted?").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        compose.onNodeWithText("Check for leftover temporary rules").assertExists()
+        compose.onNodeWithText("Troubleshooting").assertDoesNotExist()
         shot("overview")
         compose.onNodeWithTag("sample-drops").performScrollTo().assertIsEnabled()
         compose.onNodeWithText("A short sample cannot explain the entire historical DROP count.").assertExists()
@@ -76,6 +79,7 @@ class TideInsightsTest {
         compose.onNodeWithText("Clear sample").performScrollTo().performClick()
         compose.onNodeWithText("1 DROP match").assertDoesNotExist()
         assertEquals(1, fake.count("insights-capture"))
+        assertEquals(listOf("inspect", "insights-capture", "inspect"), fake.calls.toList())
     }
     @Test fun failedSampleWithoutResidueKeepsRecoveryInTroubleshooting() {
         val fake = FakeGateway().apply { insightsResult = InsightsResult(error = "Cleanup not verified.") }
@@ -84,7 +88,7 @@ class TideInsightsTest {
         compose.settle { compose.hasText("Cleanup not verified.") && fake.count("inspect") == 2 }
         compose.onNodeWithText("0 DROP matches").assertDoesNotExist()
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
-        compose.onNodeWithText("Troubleshooting").performScrollTo().performClick()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().performClick()
         fake.insightsResult = InsightsResult(recovered = true)
         compose.onNodeWithTag("recover-insights").performScrollTo().performClick()
         compose.settle { compose.hasText("Recovery verified: no Insights probes remain.", true) }
@@ -168,7 +172,7 @@ class TideInsightsTest {
             kernelReport = report.copy(ipv4 = report.ipv4.copy(inbound = report.ipv4.inbound +
                 "-A POCKETUFW_IN -j NFLOG --nflog-prefix PUFW_APP1:0123456789abcdef0123456789abcdef:P:F"))))
         open(fake)
-        compose.onNodeWithTag("recover-insights").assertIsDisplayed()
+        compose.onNodeWithTag("recover-insights").assertIsDisplayed().assertTextContains("Check sample cleanup")
         shot("residue-prominent")
         compose.onNodeWithTag("sample-drops").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("recover-insights").performScrollTo().assertIsEnabled()
@@ -194,7 +198,7 @@ class TideInsightsTest {
         open(fake)
         compose.onNodeWithTag("recover-insights").performScrollTo().performClick()
         compose.settle { compose.hasText("Affected IPv4 rule:", true) && fake.count("inspect") == 2 }
-        compose.onNodeWithText("never disables or rebuilds the firewall", substring = true).assertExists()
+        compose.onNodeWithText("Nothing was removed, disabled or rebuilt.", substring = true).assertExists()
         // Only the refused recovery and its read-only recheck: no removal, disable, enable or tunnel change.
         assertEquals(listOf("inspect", "insights-recover", "inspect"), fake.calls.toList())
         compose.onNodeWithText("Firewall").performClick()
@@ -209,7 +213,7 @@ class TideInsightsTest {
         val fake = FakeGateway(tunnelDashboard()); open(fake, 1.5f, 320)
         compose.onNodeWithTag("sample-drops").performScrollTo().assertIsDisplayed()
         shot("large-text")
-        compose.onNodeWithText("Troubleshooting").performScrollTo().performClick()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().performClick()
         compose.onNodeWithTag("recover-insights").performScrollTo().assertIsDisplayed()
         shot("large-text-troubleshooting")
         assertEquals(listOf("inspect"), fake.calls.toList())
@@ -218,12 +222,16 @@ class TideInsightsTest {
     @Test fun troubleshootingIsExplicitAndBackClosesItBeforeLeavingInsights() {
         val fake = FakeGateway(); open(fake)
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
-        compose.onNodeWithText("Troubleshooting").performScrollTo().performClick()
-        compose.onNodeWithTag("recover-insights").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().performClick()
+        compose.onNodeWithText("Sample interrupted?").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+        compose.onNodeWithText("If a traffic sample was interrupted, PocketUFW can check for temporary monitoring rules and safely remove any it recognizes.").assertExists()
+        compose.onNodeWithText("Force-stopping a process", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("recover-insights").performScrollTo().assertIsEnabled().assertTextContains("Check sample cleanup")
         shot("troubleshooting")
         assertEquals(listOf("inspect"), fake.calls.toList())
         compose.runOnIdle { screens.last().get().onBackPressedDispatcher.onBackPressed() }
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
+        compose.onNodeWithText("Sample interrupted?").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         compose.onNodeWithText("Insights.").assertExists()
         compose.runOnIdle { screens.last().get().onBackPressedDispatcher.onBackPressed() }
         compose.onNodeWithTag("firewall-action").assertExists()
@@ -236,7 +244,8 @@ class TideInsightsTest {
         open(fake)
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
         compose.onNodeWithTag("sample-drops").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Troubleshooting").performScrollTo().performClick()
+        compose.onNodeWithText("Sampling requires verified ACTIVE protection. Recheck status, or open “Sample interrupted?” to check for leftover rules.").assertExists()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().performClick()
         compose.onNodeWithTag("recover-insights").performScrollTo().assertIsEnabled()
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
@@ -245,7 +254,7 @@ class TideInsightsTest {
         val fake = FakeGateway(stateDashboard(FirewallClient.Protection.ROOT_REQUIRED, false, "Root unavailable."))
         open(fake)
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
-        compose.onNodeWithText("Troubleshooting").performScrollTo().performClick()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().performClick()
         compose.onNodeWithTag("recover-insights").performScrollTo().assertIsNotEnabled()
         assertEquals(listOf("inspect"), fake.calls.toList())
     }
@@ -265,7 +274,7 @@ class TideInsightsTest {
         compose.settle { fake.count("inspect") == 2 && compose.hasText("Recovery verified:", true) }
         compose.onNodeWithTag("recover-insights").assertDoesNotExist()
         compose.onNodeWithText("Leftover Insights probes detected.", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Troubleshooting").performScrollTo().assertExists()
+        compose.onNodeWithText("Sample interrupted?").performScrollTo().assertExists()
         shot("recovered")
         assertEquals(listOf("inspect", "insights-recover", "inspect"), fake.calls.toList())
     }

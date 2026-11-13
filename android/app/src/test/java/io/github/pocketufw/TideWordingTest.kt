@@ -506,12 +506,16 @@ class TideWordingTest {
         node("Refresh Tailscale ports runs", substring = true).assertExists()
     }
 
-    @Test fun tileHelpDescribesWhatATapReallyDoes() {
+    @Test fun settingsHasNeutralBetaFooterWithoutTileHelp() {
         show(ui(active), TideDestination.SETTINGS)
-        node("Quick Settings tile").performScrollTo().performClick()
-        compose.waitForIdle()
-        node("A tap switches only if the kernel still matches what the tile shows. " +
-            "If the tile can't say whether the firewall is on or off, a tap only checks.", substring = true).assertExists()
+        node("Quick Settings tile").assertDoesNotExist()
+        node("QUICK ACCESS").assertDoesNotExist()
+        node("Quick Settings").assertDoesNotExist()
+        node("Experimental build", substring = true).assertDoesNotExist()
+        node("Automatic repair and VPN monitoring", substring = true).assertDoesNotExist()
+        node("PocketUFW · Experimental Beta").performScrollTo().assertIsDisplayed()
+        node("Some features may be incomplete or behave unexpectedly. Please review known limitations before relying on protection.").assertExists()
+        node("Version ${BuildConfig.VERSION_NAME}").performScrollTo().assertIsDisplayed()
     }
 
     // ---- banner ----

@@ -7,16 +7,47 @@ experimental `pufw-inspect` packet-sampling tool and does not capture packets.
 
 ## Optional installation
 
-Nothing installs automatically. In Termux, start in a reviewed PocketUFW source
-checkout or extracted source archive **that contains `tools/pufw`**, then run:
+The helper is a **separate, optional release download**, not part of the APK.
+No repository checkout is needed. These assets are prepared for the upcoming
+release; there is no published Beta8 helper download yet.
+
+1. Once published, open the official [PocketUFW GitHub Releases page](https://github.com/wingetx/PocketUFW/releases)
+   in your phone's browser. Choose the release matching your app and review its
+   known limitations. Under **Assets**, download **pufw** and **pufw.sha256** into
+   your phone's **Downloads** folder, keeping those exact names. Use both files
+   from the same release. **Termux-setup.md** is the downloadable copy of this guide.
+2. In Termux, enable access to Downloads once, then accept Android's file-access prompt:
 
 ```sh
-install -m 700 tools/pufw "$PREFIX/bin/pufw"
+termux-setup-storage
 ```
 
-This copies only the helper into Termux's command directory. No shell startup
-files, aliases, environment settings, services, or firewall configuration are
-changed. It uses Android's shell plus `awk`, `timeout`, and `su`; no Python,
+3. Copy the two downloads into Termux's private storage and enter that folder:
+
+```sh
+mkdir -p "$HOME/pufw-setup" &&
+cp "$HOME/storage/downloads/pufw" "$HOME/storage/downloads/pufw.sha256" "$HOME/pufw-setup/" &&
+cd "$HOME/pufw-setup"
+```
+
+4. Verify the checksum and install the helper:
+
+```sh
+sha256sum -c pufw.sha256 &&
+install -m 700 pufw "$PREFIX/bin/pufw"
+```
+
+The checksum must report **pufw: OK**. The `&&` prevents installation if the
+check fails. If either download is missing or verification fails, stop and
+download both assets again from the same official release. A checksum detects
+file changes; the official release is the source of trust. Do not execute the
+download directly or pipe a download into a shell.
+
+Nothing installs automatically. These steps grant Termux access to shared
+storage, create a private setup folder, and copy only the verified helper into
+Termux's command directory. No shell startup files, aliases, services, or firewall
+configuration are changed. The helper uses Android's shell plus `awk`, `timeout`,
+and `su`; no Python,
 `jq`, Termux:API, or packet-capture package is required. If a required command is
 missing, the helper stops and names it before requesting root.
 
@@ -26,7 +57,8 @@ Magisk. The helper itself never stages or updates engine files. A denied root
 request, missing engine, or unsupported/incomplete response produces an error,
 not an assertion that the firewall is off.
 
-To update the helper, repeat the copy from the source version you intend to use.
+To update the helper, repeat the download, copy, verification, and installation
+steps from the release you intend to use.
 To remove it, run `rm "$PREFIX/bin/pufw"` in Termux. Neither action changes rules
 or the app. No APK installation is part of this procedure.
 
@@ -107,7 +139,7 @@ engine files, boot preferences, counters, firewall rules, or network state.
 Native inspections may create/use the engine's existing synchronization lock;
 this is not a service or a firewall/network change.
 
-Initial `pufw`, `pufw tunnel`, and `pufw stats` checks were reported successful
-on Frankenpixel (Pixel 9a, Android 17, Magisk 31.1). The redesigned statistics
-display is validated on the host with fake root/native responses and an isolated
-mock kernel; this layout has not yet been rechecked on the phone.
+The four CLI views, including per-family statistics, were tested on Frankenpixel
+(Pixel 9a, Android 17, Magisk 31.1). Host tests cover fake root/native responses,
+an isolated mock kernel, and the checksum-gated installation in temporary folders.
+Device validation of the new release-download setup remains pending.

@@ -2,8 +2,7 @@ package io.github.pocketufw
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.*
@@ -12,7 +11,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: String, onExceptions: () -> Unit) {
     val state = ui.snapshot
-    var tileHelp by rememberSaveable { mutableStateOf(false) }
     val active = state.protection == FirewallClient.Protection.ACTIVE &&
         state.rootReady && !ui.verificationInDoubt
     val bootProgress = when {
@@ -66,17 +64,15 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
             if (state.vpnActive) state.vpnProvider ?: "Unrecognized VPN" else "Not detected")
         TideTunnelSettings(ui, actions)
     }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("QUICK ACCESS", color = Muted, style = MaterialTheme.typography.labelSmall)
-        TideSettingLink("Quick Settings tile", "Enable or disable from Android’s shade") { tileHelp = true }
-    }
     TideRemoveSection(ui, actions)
-    TideNotice("Experimental build · $appVersion\nFor test devices. Automatic repair and VPN monitoring are not yet implemented.", true)
     Text("Kernel protection continues when the app closes.\nLocal-only · No accounts or telemetry",
         style = MaterialTheme.typography.bodySmall, color = Muted)
-    if (tileHelp) AlertDialog(onDismissRequest = { tileHelp = false }, title = { Text("Quick Settings") },
-        text = { Text("Open Android’s Quick Settings editor and add PocketUFW. The shield tile lets you toggle the firewall. " +
-            "Its displayed state comes from the last check. A tap switches only if the kernel still matches what the tile " +
-            "shows. If the tile can't say whether the firewall is on or off, a tap only checks.") },
-        confirmButton = { TextButton(onClick = { tileHelp = false }) { Text("Done") } })
+    TideDivider()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("PocketUFW · Experimental Beta", Modifier.semantics { heading() },
+            style = MaterialTheme.typography.labelMedium, color = Muted)
+        Text("Some features may be incomplete or behave unexpectedly. Please review known limitations before relying on protection.",
+            style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text("Version $appVersion", style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
 }

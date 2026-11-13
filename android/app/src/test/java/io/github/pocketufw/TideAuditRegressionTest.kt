@@ -160,15 +160,15 @@ class TideAuditRegressionTest {
             TideTheme { TideSettings(model.value, TideActions(), "beta", {}) }
         }
         val problems = listOf(
-            BootRestore.UNSUPPORTED to "isn't available",
-            BootRestore.DEGRADED to "incomplete",
-            BootRestore.CONFLICT to "won't overwrite",
-            BootRestore.UNKNOWN to "couldn't be read"
+            BootRestore.UNSUPPORTED to "Magisk boot restoration isn't available on this device.",
+            BootRestore.DEGRADED to "The boot hook is incomplete; restoring after reboot isn't verified.",
+            BootRestore.CONFLICT to "Something else owns the boot hook path; PocketUFW won't overwrite it.",
+            BootRestore.UNKNOWN to "Boot restoration status couldn't be read."
         )
         for ((mode, detail) in problems) {
             compose.runOnIdle { model.value = model.value.copy(snapshot =
                 model.value.snapshot.copy(bootRestore = mode)) }
-            node(detail, substring = true).assertExists()
+            node(detail).assertExists()
             compose.onNodeWithContentDescription("Restore after reboot").assertDoesNotExist()
         }
         compose.runOnIdle { model.value = model.value.copy(snapshot =

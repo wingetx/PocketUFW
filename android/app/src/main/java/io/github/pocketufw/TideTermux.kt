@@ -8,18 +8,26 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 
-internal const val TERMUX_INSTALL = "install -m 700 tools/pufw \"\$PREFIX/bin/pufw\""
+internal const val TERMUX_RELEASES = "https://github.com/wingetx/PocketUFW/releases"
+internal const val TERMUX_STORAGE = "termux-setup-storage"
+internal const val TERMUX_PREPARE = "mkdir -p \"\$HOME/pufw-setup\" &&\n" +
+    "cp \"\$HOME/storage/downloads/pufw\" \"\$HOME/storage/downloads/pufw.sha256\" \"\$HOME/pufw-setup/\" &&\n" +
+    "cd \"\$HOME/pufw-setup\""
+internal const val TERMUX_INSTALL = "sha256sum -c pufw.sha256 &&\ninstall -m 700 pufw \"\$PREFIX/bin/pufw\""
 
 @Composable
 internal fun TideTermuxCommands() {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var setupExpanded by rememberSaveable { mutableStateOf(false) }
     var copied by remember { mutableStateOf<String?>(null) }
     var copySequence by remember { mutableIntStateOf(0) }
     val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
     val copy: (String) -> Unit = { command ->
         clipboard.setText(AnnotatedString(command))
         copied = command
@@ -33,11 +41,6 @@ internal fun TideTermuxCommands() {
         if (expanded) {
             Text("Install the optional helper first. These commands are unavailable until it is installed in Termux.",
                 style = MaterialTheme.typography.bodyMedium, color = Muted)
-            Text("From a PocketUFW source folder containing tools/pufw, run this in Termux:",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
-            TermuxCommand(TERMUX_INSTALL, copy, copied == TERMUX_INSTALL, copySequence)
-            Text("Open PocketUFW and tap Recheck once to prepare its engine. Grant Termux root access when prompted. Full setup: docs/termux.md in the source folder.",
-                style = MaterialTheme.typography.bodySmall, color = Muted)
             Text("Tap a command to copy it.", style = MaterialTheme.typography.bodySmall, color = Muted)
             for ((command, purpose) in listOf(
                 "pufw" to "Verified rule status, tunnel summary and counters.",
@@ -47,6 +50,26 @@ internal fun TideTermuxCommands() {
             )) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TermuxCommand(command, copy, copied == command, copySequence)
                 Text(purpose, style = MaterialTheme.typography.bodySmall, color = Muted)
+            }
+            TideSettingExpander("Install the helper", "GitHub Release download and setup", setupExpanded) {
+                setupExpanded = !setupExpanded
+                copied = null
+            }
+            if (setupExpanded) {
+                Text("Once the release is published, download pufw and pufw.sha256 from its Assets to your phone’s Downloads folder. No source checkout is needed. Termux-setup.md contains the full guide.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
+                TideSettingLink("GitHub Releases", "Download the helper when published") { uriHandler.openUri(TERMUX_RELEASES) }
+                Text("In Termux, run this once and allow file access:",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
+                TermuxCommand(TERMUX_STORAGE, copy, copied == TERMUX_STORAGE, copySequence)
+                Text("Copy the two downloads into Termux’s private folder:",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
+                TermuxCommand(TERMUX_PREPARE, copy, copied == TERMUX_PREPARE, copySequence)
+                Text("Verify and install. Continue only if the checksum reports pufw: OK. A failed check prevents installation.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
+                TermuxCommand(TERMUX_INSTALL, copy, copied == TERMUX_INSTALL, copySequence)
+                Text("Open PocketUFW and tap Recheck once. Then run pufw in Termux and grant root access when prompted.",
+                    style = MaterialTheme.typography.bodySmall, color = Muted)
             }
             Text("Read-only and on demand, with no background polling. Separate from the experimental pufw-inspect packet-sampling tool.",
                 style = MaterialTheme.typography.bodySmall, color = Muted)

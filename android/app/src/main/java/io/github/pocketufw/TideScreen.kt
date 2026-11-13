@@ -437,6 +437,7 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
         TideSettingLink("Restore after reboot", bootLabel(state.bootRestore) + " · Magisk", showSettings)
     }
     TideTermuxCommands()
+    TideDivider()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TideIcon(R.drawable.tide_root, tint = Muted)
         Text(when {

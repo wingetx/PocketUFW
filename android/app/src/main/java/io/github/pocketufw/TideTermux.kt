@@ -39,9 +39,9 @@ internal fun TideTermuxCommands() {
             copied = null
         }
         if (expanded) {
-            Text("Install the optional helper first. These commands are unavailable until it is installed in Termux.",
+            Text("To use these commands, install the optional helper first. See “Install the helper” below.",
                 style = MaterialTheme.typography.bodyMedium, color = Muted)
-            Text("Tap a command to copy it.", style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text("Tap any command to copy it, then paste it into Termux.", style = MaterialTheme.typography.bodySmall, color = Muted)
             for ((command, purpose) in listOf(
                 "pufw" to "Verified rule status, tunnel summary and counters.",
                 "pufw tunnel" to "Tunnel mode, saved authorization and current address verification.",
@@ -56,10 +56,10 @@ internal fun TideTermuxCommands() {
                 copied = null
             }
             if (setupExpanded) {
-                Text("Once the release is published, download pufw and pufw.sha256 from its Assets to your phone’s Downloads folder. No source checkout is needed. Termux-setup.md contains the full guide.",
+                Text("Download pufw and pufw.sha256 from the GitHub Release assets to your phone’s Downloads folder. No source code needed. The release also includes a full setup guide (Termux-setup.md).",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
-                TideSettingLink("GitHub Releases", "Download the helper when published") { uriHandler.openUri(TERMUX_RELEASES) }
-                Text("In Termux, run this once and allow file access:",
+                TideSettingLink("GitHub Releases", "Get the Termux helper") { uriHandler.openUri(TERMUX_RELEASES) }
+                Text("Run these setup commands in Termux in order. Start by allowing access to Downloads:",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
                 TermuxCommand(TERMUX_STORAGE, copy, copied == TERMUX_STORAGE, copySequence)
                 Text("Copy the two downloads into Termux’s private folder:",

@@ -39,6 +39,7 @@ android {
     testOptions { unitTests { isIncludeAndroidResources = true } }
 
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/firewallAssets"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/termuxAssets"))
 }
 
 val stageFirewallAssets by tasks.registering(Copy::class) {
@@ -53,6 +54,13 @@ val stageFirewallAssets by tasks.registering(Copy::class) {
     into(layout.buildDirectory.dir("generated/firewallAssets"))
 }
 tasks.named("preBuild") { dependsOn(stageFirewallAssets) }
+
+val stageTermuxHelper by tasks.registering(Sync::class) {
+    // Keep the optional, unprivileged companion separate from the engine assets.
+    from(rootProject.file("../tools/pufw")) { into("termux") }
+    into(layout.buildDirectory.dir("generated/termuxAssets"))
+}
+tasks.named("preBuild") { dependsOn(stageTermuxHelper) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")

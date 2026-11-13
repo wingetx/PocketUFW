@@ -6,8 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -16,24 +15,41 @@ internal fun TideSettings(ui: TideUiState, actions: TideActions, appVersion: Str
     var tileHelp by rememberSaveable { mutableStateOf(false) }
     val active = state.protection == FirewallClient.Protection.ACTIVE &&
         state.rootReady && !ui.verificationInDoubt
+    val bootProgress = when {
+        ui.working(TideOperation.ENABLE_BOOT) -> "Enabling…"
+        ui.working(TideOperation.DISABLE_BOOT) -> "Disabling…"
+        else -> null
+    }
     TideHeading("Settings.")
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("STARTUP", color = Muted, style = MaterialTheme.typography.labelSmall)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Restore after reboot", style = MaterialTheme.typography.titleMedium)
-                Text("Uses Magisk at startup. No background app. Restores physical filtering only; tunnel filtering never restores.",
-                    style = MaterialTheme.typography.bodySmall, color = Muted)
-            }
+            Text("Restore after reboot", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             if (bootProblemText(state.bootRestore) == null) {
                 Switch(checked = state.bootRestore == FirewallClient.BootRestore.ENABLED,
                     onCheckedChange = { next -> if (!ui.busy && active) actions.changeBootRestoration(next) },
                     enabled = active && !ui.busy,
-                    modifier = Modifier.semantics { contentDescription = "Restore after reboot" })
+                    modifier = Modifier.semantics {
+                        contentDescription = "Restore after reboot"
+                        if (bootProgress != null) {
+                            stateDescription = bootProgress
+                            progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+                            liveRegion = LiveRegionMode.Polite
+                        }
+                    })
             }
         }
+        Text("Uses Magisk at startup. No background app. Restores physical filtering only; tunnel filtering never restores.",
+            style = MaterialTheme.typography.bodySmall, color = Muted)
+        if (bootProgress != null) Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TideProgressIndicator()
+            Text(bootProgress, style = MaterialTheme.typography.bodySmall, color = Mint)
+        }
         restoreFailureNotice(state, ui.verificationInDoubt)?.let { TideNotice(it, true) }
-        if (!active) Text("Enable the firewall to change boot restoration.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        if (!active) Text(if (ui.verificationInDoubt || !state.rootReady)
+            "Recheck status before changing boot restoration." else "Enable the firewall to change boot restoration.",
+            color = Muted, style = MaterialTheme.typography.bodySmall)
         bootProblemText(state.bootRestore)?.let { TideNotice(it, true) }
 
         TideDivider()

@@ -55,6 +55,7 @@ class TideWordingTest {
     }
 
     private fun expandCoverage() = node("Coverage details").performScrollTo().performClick()
+    private fun expandTechnical() = node("Technical details").performScrollTo().performClick()
 
     private val active = activeDashboard().snapshot
     private fun ui(snapshot: Snapshot, report: FirewallClient.KernelReport? = sampleReport(), doubt: Boolean = false) =
@@ -67,7 +68,9 @@ class TideWordingTest {
         show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
             tunnelMode = FirewallClient.TunnelMode.PINNED, tailnetConnectivity = FirewallClient.TailnetConnectivity.MATCH)))
         expandCoverage()
-        node("Tunnel rules are on for listed hooks, until restart. Only pinned Tailscale destinations are trusted on tun*. Packet sources and interface ownership are not authenticated.").assertExists()
+        node("Optional tunnel protection is on for supported VPN connections. It lasts until restart and is never restored after reboot.").assertExists()
+        expandTechnical()
+        node("Packet sources and interface ownership are not authenticated.", substring = true).assertExists()
         node("Settings").performClick()
         node("Restores physical filtering only; tunnel filtering never restores.", substring = true).assertExists()
     }
@@ -78,21 +81,58 @@ class TideWordingTest {
             tailnetConnectivity = FirewallClient.TailnetConnectivity.REAUTHORIZE,
             tailnetPin4 = "100.64.0.1/32", tailnetPin6 = "fd7a:115c:a1e0::1/128",
             tailnetObserved4 = "100.64.0.9/32", tailnetObserved6 = "fd7a:115c:a1e0::9/128")))
-        node("Active.").assertExists()
+        node("Needs attention.").assertExists()
+        node("PROTECTION NEEDS ATTENTION · REAUTHORIZE TAILSCALE").assertExists()
+        node("Installed filtering remains in place", substring = true).assertExists()
         expandCoverage()
+        expandTechnical()
         node("Pinned tailnet destinations: 100.64.0.1/32, fd7a:115c:a1e0::1/128.").assertExists()
         node("Tailnet connectivity: REAUTHORIZE.", substring = true).assertExists()
         node("100.64.0.9/32", substring = true).assertExists()
-        node("Installed protection is unchanged.", substring = true).assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
     }
 
     @Test fun denyOnlyWarnsAboutTailscaleStartingLater() {
         show(ui(active.copy(tunnelFilter = FirewallClient.TunnelFilter.ON,
             tunnelMode = FirewallClient.TunnelMode.DENY_ONLY)))
         expandCoverage()
+        expandTechnical()
         node("Deny-only has no tailnet exemption", substring = true).assertExists()
         node("unsolicited peer connections remain filtered if Tailscale starts later", substring = true).assertExists()
         node("Only pinned Tailscale destinations", substring = true).assertDoesNotExist()
+    }
+
+    @Test fun stalePinsOfferSettingsWithoutChangingRules() {
+        val dashboard = tunnelDashboard()
+        val fake = FakeGateway(dashboard.copy(snapshot = dashboard.snapshot.copy(
+            tailnetConnectivity = FirewallClient.TailnetConnectivity.REAUTHORIZE)))
+        screens += compose.launchScreen(fake)
+        compose.settle { compose.hasText("Needs attention.") }
+        node("Review tunnel protection").performScrollTo().performClick()
+        node("Settings.").assertExists()
+        node("Tunnel protection").performScrollTo().performClick()
+        node("REAUTHORIZE: verified addresses", substring = true).assertExists()
+        assertEquals(listOf("inspect"), fake.calls.toList())
+    }
+
+    @Test fun unknownConfiguredTunnelPreservesVerifiedPhysicalScope() {
+        show(ui(active.copy(physicalFilter = FirewallClient.PhysicalFilter.ACTIVE,
+            tunnelMode = FirewallClient.TunnelMode.DENY_ONLY, tunnelFilter = FirewallClient.TunnelFilter.UNKNOWN)))
+        node("PROTECTION NEEDS ATTENTION · TUNNEL STATUS UNKNOWN").assertExists()
+        node("Physical firewall rules are verified, but tunnel protection is not verified.", substring = true).assertExists()
+        node("Filtered where supported").assertExists()
+        node("Recheck status").assertIsEnabled()
+        expandCoverage()
+        node("No action is needed", substring = true).assertDoesNotExist()
+        node("Coverage inspection is incomplete.", substring = true).assertExists()
+    }
+
+    @Test fun unknownTunnelModeDoesNotClaimHealthyConfiguredProtection() {
+        show(ui(active.copy(physicalFilter = FirewallClient.PhysicalFilter.ACTIVE,
+            tunnelFilter = FirewallClient.TunnelFilter.ON, tunnelMode = FirewallClient.TunnelMode.UNKNOWN)))
+        node("PROTECTION NEEDS ATTENTION · TUNNEL MODE UNKNOWN").assertExists()
+        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
+        node("Recheck status").assertIsEnabled()
     }
 
     private data class Headline(val title: String, val label: String, val body: String, val button: String)
@@ -100,12 +140,12 @@ class TideWordingTest {
     private val headlines = listOf(
         Snapshot(Protection.ACTIVE, rootReady = true) to Headline("Active.", "PROTECTION ACTIVE · RULES VERIFIED",
             "Your firewall is active with verified rules. See Coverage details for protection limits.", "Turn firewall off"),
-        Snapshot(Protection.INACTIVE, rootReady = true) to Headline("Off.", "POCKETUFW IS INACTIVE",
+        Snapshot(Protection.INACTIVE, rootReady = true) to Headline("Inactive.", "PROTECTION INACTIVE",
             "PocketUFW rules are not installed. Android’s own firewall remains unchanged.", "Turn firewall on"),
         Snapshot(Protection.DEGRADED, rootReady = true, details = "Incomplete firewall.") to Headline(
-            "Needs\nattention.", "PROTECTION NOT VERIFIED", "Incomplete firewall.", "Recheck status"),
+            "Needs attention.", "PROTECTION NEEDS ATTENTION · RULES NOT VERIFIED", "Incomplete firewall.", "Recheck status"),
         Snapshot(Protection.ROOT_REQUIRED, rootReady = false, details = "No root.") to Headline(
-            "Root\nrequired.", "ROOT PERMISSION NEEDED", "No root.", "Check root access"),
+            "Needs attention.", "PROTECTION NEEDS ATTENTION · ROOT ACCESS NEEDED", "No root.", "Check root access"),
     )
 
     @Test fun udpEditorOnlyOpensFromSettingsNotKernelRules() {
@@ -144,7 +184,7 @@ class TideWordingTest {
             node(expected.button).assertExists("$state button")
             // Only one headline is ever on screen.
             headlines.filter { it.first !== snapshot }.forEach { (_, other) ->
-                node(other.title).assertDoesNotExist()
+                if (other.title != expected.title) node(other.title).assertDoesNotExist()
                 node(other.label).assertDoesNotExist()
             }
         }
@@ -152,8 +192,8 @@ class TideWordingTest {
 
     @Test fun doubtReplacesEveryClaimAboutTheLastReading() {
         show(ui(active, doubt = true))
-        node("Not\nverified.").assertExists()
-        node("RECHECK REQUIRED").assertExists()
+        node("Needs attention.").assertExists()
+        node("PROTECTION NEEDS ATTENTION · RECHECK REQUIRED").assertExists()
         node("A later read failed or the Quick Settings tile changed. " +
             "Last known status is not proof of current protection. Recheck the kernel.").assertExists()
         node("Recheck status").assertExists()
@@ -161,11 +201,27 @@ class TideWordingTest {
         node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
         node("Turn firewall off").assertDoesNotExist()
         node("Filtering active").assertDoesNotExist()
+        expandCoverage()
+        node("These interface and rule findings are from the last inspection. Current coverage is not verified.").assertExists()
     }
 
-    @Test fun policyRowOnlyClaimsTheDenyPolicyWhenVerified() {
-        show(ui(active))
-        node("Filtering active").assertExists()
+    @Test fun incomingRowOnlyClaimsFilteringWhenPhysicalRulesAreVerified() {
+        val verified = active.copy(physicalFilter = FirewallClient.PhysicalFilter.ACTIVE)
+        val model = mutableStateOf(ui(verified))
+        activity().get().setContent { TideTheme { TideScreen(model.value, TideActions()) } }
+        for (state in listOf(ui(verified), ui(verified.copy(uncoveredInterfaces = listOf("eth0"))),
+            ui(verified, report = bypassReport()), ui(verified.copy(protection = Protection.DEGRADED,
+                tunnelFilter = FirewallClient.TunnelFilter.DEGRADED)))) {
+            compose.runOnIdle { model.value = state }
+            node("Filtered where supported").assertExists()
+        }
+        for (state in listOf(ui(active), ui(verified, doubt = true), ui(verified.copy(rootReady = false)),
+            ui(verified.copy(protection = Protection.DEGRADED, physicalFilter = FirewallClient.PhysicalFilter.DEGRADED)),
+            ui(verified.copy(protection = Protection.INACTIVE, physicalFilter = FirewallClient.PhysicalFilter.INACTIVE,
+                bootRestore = BootRestore.DISABLED)))) {
+            compose.runOnIdle { model.value = state }
+            node("Filtered where supported").assertDoesNotExist()
+        }
     }
 
     @Test fun uncertaintyOverridesBothCachedActiveAndOffAndOnlyOffersRecheck() {
@@ -176,9 +232,9 @@ class TideWordingTest {
             TideActions(recheck = { rechecks++ }, changeProtection = { changes++ })) } }
         for (state in listOf(active, Snapshot(Protection.INACTIVE, rootReady = true), active.copy(rootReady = false))) {
             compose.runOnIdle { model.value = ui(state, doubt = state.rootReady) }
-            node("Not\nverified.").assertExists()
+            node("Needs attention.").assertExists()
             node("Active.").assertDoesNotExist()
-            node("Off.").assertDoesNotExist()
+            node("Inactive.").assertDoesNotExist()
             node("Filtering active").assertDoesNotExist()
             node("Turn firewall on").assertDoesNotExist()
             node("Turn firewall off").assertDoesNotExist()
@@ -208,10 +264,14 @@ class TideWordingTest {
                 "Recheck status and inspect kernel rules before relying on $recovery.").assertExists()
             node("Firewall state could not be verified.", substring = true).assertDoesNotExist()
             node("Don't assume packets", substring = true).assertDoesNotExist()
-            node("PROTECTION NOT VERIFIED").assertExists()
+            node("PROTECTION NEEDS ATTENTION · " + when (tunnel) {
+                "DEGRADED" -> "TUNNEL RULES DEGRADED"
+                "UNKNOWN" -> "TUNNEL STATUS UNKNOWN"
+                else -> "RULES NOT VERIFIED"
+            }).assertExists()
             node("Recheck status").assertIsEnabled()
             if (tunnel == "DEGRADED") {
-                node("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.").assertExists()
+                node("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.").assertDoesNotExist()
                 node("Remove tunnel rules only").assertIsEnabled()
             }
         }
@@ -236,7 +296,7 @@ class TideWordingTest {
         node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
         compose.runOnIdle { model.value = ui(state.copy(physicalFilter = FirewallClient.PhysicalFilter.ACTIVE), doubt = true) }
         node("Physical firewall rules are verified", substring = true).assertDoesNotExist()
-        node("RECHECK REQUIRED").assertExists()
+        node("PROTECTION NEEDS ATTENTION · RECHECK REQUIRED").assertExists()
     }
 
     @Test fun policyRowIsHonestWhenOff() {
@@ -260,7 +320,8 @@ class TideWordingTest {
     @Test fun offWithRestoreOnIsExplainedOnTheFirewallTab() {
         show(ui(offButArmed))
         node(notice).assertExists()
-        node("Off.").assertExists()
+        node("Needs attention.").assertExists()
+        node("PROTECTION NEEDS ATTENTION · RESTORATION NOT RUNNING").assertExists()
     }
 
     @Test fun offWithRestoreOnIsExplainedInSettings() {
@@ -304,7 +365,7 @@ class TideWordingTest {
             uncoveredInterfaces = listOf("tun0"))))
         expandCoverage()
         node("Not filtered: traffic inside Proton VPN (tun0).").assertExists()
-        node("Coverage inspected · known limitations").assertExists()
+        node(COVERAGE_SUBTITLE).assertExists()
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
     }
 
@@ -331,18 +392,19 @@ class TideWordingTest {
             uncoveredInterfaces = listOf("US-DEN-315", "tun1", "ipsec7"))))
         expandCoverage()
         node("Not filtered: US-DEN-315, traffic inside Tailscale (tun1), unidentified IPsec tunnel ipsec7.").assertExists()
-        node(CARRIER_IMS_NOTICE).assertDoesNotExist()
+        node("Carrier calling network is managed separately from PocketUFW.", substring = true).assertDoesNotExist()
     }
 
     @Test fun androidIdentifiedCarrierImsIsExplainedCalmlyButStillListedAsNotFiltered() {
         // Frankenpixel's case: Android names ipsec995 as carrier IMS; ipsec7 has no such record.
         show(ui(active.copy(uncoveredInterfaces = listOf("ipsec995", "ipsec7"), carrierImsInterfaces = setOf("ipsec995"))))
         expandCoverage()
-        node("Not filtered: carrier calling network (ipsec995), unidentified IPsec tunnel ipsec7.").assertExists()
-        node(CARRIER_IMS_NOTICE).assertExists()
+        node("Not filtered: unidentified IPsec tunnel ipsec7.").assertExists()
+        node("Carrier calling networks (ipsec995) are not filtered by PocketUFW. Android manages them separately; this is an expected coverage boundary.").assertExists()
+        node("Carrier calling network is managed separately from PocketUFW.", substring = true).assertDoesNotExist()
         // Known limits remain available without changing the verified protection verdict.
-        node("Coverage inspected · known limitations").assertExists()
-        node("Coverage limited").assertExists()
+        node(COVERAGE_SUBTITLE).assertExists()
+        node("Coverage limited").assertDoesNotExist()
         node("Filtering active").assertDoesNotExist()
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
@@ -357,7 +419,7 @@ class TideWordingTest {
         assertEquals("unidentified IPsec tunnel ipsec995", uncoveredLabel("ipsec995", vpnOwned))
         show(ui(vpnOwned))
         expandCoverage()
-        node(CARRIER_IMS_NOTICE).assertDoesNotExist()
+        node("Carrier calling network is managed separately from PocketUFW.", substring = true).assertDoesNotExist()
         node("Not filtered: unidentified IPsec tunnel ipsec995.").assertExists()
     }
 
@@ -367,9 +429,9 @@ class TideWordingTest {
         node("Not filtered: eth0, usb0.").assertExists()
         node("Active.").assertExists() // The state itself stays.
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
-        node("Coverage inspected · known limitations").assertExists()
+        node(COVERAGE_SUBTITLE).assertExists()
         node("Unsolicited incoming traffic is blocked on supported physical interfaces.").assertDoesNotExist()
-        node("Coverage limited").assertExists()
+        node("Coverage limited").assertDoesNotExist()
         node("Filtering active").assertDoesNotExist()
         node("Turn firewall off").assertExists()
     }
@@ -389,7 +451,7 @@ class TideWordingTest {
     @Test fun aBypassRuleIsDisclosedOnTheFirewallTab() {
         show(ui(active, report = bypassReport()))
         expandCoverage()
-        node(bypassWarning, substring = true).assertExists()
+        node("Earlier Android rules were found that can accept traffic before PocketUFW.", substring = true).assertExists()
         node("Active.").assertExists()
         node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
     }
@@ -397,7 +459,7 @@ class TideWordingTest {
     @Test fun aBypassRuleInEitherFamilyIsDisclosed() {
         show(ui(active, report = bypassReport(rule4 = null, rule6 = "-A INPUT -i wlan0 -j ACCEPT")))
         expandCoverage()
-        node(bypassWarning, substring = true).assertExists()
+        node("Earlier Android rules were found that can accept traffic before PocketUFW.", substring = true).assertExists()
     }
 
     @Test fun kernelRulesListBypassRulesInReadableView() {

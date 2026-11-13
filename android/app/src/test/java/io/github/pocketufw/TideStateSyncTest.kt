@@ -77,7 +77,7 @@ class TideStateSyncTest {
         open(fake)
         fake.dashboard = off
         tileWrites()
-        compose.settle { compose.hasText("Off.") }
+        compose.settle { compose.hasText("Inactive.") }
         assertEquals(2, fake.count("inspect"))
         node("RECHECK REQUIRED", substring = true).assertDoesNotExist()
         node("Firewall is off. No rules changed.").assertDoesNotExist()
@@ -88,7 +88,7 @@ class TideStateSyncTest {
         open(fake)
         fake.dashboard = off
         TileStatusStore.invalidate(app, TileStatusStore.SOURCE_TILE)
-        compose.settle { compose.hasText("Off.") }
+        compose.settle { compose.hasText("Inactive.") }
         assertEquals(2, fake.count("inspect"))
     }
 
@@ -125,7 +125,7 @@ class TideStateSyncTest {
         fake.dashboard = off
         fake.gate = null
         gate.countDown()
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
         assertStaysAt(fake, "inspect", 2)
     }
 
@@ -152,7 +152,7 @@ class TideStateSyncTest {
         tileWrites()
         assertStaysAt(fake, "inspect", 1)
         focus(controller, true)
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
         assertStaysAt(fake, "inspect", 2)
     }
 
@@ -172,7 +172,7 @@ class TideStateSyncTest {
         fake.dashboard = off
         gate.countDown()
         compose.mainClock.autoAdvance = true
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
     }
 
     @Test fun anUnchangedFocusReturnStillRequestsNoRoot() {
@@ -192,7 +192,7 @@ class TideStateSyncTest {
         fake.nextInspections += activeDashboard().copy(superseded = true)
         fake.dashboard = off
         launch(fake)
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
         assertStaysAt(fake, "inspect", 2)
     }
 
@@ -203,7 +203,7 @@ class TideStateSyncTest {
         fake.dashboard = off.copy(superseded = true)
         fake.nextInspections += off
         confirmFirewallOff()
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
         node("Firewall disabled", substring = true).assertExists()
         node("RECHECK REQUIRED", substring = true).assertDoesNotExist()
     }
@@ -346,7 +346,7 @@ class TideStateSyncTest {
         node("Turn firewall off?").assertExists()
         fake.dashboard = off
         TileStatusStore.publish(app, offSnapshot, source = TileStatusStore.SOURCE_TILE)
-        compose.settle { fake.count("inspect") == 2 && compose.hasText("Off.") }
+        compose.settle { fake.count("inspect") == 2 && compose.hasText("Inactive.") }
         node("Turn firewall off?").assertDoesNotExist()
         assertEquals(0, fake.count("disable"))
     }
@@ -361,7 +361,7 @@ class TideStateSyncTest {
 
     @Test fun turnFirewallOnEnables() {
         val fake = FakeGateway(off)
-        open(fake, expect = "Off.")
+        open(fake, expect = "Inactive.")
         node("Turn firewall on").performClick()
         compose.settle { fake.count("enable") == 1 }
         assertEquals(0, fake.count("disable"))

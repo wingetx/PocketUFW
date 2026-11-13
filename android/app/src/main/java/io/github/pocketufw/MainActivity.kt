@@ -398,7 +398,26 @@ internal fun PocketScreen(client: FirewallGateway, openAppInfo: ((Context) -> Bo
             changeBootRestoration = { next ->
                 if (!busy && verifiedActive && state.bootRestore in listOf(
                         FirewallClient.BootRestore.ENABLED, FirewallClient.BootRestore.DISABLED
-                    )) perform { client.changeBootRestoration(next) }
+                    )) perform(if (next) TideOperation.ENABLE_BOOT else TideOperation.DISABLE_BOOT,
+                        onResult = { outcome ->
+                            val expected = if (next) FirewallClient.BootRestore.ENABLED else FirewallClient.BootRestore.DISABLED
+                            // The gateway already reads boot status back. A command's success alone
+                            // cannot confirm this setting, especially if another write superseded it.
+                            val verified = outcome?.success == true && outcome.dashboard.snapshot.rootReady &&
+                                outcome.dashboard.snapshot.bootRestore == expected &&
+                                !outcome.dashboard.superseded && !outsideWritePending
+                            failed = !verified
+                            message = when {
+                                verified -> "Restore after reboot ${if (next) "enabled" else "disabled"}."
+                                // The bridge can retain its command message when final read-back fails.
+                                outcome?.success == false && outcome.explanation !in setOf(
+                                    "Magisk boot restoration enabled.", "Boot restoration disabled; live firewall unchanged."
+                                ) ->
+                                    "Could not ${if (next) "enable" else "disable"} restore after reboot. " +
+                                        outcome.explanation + " Recheck status before trying again."
+                                else -> "Restore after reboot could not be verified. Recheck status before trying again."
+                            }
+                        }) { client.changeBootRestoration(next) }
             },
             refreshCounters = { refreshCounters() },
             resetCounters = {

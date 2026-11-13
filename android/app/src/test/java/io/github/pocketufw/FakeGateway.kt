@@ -168,6 +168,7 @@ internal class FakeGateway(
     }
     override fun changeBootRestoration(enabled: Boolean): Operation {
         calls += if (enabled) "boot-enable" else "boot-disable"
+        waitAtGate()
         return operation()
     }
     override fun refreshVerifiedPorts(): Operation {

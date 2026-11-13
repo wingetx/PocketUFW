@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.test.*
@@ -77,11 +78,21 @@ class TidePolishTest {
     }
     private fun shot(name: String) {
         compose.waitForIdle()
-        val directory = File("build/reports/beta7-ui").also { it.mkdirs() }
+        val directory = File("build/reports/beta8-status").also { it.mkdirs() }
         val view = screens.last().get().window.decorView
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         compose.runOnIdle { view.draw(Canvas(bitmap)) }
         File(directory, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+    }
+
+    private fun assertDividerColor(color: Color) {
+        val bounds = compose.onNodeWithTag("protection-divider").performScrollTo().assertIsDisplayed()
+            .fetchSemanticsNode().boundsInRoot
+        val view = screens.last().get().window.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        compose.runOnIdle { view.draw(Canvas(bitmap)) }
+        assertEquals(color.toArgb(), bitmap.getPixel((bounds.left + 8).toInt(), bounds.center.y.toInt()))
         bitmap.recycle()
     }
 
@@ -93,117 +104,109 @@ class TidePolishTest {
         val background = if (dark) Color(0xFF141B29) else Color(0xFFF7F6EF)
         val luminances = listOf(green.luminance(), background.luminance()).sorted()
         assertTrue("Status text meets 4.5:1 contrast", (luminances[1] + .05f) / (luminances[0] + .05f) >= 4.5f)
-        val client = FirewallClient(RuntimeEnvironment.getApplication(), shell = FakeShell())
-        val parsed = client.dashboardFromOutput(0, bridgeOutput(uncovered = "eth0,usb0",
-            bypass4 = listOf("-A INPUT -i wlan0 -j ACCEPT")).replace("rules_report=READY",
-                "physical_state=ACTIVE\ntunnel_filter=OFF\ntailnet_trust=OFF\nrules_report=READY"), false)
-        val limited = TideUiState(snapshot = parsed.snapshot, report = parsed.kernelReport)
+        val report = base.report!!.copy(ipv4 = base.report.ipv4.copy(bypass = listOf("-A INPUT -i wlan0 -j ACCEPT")))
+        val limited = base.copy(report = report, snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("eth0", "usb0")))
         val carrier = base.copy(snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("ipsec995"),
             carrierImsInterfaces = setOf("ipsec995")))
         for ((name, state) in listOf("verified" to base, "carrier" to carrier, "limited" to limited,
-            "unknown" to base.copy(report = null, snapshot = base.snapshot.copy(interfaceInventoryAvailable = false)),
+            "unknown-coverage" to base.copy(report = null, snapshot = base.snapshot.copy(interfaceInventoryAvailable = false)),
             "limited-unknown" to limited.copy(report = null))) {
             compose.runOnIdle { model.value = state }
             node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
-            node(when (name) {
-                "verified" -> "Filtering active"
-                "carrier" -> "Carrier calling excluded"
-                "unknown" -> "Coverage unknown"
-                else -> "Coverage limited"
-            }).assertExists()
-            if (name != "verified") node("Filtering active").assertDoesNotExist()
+            node("Filtered where supported").assertExists()
+            node("Coverage limited").assertDoesNotExist()
+            compose.onNodeWithTag("coverage-notice").assertDoesNotExist()
             assertEquals(green, layouts("Active.").layoutInput.style.color)
-            assertEquals(if (dark) Color(0xFFB3BDCE) else Color(0xFF59606B),
-                layouts(coverageSummary(state)).layoutInput.style.color)
+            assertEquals(green, layouts("PROTECTION ACTIVE · RULES VERIFIED").layoutInput.style.color)
+            assertEquals(if (dark) Color(0xFFB3BDCE) else Color(0xFF59606B), layouts(COVERAGE_SUBTITLE).layoutInput.style.color)
             node("Coverage details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
             compose.onNodeWithTag("protection-status")
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
                 .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
-                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
-                    "Protection active; rules verified. ${coverageSummary(state)}."))
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "PROTECTION ACTIVE · RULES VERIFIED"))
             assertNoClippedText()
+            assertDividerColor(green)
             compose.onNodeWithTag("protection-status").performScrollTo()
             shot("$name-${if (dark) "dark" else "light"}-$scale")
-            if (name in listOf("verified", "carrier")) {
-                compose.onNodeWithTag("coverage-notice").assertDoesNotExist()
-            } else {
-                val notice = when (name) {
-                    "limited" -> "Coverage limited — not filtered: eth0, usb0; earlier Android rules can bypass PocketUFW. Review Coverage details."
-                    "unknown" -> "Coverage unknown. Recheck status to inspect interfaces and earlier Android rules."
-                    else -> "Coverage limited — not filtered: eth0, usb0. Other coverage is unknown; recheck status."
-                }
-                compose.onAllNodesWithTag("coverage-notice").assertCountEquals(1)
-                node(notice).performScrollTo().assertIsDisplayed()
-                assertEquals(if (dark) Color(0xFFF3C99B) else Color(0xFF793C10), layouts(notice).layoutInput.style.color)
-                shot("$name-notice-${if (dark) "dark" else "light"}-$scale")
-            }
         }
-        compose.runOnIdle { model.value = base.copy(report = limited.report,
+        compose.runOnIdle { model.value = base.copy(report = report,
             snapshot = base.snapshot.copy(uncoveredInterfaces = listOf("ipsec995", "eth0", "usb0"),
                 carrierImsInterfaces = setOf("ipsec995"))) }
         click("Coverage details")
         node("Coverage details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-        node(CARRIER_IMS_NOTICE).performScrollTo().assertIsDisplayed()
-        node(BYPASS_NOTICE).assertExists()
-        node("Not filtered: carrier calling network (ipsec995), eth0, usb0.").assertExists()
+        for (heading in listOf("What PocketUFW protects", "What Android and VPNs handle separately", "When action is needed"))
+            node(heading).assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+        compose.onAllNodesWithText("Carrier calling networks (ipsec995)", substring = true).assertCountEquals(1)
+        node("Not filtered: eth0, usb0.").assertExists()
+        compose.onNodeWithText("Earlier Android rules were found", substring = true).assertExists()
+        node("Technical details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
+        compose.onNodeWithText("Pinned tailnet destinations:", substring = true).assertDoesNotExist()
         assertNoClippedText()
+        node("What PocketUFW protects").performScrollTo()
         shot("coverage-${if (dark) "dark" else "light"}-$scale")
-        node("Another tun* interface can inject tailnet-source packets into these local destinations; PINNED does not authenticate packet ingress.")
+        click("Technical details")
+        node("Technical details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+        node("IPv4: -A INPUT -i wlan0 -j ACCEPT").assertExists()
+        compose.onNodeWithText("PINNED trusts destination addresses on tun*, not individual packets.", substring = true)
             .performScrollTo().assertIsDisplayed()
         node("At the last full inspection, tailnet pins matched verified addresses; reachability has not been tested.").assertExists()
+        assertNoClippedText()
+        shot("technical-${if (dark) "dark" else "light"}-$scale")
         click("Coverage details")
-        node(CARRIER_IMS_NOTICE).assertDoesNotExist()
+        node("Technical details").assertDoesNotExist()
+        compose.onNodeWithText("Carrier calling networks", substring = true).assertDoesNotExist()
     }
 
     @Test fun verifiedAndLimitedProtectionStayGreenInLightMode() = verifiedAppearance(false, 1f)
-    @Test fun verifiedAndLimitedProtectionStayMintInDarkMode() = verifiedAppearance(true, 1f)
+    @Test fun verifiedAndLimitedProtectionStayGreenInDarkMode() = verifiedAppearance(true, 1f)
     @Test fun largeLightTextKeepsStatusAndDisclosuresAccessible() = verifiedAppearance(false, 2f)
     @Test fun largeDarkTextKeepsStatusAndDisclosuresAccessible() = verifiedAppearance(true, 2f)
 
-    @Test fun failedVerificationAndDegradedProtectionKeepWarningsAndRecovery() {
+    private fun attentionAppearance(dark: Boolean, scale: Float) {
         val base = fixture()
-        val model = mutableStateOf(base.copy(verificationInDoubt = true))
-        show(model)
-        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
-        assertEquals(Color(0xFF8F4915), layouts("Not\nverified.").layoutInput.style.color)
-        node("Recheck status").assertIsEnabled()
-        node("Coverage not verified · last inspection only").assertExists()
-        compose.runOnIdle { model.value = base.copy(snapshot = base.snapshot.copy(rootReady = false)) }
-        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
-        node("Recheck status").assertIsEnabled()
-        val parsed = FirewallClient(RuntimeEnvironment.getApplication(), shell = FakeShell()).dashboardFromOutput(0,
-            bridgeOutput(state = "DEGRADED").replace("rules_report=READY",
-                "physical_state=ACTIVE\ntunnel_filter=DEGRADED\nrules_report=READY"), false)
-        compose.runOnIdle { model.value = TideUiState(snapshot = parsed.snapshot, report = parsed.kernelReport) }
-        assertEquals(Color(0xFF8F4915), layouts("Needs\nattention.").layoutInput.style.color)
-        node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
-        node("Physical firewall rules are verified, but tunnel protection is degraded. " +
-            "Recheck status and inspect kernel rules before relying on tunnel protection.").assertExists()
-        node("Firewall state could not be verified. Some rules may be installed. Don't assume " +
-            "packets are being filtered, or that they aren't.").assertDoesNotExist()
-        node("IPv4 and IPv6 rules and hooks verified.").assertDoesNotExist()
-        node("Remove tunnel rules only").performScrollTo().assertIsDisplayed().assertIsEnabled()
-        assertNoClippedText()
-        shot("degraded-recovery")
+        val model = mutableStateOf(base)
+        show(model, dark, scale)
+        val amber = if (dark) Color(0xFFF3B778) else Color(0xFF8F4915)
+        val neutral = if (dark) Color(0xFFB3BDCE) else Color(0xFF59606B)
+        val states = listOf(
+            "unverified" to base.copy(verificationInDoubt = true),
+            "root" to base.copy(snapshot = base.snapshot.copy(rootReady = false)),
+            "degraded" to base.copy(snapshot = base.snapshot.copy(protection = Protection.DEGRADED, physicalFilter = PhysicalFilter.DEGRADED)),
+            "tunnel-degraded" to base.copy(snapshot = base.snapshot.copy(protection = Protection.DEGRADED, tunnelFilter = TunnelFilter.DEGRADED)),
+            "stale-pins" to base.copy(snapshot = base.snapshot.copy(tailnetConnectivity = TailnetConnectivity.REAUTHORIZE, tailnetObserved4 = "100.64.0.9/32")),
+            "unknown-pins" to base.copy(snapshot = base.snapshot.copy(tailnetConnectivity = TailnetConnectivity.UNVERIFIED)),
+            "inactive" to base.copy(snapshot = base.snapshot.copy(protection = Protection.INACTIVE, physicalFilter = PhysicalFilter.INACTIVE,
+                tunnelFilter = TunnelFilter.OFF, tunnelMode = TunnelMode.OFF, bootRestore = BootRestore.DISABLED))
+        )
+        for ((name, state) in states) {
+            compose.runOnIdle { model.value = state }
+            val status = protectionStatus(state)
+            val color = if (name == "inactive") neutral else amber
+            node(if (name == "inactive") "Inactive." else "Needs attention.").assertExists()
+            node("PROTECTION ACTIVE · RULES VERIFIED").assertDoesNotExist()
+            assertEquals(color, layouts(status.title).layoutInput.style.color)
+            assertEquals(color, layouts(status.label).layoutInput.style.color)
+            compose.onNodeWithTag("protection-status").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, status.label))
+            assertDividerColor(color)
+            assertNoClippedText()
+            if (name == "tunnel-degraded") {
+                compose.onNodeWithText("Physical firewall rules are verified, but tunnel protection is degraded.", substring = true).assertExists()
+                node("Remove tunnel rules only").assertIsEnabled()
+                node("Filtered where supported").assertExists()
+            }
+            if (name in listOf("unverified", "root", "degraded", "inactive")) node("Filtered where supported").assertDoesNotExist()
+            if (name == "stale-pins") node("Review tunnel protection").assertIsEnabled()
+            compose.onNodeWithText("Tailnet connectivity: REAUTHORIZE.", substring = true).assertDoesNotExist()
+            node("Tunnel protection is degraded. Tunnel-only recovery keeps the physical firewall in place.").assertDoesNotExist()
+            compose.onNodeWithTag("protection-status").performScrollTo()
+            shot("$name-${if (dark) "dark" else "light"}-$scale")
+        }
     }
 
-    @Test fun staleAndUnverifiedPinsRemainVisibleOutsideCollapsedCoverage() {
-        val base = fixture()
-        val model = mutableStateOf(base.copy(snapshot = base.snapshot.copy(
-            tailnetConnectivity = TailnetConnectivity.REAUTHORIZE, tailnetObserved4 = "100.64.0.9/32")))
-        show(model)
-        node("Coverage details").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
-        compose.onNodeWithText("Tailnet connectivity: REAUTHORIZE.", substring = true)
-            .performScrollTo().assertIsDisplayed()
-        val warning = compose.onNodeWithText("Tailnet connectivity: REAUTHORIZE.", substring = true, useUnmergedTree = true)
-        val results = mutableListOf<TextLayoutResult>()
-        warning.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
-        assertEquals(Color(0xFF793C10), results.single().layoutInput.style.color)
-        node("PROTECTION ACTIVE · RULES VERIFIED").assertExists()
-        shot("pinned-reauthorize")
-        compose.runOnIdle { model.value = base.copy(snapshot = base.snapshot.copy(tailnetConnectivity = TailnetConnectivity.UNVERIFIED)) }
-        compose.onNodeWithText("Recheck status before relying on tailnet access.", substring = true).assertExists()
-    }
+    @Test fun attentionAndInactiveHaveDistinctLightPresentations() = attentionAppearance(false, 1f)
+    @Test fun attentionAndInactiveHaveDistinctDarkPresentations() = attentionAppearance(true, 1f)
+    @Test fun largeLightAttentionAndInactiveStayAccessible() = attentionAppearance(false, 2f)
+    @Test fun largeDarkAttentionAndInactiveStayAccessible() = attentionAppearance(true, 2f)
 
     @Test fun tunnelReturnTotalExcludesTailnetAndPreservesZeroAndUnavailable() {
         val base = fixture()

@@ -364,7 +364,7 @@ class TideAuditRegressionTest {
         Thread.sleep(400) // Robolectric's focus listener dispatches asynchronously.
         // Query Compose first. Its test scheduler needs to pump the focus event
         // before the asynchronous fake's inspection count can increment.
-        compose.settle { compose.hasText("Off.") && fake.count("inspect") >= 2 }
+        compose.settle { compose.hasText("Inactive.") && fake.count("inspect") >= 2 }
         node("Turn firewall off").assertDoesNotExist()
         assertEquals(2, fake.count("inspect"))
         // Automatic tile-triggered synchronization never displays a user-tap banner.

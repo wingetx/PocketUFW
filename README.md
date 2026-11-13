@@ -11,7 +11,12 @@
 > [!WARNING]
 > **Experimental beta, not a security guarantee.** PocketUFW requires root and a compatible `iptables`/`ip6tables` backend. Coverage varies by device, kernel, interface naming, and Android/OEM rules. It is not a replacement for Android's security model.
 
+> [!CAUTION]
+> **Confirmed Wi-Fi calling compatibility issue:** On a Pixel 9a running Android 17, PocketUFW's physical firewall caused incoming calls over Wi-Fi calling to fail silently while the carrier's UDP 4500 connection-tracking entry was absent. Calls succeeded with PocketUFW off and when that entry existed. If you rely on Wi-Fi calling to receive calls, **do not use PocketUFW's physical firewall until this is resolved**. If cellular reception is reliable, disabling Wi-Fi calling is a workaround. Confirmed on this device; other phones and carriers have not been tested.
+
 **Latest signed beta:** [PocketUFW 0.1.0-beta7](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta7) is published as an **experimental prerelease** (versionCode 29), with a calmer, more honest Tide interface, matching tunnel return counters, and fixes to coverage detection, root-output collection, and Quick Settings state. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/PocketUFW-0.1.0-beta7.apk), [verify its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta7/SHA256SUMS.txt), and read the [Beta 7 release notes](docs/releases/0.1.0-beta7.md). Installed rules being verified does not guarantee all incoming traffic is covered; Android/OEM bypass rules and tunnel trust limits remain disclosed.
+
+**Beta 8 in development:** The local, unsigned [Beta 8 release candidate](docs/releases/0.1.0-beta8.md) improves startup-toggle feedback, simplifies coverage wording, and adds an optional read-only [Termux companion](docs/termux.md). It has not replaced the signed Beta 7 release.
 
 **Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. Ordinary firewall enforcement remains in place; strict capture cleanup and verification still apply.
 
@@ -103,6 +108,14 @@ See [hardware validation](docs/hardware-validation.md), [compatibility notes](do
 5. If desired, enable **Restore after reboot**. This restores **physical** filtering using Magisk's one-shot boot hook, not the optional tunnel filter.
 
 For initial testing, keep a trusted recovery route (such as USB ADB), especially when your phone depends on cellular, Wi-Fi calling, local services, or VPN connectivity. Installing or opening PocketUFW does not itself install firewall rules.
+
+### Optional Termux companion (Beta8 source)
+
+The optional `pufw` helper offers four read-only terminal views: quick status,
+`pufw tunnel`, `pufw stats`, and `pufw raw`. It must be installed separately in
+Termux; the app's **Termux quick commands** disclosure provides copyable commands
+and setup guidance. See [installation, verification limits, and usage](docs/termux.md).
+It does not sample packets or run in the background.
 
 ### Updating older betas
 

@@ -9,8 +9,7 @@ experimental `pufw-inspect` packet-sampling tool and does not capture packets.
 
 The helper is included in the Beta8 APK and installed into Termux only when you
 choose. No separate download, repository checkout, or storage permission is
-needed. This bundled installation flow is prepared for the upcoming release;
-Beta8 has not been published yet.
+needed.
 
 1. In PocketUFW, open **Firewall → Termux quick commands → Install the helper**.
 2. Tap **Copy installation command**.

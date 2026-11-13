@@ -1,26 +1,25 @@
 # PocketUFW Android beta
 
-**Beta 6 candidate:** `0.1.0-beta6` (versionCode 27) adds bounded native Insights
-DROP sampling, verified cleanup/recovery, carrier IMS wording and Tide cleanup.
-Activity is the single home for counters; Insights shows sampled traffic.
-Strict verification can withhold samples during Android/OEM rule changes.
-See [release notes](../docs/releases/0.1.0-beta6.md) and
-[implementation, limits and validation](../docs/insights-v1.md).
-This candidate is unsigned and awaits independent review; published Beta 5 is unchanged.
+**Current experimental prerelease: `0.1.0-beta8` (versionCode 30).**
+Beta8 refines Tide's status and boot feedback and adds a bundled, optional,
+read-only `pufw` Termux helper with one-command installation in normal Termux.
+See the [Beta8 release notes](../docs/releases/0.1.0-beta8.md), [Termux guide](../docs/termux.md),
+and [GitHub Releases](https://github.com/wingetx/PocketUFW/releases).
 
-**Beta 5 update:** The Tide interface provides optional **PINNED** and
-**DENY-ONLY** tunnel filtering in Settings, off by default, with separate physical
-and tunnel counters. It reports pinned and observed tailnet destinations,
-REAUTHORIZE when addresses change, and tunnel-only recovery when DEGRADED.
-Tunnel rules are not restored after reboot. See [tunnel policy and limitations](../docs/tunnel-filtering.md)
-and the [signed Beta 5 release](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5).
+**Important Wi-Fi calling issue:** On a Pixel 9a with Android 17, enabling the
+physical firewall can silently prevent incoming calls over Wi-Fi calling.
+Users who rely on Wi-Fi calling **should not enable physical filtering until
+the issue is addressed**. The [release notes](../docs/releases/0.1.0-beta8.md)
+describe the confirmed conditions and limitations.
 
+PocketUFW remains experimental, not a production security guarantee.
+Android variants, carriers and root implementations may behave differently;
+compatible `iptables`/`ip6tables` and root are required.
 
-**0.1.0-beta6 (versionCode 27)** is a testing candidate of the one-switch
-Android root firewall, not a production security guarantee. Earlier builds were
-hardware tested on Pixel 9a and Moto G 5G (2024); the final Beta 6 candidate
-has not been installed or device-tested. Other Android variants may behave
-differently. Root and legacy iptables/ip6tables support are required.
+Previous versions: [Beta7](../docs/releases/0.1.0-beta7.md),
+[Beta6](../docs/releases/0.1.0-beta6.md), and
+[Beta5](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5).
+The [tunnel policy and limitations](../docs/tunnel-filtering.md) remain relevant.
 
 For F-Droid, the simplest route is source-tagged builds signed by F-Droid.
 The published GitHub beta2 and newer APKs use PocketUFW's release signing

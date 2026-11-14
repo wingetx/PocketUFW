@@ -467,12 +467,18 @@ internal class FirewallClient(
         if (tunnelFilter == TunnelFilter.DEGRADED) {
             return RuleActivity(error = "Tunnel protection is degraded; recheck before reading counters.")
         }
+        val resetAt = values["last_counter_reset_at"]?.toLongOrNull()
+            ?.takeIf { it > 0 && it <= System.currentTimeMillis() }
+            ?: preferences.getLong("last_counter_reset_at", 0L)
+        // Keep the last verified reset for old/missing metadata, without ever editing
+        // SharedPreferences from a root shell while the app may have it cached.
+        if (resetAt > 0) preferences.edit().putLong("last_counter_reset_at", resetAt).apply()
         return RuleActivity(
             ipv4Blocked = counts[0], ipv6Blocked = counts[1],
             ipv4Bytes = counts[2], ipv6Bytes = counts[3],
             ipv4Replies = counts[4], ipv6Replies = counts[5],
             checkedAt = System.currentTimeMillis(),
-            lastManualResetAt = preferences.getLong("last_counter_reset_at", 0L),
+            lastManualResetAt = resetAt,
             tunnel = tunnel, tunnelFilter = tunnelFilter, tunnelMode = tunnelMode,
             tailnetPin4 = values["tailnet_pin4"].takeIf { tunnelMode == TunnelMode.PINNED },
             tailnetPin6 = values["tailnet_pin6"].takeIf { tunnelMode == TunnelMode.PINNED }
@@ -671,7 +677,8 @@ internal class FirewallClient(
             timedOut = result.timedOut
             val values = fields(result.text)
             if (action == "reset-counters" && result.succeeded &&
-                values["operation"] == "SUCCESS" && values["state"] == "ACTIVE") {
+                values["operation"] == "SUCCESS" && values["state"] == "ACTIVE" &&
+                values["counter_reset_recorded"] != "NO") {
                 preferences.edit()
                     .putLong("last_counter_reset_at", System.currentTimeMillis()).apply()
             }

@@ -1,22 +1,31 @@
 # PocketUFW Android beta
 
-**Current experimental prerelease: `0.1.0-beta8` (versionCode 30).**
-Beta8 refines Tide's status and boot feedback and adds a bundled, optional,
-read-only `pufw` Termux helper with one-command installation in normal Termux.
-See the [Beta8 release notes](../docs/releases/0.1.0-beta8.md), [Termux guide](../docs/termux.md),
-and [GitHub Releases](https://github.com/wingetx/PocketUFW/releases).
+**Latest signed prerelease: `0.1.0-beta8.1` (versionCode 31).**
+Beta8.1 adds horizontal swipes through Firewall, Activity, Insights, and Settings,
+retaining scroll/disclosure state and running operations. A deliberate swipe over
+a clickable row cancels the pending tap and navigates; child drag controls,
+raw-rule horizontal scrolling, vertical scrolling, and system back edges retain
+priority. The UDP editor remains a separate subpage.
+
+The bundled optional `pufw` helper retains four read-only views and adds confirmed
+`pufw clear`, using the app reset mechanism and shared reset timestamp. Counter
+reset preserves rules, pins, authorization, and Insights samples. UI cleanup
+removes the redundant collapsed Termux divider, the main-screen startup shortcut,
+and Settings' standalone REMOVE heading. The Settings toggle and removal flow remain.
+See the [Beta8.1 release notes](../docs/releases/0.1.0-beta8.1.md) and
+[Termux guide](../docs/termux.md). The signed artifact uses the existing release certificate; Gradle still produces an unsigned APK until separately signed.
 
 **Important Wi-Fi calling issue:** On a Pixel 9a with Android 17, enabling the
 physical firewall can silently prevent incoming calls over Wi-Fi calling.
 Users who rely on Wi-Fi calling **should not enable physical filtering until
-the issue is addressed**. The [release notes](../docs/releases/0.1.0-beta8.md)
+the issue is addressed**. The [release notes](../docs/releases/0.1.0-beta8.1.md)
 describe the confirmed conditions and limitations.
 
 PocketUFW remains experimental, not a production security guarantee.
 Android variants, carriers and root implementations may behave differently;
 compatible `iptables`/`ip6tables` and root are required.
 
-Previous versions: [Beta7](../docs/releases/0.1.0-beta7.md),
+Previous versions: [Beta8](../docs/releases/0.1.0-beta8.md), [Beta7](../docs/releases/0.1.0-beta7.md),
 [Beta6](../docs/releases/0.1.0-beta6.md), and
 [Beta5](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta5).
 The [tunnel policy and limitations](../docs/tunnel-filtering.md) remain relevant.
@@ -162,24 +171,29 @@ Install a Java 17 JDK and Android SDK with Android API level 36. Set the
 `ANDROID_HOME` environment variable or configure an **ignored**
 `android/local.properties` with `sdk.dir=/path/to/android-sdk`.
 The wrapper uses Gradle 8.9. Insights also requires NDK 27.2.12479018 and
-CMake 3.22.1. For an unsigned release, see the [Beta 6 build procedure](../docs/releases/0.1.0-beta6.md#unsigned-build).
+CMake 3.22.1. Keep release signing keys outside the worktree.
+The release build below has no signing configuration.
 
 ```sh
 cd android
-./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 ```
 
-The build automatically bundles the current repository-root `pocketufw` and
-`vpn-probe`, `bootctl`, `boot-service`, and `android-bridge` scripts. The
-CLI remains the sole source of firewall-rule logic.
+The build bundles the seven repository-root scripts: `pocketufw`, `vpn-probe`,
+`bootctl`, `boot-service`, `android-bridge`, `rules-report`, and `udp-config`, plus
+`tools/pufw` as `assets/termux/pufw`. Verify these bytes against their sources
+before signing. The CLI remains the sole source of firewall-rule logic.
 
-The APK is produced at:
+The unsigned release APK is produced at:
 
 ```text
-android/app/build/outputs/apk/debug/app-debug.apk
+android/app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
 ## Deploy to an authorized test phone
+
+For a separate debug build, run `./gradlew :app:assembleDebug` from `android/`.
+It uses the debug identity, which differs from the separately signed release APK.
 
 ```sh
 adb devices -l

@@ -30,7 +30,9 @@ internal fun TideTermuxCommands() {
         copySequence++
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TideSettingExpander("Termux quick commands", "Check your firewall from the terminal", expanded) {
+        // The screen's footer divider already closes this row when collapsed.
+        TideSettingExpander("Termux quick commands", "Check your firewall from the terminal", expanded,
+            showDivider = expanded) {
             expanded = !expanded
             copied = null
         }
@@ -42,6 +44,7 @@ internal fun TideTermuxCommands() {
                 "pufw" to "Verified rule status, tunnel summary and counters.",
                 "pufw tunnel" to "Tunnel mode, saved authorization and current address verification.",
                 "pufw stats" to "Physical and tunnel DROP packets, bytes and established/related returns. Does not recheck PINNED addresses.",
+                "pufw clear" to "Reset PocketUFW counters after confirmation in Termux. Rules and Insights samples are kept.",
                 "pufw raw" to "Native read-only diagnostic output."
             )) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 TermuxCommand(command, copy, copied == command, copySequence)
@@ -77,7 +80,7 @@ internal fun TideTermuxCommands() {
                 Text("Then tap Recheck in PocketUFW and run pufw in Termux. Installation needs no root; running pufw still requires root access.",
                     style = MaterialTheme.typography.bodySmall, color = Muted)
             }
-            Text("Read-only and on demand, with no background polling. Separate from the experimental pufw-inspect packet-sampling tool.",
+            Text("On demand, with no background polling. Only pufw clear changes counters, after confirmation. Separate from the experimental pufw-inspect packet-sampling tool.",
                 style = MaterialTheme.typography.bodySmall, color = Muted)
         }
     }

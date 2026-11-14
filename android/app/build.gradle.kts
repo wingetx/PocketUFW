@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.pocketufw"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "0.1.0-beta8"
+        versionCode = 31
+        versionName = "0.1.0-beta8.1"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

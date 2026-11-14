@@ -22,7 +22,6 @@ internal fun TideRemoveSection(ui: TideUiState, actions: TideActions) {
     var removeOpen by rememberSaveable { mutableStateOf(false) }
     var anywayOpen by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("REMOVE", color = Muted, style = MaterialTheme.typography.labelSmall)
         TideSettingLink("Remove PocketUFW",
             "Uninstalling without this leaves the firewall running until you restart the phone.") {
             if (!ui.busy && state.protection != FirewallClient.Protection.CHECKING) removeOpen = true

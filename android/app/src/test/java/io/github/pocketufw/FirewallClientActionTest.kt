@@ -389,6 +389,21 @@ class FirewallClientActionTest {
         assertTrue(client.inspectDashboard().activity!!.lastManualResetAt >= before)
     }
 
+    @Test fun externalResetTimeIsAdoptedByFullAndCounterReads() {
+        val at = System.currentTimeMillis() - 10_000
+        shell.respond = { ShellResult(0, bridgeOutput() + "\nlast_counter_reset_at=$at") }
+        assertEquals(at, client.inspectDashboard().activity!!.lastManualResetAt)
+        assertEquals(at, client.refreshCounterActivity().lastManualResetAt)
+        for (invalid in listOf("-1", "0", "bad", "999999999999999999999", "${System.currentTimeMillis() + 60_000}")) {
+            shell.respond = { ShellResult(0, bridgeOutput() + "\nlast_counter_reset_at=$invalid") }
+            assertEquals(at, client.refreshCounterActivity().lastManualResetAt)
+        }
+        shell.respond = { ShellResult(0, bridgeOutput(operation = "SUCCESS") +
+            "\ncounter_reset_recorded=NO") }
+        client.resetCounters()
+        assertEquals(at, client.inspectDashboard().activity!!.lastManualResetAt)
+    }
+
     // ---- stale results ----
 
     @Test fun aReadOvertakenByANewerWriteIsNotSaved() {

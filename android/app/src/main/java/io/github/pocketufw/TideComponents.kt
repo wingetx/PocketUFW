@@ -201,12 +201,14 @@ internal fun TideSettingLink(label: String, detail: String, onClick: () -> Unit)
 }
 
 @Composable
-internal fun TideSettingExpander(label: String, detail: String, expanded: Boolean, onClick: () -> Unit) {
-    TideSettingRow(label, detail, expanded, onClick)
+internal fun TideSettingExpander(label: String, detail: String, expanded: Boolean,
+                                 showDivider: Boolean = true, onClick: () -> Unit) {
+    TideSettingRow(label, detail, expanded, onClick, showDivider)
 }
 
 @Composable
-private fun TideSettingRow(label: String, detail: String, expanded: Boolean?, onClick: () -> Unit) {
+private fun TideSettingRow(label: String, detail: String, expanded: Boolean?, onClick: () -> Unit,
+                           showDivider: Boolean = true) {
     Column {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
             .semantics { if (expanded != null) stateDescription = if (expanded) "Expanded" else "Collapsed" }
@@ -218,7 +220,7 @@ private fun TideSettingRow(label: String, detail: String, expanded: Boolean?, on
             Spacer(Modifier.width(12.dp))
             if (expanded == null) TideIcon(R.drawable.tide_chevron) else TideDisclosureIcon(expanded)
         }
-        TideDivider()
+        if (showDivider) TideDivider()
     }
 }
 

@@ -4,7 +4,6 @@ Detailed UI behavior is exercised in TideAuditRegressionTest under Robolectric.
 These inexpensive checks also run when only the Python suite is available.
 """
 from pathlib import Path
-import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +13,7 @@ SCREENS = {
     for file in (
         "MainActivity.kt", "TideScreen.kt", "TideCounters.kt",
         "TideSettings.kt", "TideComponents.kt", "KernelStatusTab.kt",
-        "UdpExceptionsPanel.kt",
+        "UdpExceptionsPanel.kt", "TideProtectionStatus.kt",
     )
 }
 
@@ -48,23 +47,31 @@ class TideAuditContractTests(unittest.TestCase):
         main = SCREENS["MainActivity.kt"]
         screen = SCREENS["TideScreen.kt"].split('private fun TideFirewall(', 1)[1]
         self.assertIn('verificationInDoubt = true', main)
-        # Follow the guard used by the title instead of requiring its old inline
-        # spelling. It must cover both stale states and missing root evidence.
-        title = re.search(r'val title = if \((\w+)\) "Not\\nverified\." else when \(state.protection\)', screen)
-        self.assertIsNotNone(title, 'Uncertainty must override both ACTIVE and INACTIVE titles')
-        guard = re.escape(title.group(1))
-        self.assertRegex(screen, rf'val {guard} = ui\.verificationInDoubt \|\| \(active && !state\.rootReady\)')
-        self.assertIn('val active = state.protection == FirewallClient.Protection.ACTIVE', screen)
-        self.assertRegex(screen, rf'val verified = active && !{guard}\b')
-        self.assertRegex(screen, rf'val label = if \({guard}\) "Recheck required" else when')
+        # Beta8 moved headline classification into protectionStatus. Follow the
+        # current guard and its precedence; do not require the retired layout.
+        status = SCREENS["TideProtectionStatus.kt"]
+        self.assertIn('val status = protectionStatus(ui)', screen)
+        self.assertIn('Text(status.title,', screen)
+        self.assertIn('Text(status.label,', screen)
+        self.assertIn('TideProtectionHealth.ATTENTION -> "Needs attention."', status)
+        self.assertIn('TideProtectionStatus(TideProtectionHealth.ATTENTION,', status)
+        doubt = status.index('if (ui.verificationInDoubt) return attention(')
+        no_root = status.index('if (!state.rootReady) return attention(')
+        for claim in ('if (state.protection == Protection.INACTIVE)',
+                      'return TideProtectionStatus(TideProtectionHealth.HEALTHY,'):
+            self.assertLess(doubt, status.index(claim))
+            self.assertLess(no_root, status.index(claim))
+        self.assertIn('val notVerified = ui.verificationInDoubt || (!state.rootReady', screen)
         # The primary action must recheck before either on/off path can be chosen.
         action = screen.split('TidePrimaryButton(', 1)[1].split('}, icon =', 1)[0]
-        recheck = action.index(f'{title.group(1)} -> "Recheck status"')
+        recheck = action.index('notVerified -> "Recheck status"')
         self.assertLess(recheck, action.index('active -> "Turn firewall off"'))
         self.assertLess(recheck, action.index('Protection.INACTIVE -> "Turn firewall on"'))
-        self.assertRegex(screen, rf'val attention = {guard} \|\|')
-        self.assertIn('if (attention) actions.recheck()', screen)
-        self.assertIn('Last known status is not proof of current protection', screen)
+        click = screen.split('onClick = { if (!ui.busy)', 1)[1]
+        self.assertIn('else if (notVerified ||', click)
+        self.assertLess(click.index('actions.recheck()'), click.index('requestDisable()'))
+        self.assertLess(click.index('actions.recheck()'), click.index('actions.changeProtection(true)'))
+        self.assertIn('Last known status is not proof of current protection', status)
 
     def test_tile_stamp_recheck_not_unconditional_root_request(self):
         main = SCREENS["MainActivity.kt"]

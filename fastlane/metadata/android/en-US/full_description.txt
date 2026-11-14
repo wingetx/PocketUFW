@@ -4,6 +4,8 @@ One switch controls PocketUFW-owned IPv4 and IPv6 kernel rules that deny unsolic
 
 Features:
 * Verified protection switch and on-demand root checks
+* Swipe navigation across Firewall, Activity, Insights and Settings
+* Optional bundled Termux helper: four read-only views and confirmed pufw clear for owned counters
 * Activity with physical/tunnel IPv4 and IPv6 counters and readable kernel rules
 * Optional PINNED or DENY-ONLY inbound tunnel filtering
 * Insights: on-demand, bounded DROP samples with source, protocol and traffic clues
@@ -14,6 +16,8 @@ Features:
 
 Requires working root access (Magisk or compatible su), legacy iptables/ip6tables and a compatible Android kernel. No Google Play Services required.
 
-This is beta software. It is not universal Android host protection. Only specified physical interfaces and explicitly enabled supported tunnels are filtered; earlier Android/OEM ACCEPT rules may bypass PocketUFW. Tethering and unsupported interfaces, including carrier IPsec inner interfaces, are not covered. Insights requires kernel NFLOG support; Android/OEM rule changes can cause a sample to be withheld after cleanup. Tailscale port changes may require an explicit Refresh VPN. There is no resident self-repair monitor.
+This is beta software. It is not universal Android host protection. Only specified physical interfaces and explicitly enabled supported tunnels are filtered; earlier Android/OEM ACCEPT rules may bypass PocketUFW. Tethering and unsupported interfaces, including carrier IPsec inner interfaces, are not covered. Insights requires kernel NFLOG support; Android/OEM rule changes can cause a sample to be withheld after cleanup. Tailscale port changes may require an explicit Refresh Tailscale ports. There is no resident self-repair monitor.
+
+Known Wi-Fi calling issue: incoming calls failed on a Pixel 9a with Android 17 after the carrier UDP 4500 connection-tracking entry expired. If you rely on Wi-Fi calling, do not enable physical filtering until this is fixed. Other phones/carriers and SMS are untested. PINNED verifies destination addresses, not cryptographic packet origin; tunnel filtering does not restore after reboot. Counter reset preserves rules, authorization and Insights samples.
 
 PocketUFW is independent software, not affiliated with Canonical or UFW.

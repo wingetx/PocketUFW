@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,8 +121,11 @@ internal fun TideScreen(
         if (ui.snapshot.tunnelFilter != FirewallClient.TunnelFilter.DEGRADED ||
             !ui.snapshot.rootReady || ui.verificationInDoubt || ui.busy) tunnelRemoveConfirmOpen = false
     }
-    val scroll = rememberScrollState()
-    LaunchedEffect(destination, inspection, exceptions) { scroll.scrollTo(0) }
+    val tabState = rememberSaveableStateHolder()
+    val tabScrolls = TideDestination.entries.map { rememberScrollState() }
+    val exceptionsScroll = rememberScrollState()
+    val scroll = if (exceptions) exceptionsScroll else tabScrolls[destination.ordinal]
+    LaunchedEffect(inspection, exceptions) { scroll.scrollTo(0) }
     BackHandler(exceptions || destination != TideDestination.FIREWALL) {
         if (exceptions) exceptions = false else destination = TideDestination.FIREWALL
     }
@@ -203,50 +207,55 @@ internal fun TideScreen(
             }
         }
     ) { inset ->
-        // The banner overlays this area. Shrinking the scrolling viewport by its height
-        // leaves nothing under it, at any scroll position, to be hidden or to lose a tap.
-        Column(Modifier.fillMaxSize().padding(inset)
-            .padding(bottom = if (note.isEmpty()) 0.dp else bannerHeight).verticalScroll(scroll)
-            .padding(horizontal = 24.dp).padding(top = 12.dp, bottom = 28.dp)
-            .testTag("tide-content"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            when {
-                exceptions -> {
-                    TideHeading("UDP exceptions.", "Allow a listener through incoming rules.")
-                    UdpExceptionsPanel(ui.snapshot, ui.report, ui.busy || ui.verificationInDoubt,
-                        actions.setUdpPorts, actions.restoreAutomatic, initiallyExpanded = true)
-                    val vpnReason = vpnRefreshBlockedReason(ui.snapshot.udpConfigMode)
-                    val vpnAllowed = !ui.busy && !ui.verificationInDoubt &&
-                        ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
-                        ui.snapshot.rootReady && vpnReason == null
-                    TideOutlinedButton("Refresh Tailscale ports", actions.refreshVpn, enabled = vpnAllowed,
-                        loading = ui.working(TideOperation.REFRESH_PORTS), loadingLabel = "Refreshing…")
-                    Text("Checks Tailscale's UDP listeners, not your current VPN connection.",
-                        style = MaterialTheme.typography.bodySmall, color = Muted)
-                    if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
-                        color = Muted)
-                }
-                destination == TideDestination.FIREWALL -> TideFirewall(ui, actions.copy(recheck = {
-                    checkControl = TideCheckControl.FIREWALL; actions.recheck()
-                }), appVersion,
-                    checkingAction = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.FIREWALL,
-                    requestRemoval = { removeConfirmOpen = true },
-                    requestTunnelRemoval = { tunnelRemoveConfirmOpen = true },
-                    requestDisable = { offConfirmOpen = true },
-                    showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
-                    showSettings = { destination = TideDestination.SETTINGS })
-                destination == TideDestination.INSIGHTS -> TideInsights(ui, actions)
-                destination == TideDestination.ACTIVITY -> {
-                    TideHeading(if (inspection == TideInspection.COUNTERS) "Activity." else "Kernel rules.")
-                    TideTabs(TideInspection.entries.map { it.label }, inspection.ordinal) {
-                        inspection = TideInspection.entries[it]
+        tabState.SaveableStateProvider(if (exceptions) "exceptions" else destination.name) {
+            // The banner overlays this area. Shrinking the scrolling viewport by its height
+            // leaves nothing under it, at any scroll position, to be hidden or to lose a tap.
+            Column(Modifier.fillMaxSize().padding(inset)
+                .padding(bottom = if (note.isEmpty()) 0.dp else bannerHeight)
+                .tideTabSwipes(enabled = !exceptions) { step ->
+                    TideDestination.entries.getOrNull(destination.ordinal + step)?.let { destination = it }
+                }.verticalScroll(scroll)
+                .padding(horizontal = 24.dp).padding(top = 12.dp, bottom = 28.dp)
+                .testTag("tide-content"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                when {
+                    exceptions -> {
+                        TideHeading("UDP exceptions.", "Allow a listener through incoming rules.")
+                        UdpExceptionsPanel(ui.snapshot, ui.report, ui.busy || ui.verificationInDoubt,
+                            actions.setUdpPorts, actions.restoreAutomatic, initiallyExpanded = true)
+                        val vpnReason = vpnRefreshBlockedReason(ui.snapshot.udpConfigMode)
+                        val vpnAllowed = !ui.busy && !ui.verificationInDoubt &&
+                            ui.snapshot.protection == FirewallClient.Protection.ACTIVE &&
+                            ui.snapshot.rootReady && vpnReason == null
+                        TideOutlinedButton("Refresh Tailscale ports", actions.refreshVpn, enabled = vpnAllowed,
+                            loading = ui.working(TideOperation.REFRESH_PORTS), loadingLabel = "Refreshing…")
+                        Text("Checks Tailscale's UDP listeners, not your current VPN connection.",
+                            style = MaterialTheme.typography.bodySmall, color = Muted)
+                        if (vpnReason != null) Text(vpnReason, style = MaterialTheme.typography.bodySmall,
+                            color = Muted)
                     }
-                    if (inspection == TideInspection.COUNTERS) TideCounters(ui, actions)
-                    else KernelStatusTab(ui.snapshot, ui.report, ui.busy,
-                        { checkControl = TideCheckControl.KERNEL; actions.recheck() },
-                        verificationInDoubt = ui.verificationInDoubt,
-                        checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.KERNEL)
+                    destination == TideDestination.FIREWALL -> TideFirewall(ui, actions.copy(recheck = {
+                        checkControl = TideCheckControl.FIREWALL; actions.recheck()
+                    }), appVersion,
+                        checkingAction = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.FIREWALL,
+                        requestRemoval = { removeConfirmOpen = true },
+                        requestTunnelRemoval = { tunnelRemoveConfirmOpen = true },
+                        requestDisable = { offConfirmOpen = true },
+                        showRules = { destination = TideDestination.ACTIVITY; inspection = TideInspection.RULES },
+                        showSettings = { destination = TideDestination.SETTINGS })
+                    destination == TideDestination.INSIGHTS -> TideInsights(ui, actions)
+                    destination == TideDestination.ACTIVITY -> {
+                        TideHeading(if (inspection == TideInspection.COUNTERS) "Activity." else "Kernel rules.")
+                        TideTabs(TideInspection.entries.map { it.label }, inspection.ordinal) {
+                            inspection = TideInspection.entries[it]
+                        }
+                        if (inspection == TideInspection.COUNTERS) TideCounters(ui, actions)
+                        else KernelStatusTab(ui.snapshot, ui.report, ui.busy,
+                            { checkControl = TideCheckControl.KERNEL; actions.recheck() },
+                            verificationInDoubt = ui.verificationInDoubt,
+                            checking = ui.working(TideOperation.CHECK) && checkControl == TideCheckControl.KERNEL)
+                    }
+                    else -> TideSettings(ui, actions, appVersion, onExceptions = { exceptions = true })
                 }
-                else -> TideSettings(ui, actions, appVersion, onExceptions = { exceptions = true })
             }
         }
     }
@@ -432,9 +441,6 @@ private fun TideFirewall(ui: TideUiState, actions: TideActions, appVersion: Stri
             else -> "Not verified"
         })
         TidePolicyRow(R.drawable.tide_up, "Outgoing", "Unchanged")
-    }
-    if (active) {
-        TideSettingLink("Restore after reboot", bootLabel(state.bootRestore) + " · Magisk", showSettings)
     }
     TideTermuxCommands()
     TideDivider()

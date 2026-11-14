@@ -69,12 +69,16 @@ class TideTermuxTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         node("Check your firewall from the terminal").assertExists()
         node("pufw").assertDoesNotExist()
+        compose.onNodeWithText("Root access granted", substring = true).performScrollTo().assertIsDisplayed()
+        shot("collapsed")
         click("Termux quick commands")
         node("Termux quick commands").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
         node("To use these commands, install the optional helper first. See “Install the helper” below.").assertExists()
-        for (command in listOf("pufw", "pufw tunnel", "pufw stats", "pufw raw")) node(command).assertExists()
+        for (command in listOf("pufw", "pufw tunnel", "pufw stats", "pufw clear", "pufw raw")) node(command).assertExists()
         node("Install the helper").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         node("Copy installation command").assertDoesNotExist()
+        compose.onNodeWithText("Root access granted", substring = true).performScrollTo().assertIsDisplayed()
+        shot("expanded")
         click("Install the helper")
         node("Install the helper").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
         compose.onNodeWithText("The helper is included in this app; no download or storage permission is needed.", substring = true).assertExists()
@@ -99,7 +103,7 @@ class TideTermuxTest {
         val (fake, clipboard) = open()
         click("Termux quick commands")
         click("Install the helper")
-        val commands = listOf("pufw", "pufw tunnel", "pufw stats", "pufw raw", "pufw raw")
+        val commands = listOf("pufw", "pufw tunnel", "pufw stats", "pufw clear", "pufw raw", "pufw raw")
         for (command in commands) {
             node(command).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
             assertEquals("Copy command", node(command).fetchSemanticsNode().config[SemanticsActions.OnClick].label)
@@ -135,7 +139,7 @@ class TideTermuxTest {
         node("Installation command copied. Paste it into Termux.").assertDoesNotExist()
     }
 
-    @Test fun bundledHelperIsExactlyTheExistingReadOnlyCompanion() {
+    @Test fun bundledHelperMatchesTheCompanionSource() {
         val context = RuntimeEnvironment.getApplication()
         val bundled = context.assets.open(TERMUX_HELPER_ASSET).use { it.readBytes() }
         assertArrayEquals(File("../../tools/pufw").readBytes(), bundled)
@@ -166,7 +170,7 @@ class TideTermuxTest {
         click("Termux quick commands")
         click("Install the helper")
         val appearance = if (dark) "dark" else "light"
-        for (command in listOf("Copy installation command", "pufw", "pufw tunnel", "pufw stats", "pufw raw")) {
+        for (command in listOf("Copy installation command", "pufw", "pufw tunnel", "pufw stats", "pufw clear", "pufw raw")) {
             node(command).performScrollTo().assertIsDisplayed()
             val bounds = node(command).getUnclippedBoundsInRoot()
             assertTrue("Copy target remains at least 48dp high", (bounds.bottom - bounds.top).value >= 48f)

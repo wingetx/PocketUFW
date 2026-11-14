@@ -94,6 +94,28 @@ done
 # mksh closes descriptors above 2 for children unless they are passed explicitly.
 sh() { command sh "$@" 8>&8; }
 
+# UI metadata shared by app and Termux resets. Root reads it through this bridge;
+# it lives in app-private storage, independently of rules, pins and Insights.
+reset_record="$BASE/counter-reset-at"
+read_reset_time() {
+  [ ! -L "$reset_record" ] && [ -f "$reset_record" ] || return 0
+  reset_time=$(cat "$reset_record" 2>/dev/null) || return 0
+  case "$reset_time" in ''|0*|*[!0-9]*) return 0 ;; esac
+  [ "${#reset_time}" -le 13 ] || return 0
+  printf 'last_counter_reset_at=%s\n' "$reset_time"
+}
+record_reset_time() (
+  umask 077
+  reset_seconds=$(date +%s) || exit 1
+  case "$reset_seconds" in ''|0*|*[!0-9]*) exit 1 ;; esac
+  [ "${#reset_seconds}" -le 10 ] || exit 1
+  [ ! -L "$reset_record" ] && [ ! -d "$reset_record" ] || exit 1
+  reset_tmp=$(mktemp "$BASE/counter-reset-at.XXXXXX") || exit 1
+  trap 'rm -f "$reset_tmp"' 0
+  trap 'exit 1' HUP INT TERM
+  printf '%s000\n' "$reset_seconds" > "$reset_tmp" && mv -fT "$reset_tmp" "$reset_record"
+)
+
 # Fast, read-only counter refresh. The engine itself verifies both families,
 # their owned rules and hooks before reading kernel counters. Do not query
 # boot status, saved UDP policy, or the verbose rules report for a button tap.
@@ -105,6 +127,7 @@ if [ "$ACTION" = counters ]; then
   case "$snapshot" in
     'state=ACTIVE'*)
       printf 'root=GRANTED\n%s\n' "$snapshot"
+      read_reset_time
       exit 0 ;;
     *)
       echo 'error=Firewall is not active or its policy could not be verified.'
@@ -591,6 +614,15 @@ if [ "$outcome" = 'SUCCESS' ]; then
   fi
 fi
 
+if [ "$ACTION" = reset-counters ] && [ "$outcome" = SUCCESS ]; then
+  if record_reset_time; then
+    reset_recorded=YES
+  else
+    reset_recorded=NO
+    message='PocketUFW counters reset, but the shared reset time could not be saved. Rules and VPN exceptions are unchanged.'
+  fi
+fi
+
 # If enabling installed only some rules, perform the existing best-effort
 # rollback, then re-audit. Never silently claim protection.
 if [ "$ACTION" = enable ] && [ "$created_now" = 1 ] &&
@@ -709,6 +741,7 @@ echo "previous_boot=$previous_boot"
 echo "operation=$outcome"
 echo "message=$message"
 echo "state=$state"
+read_reset_time
 case "$(printf '%s\n' "$trust_report" | sed -n 's/^tailnet_wireguard=//p')" in
   CONFLICT) echo 'tailnet_wireguard=CONFLICT' ;;
   UNKNOWN) echo 'tailnet_wireguard=UNKNOWN' ;;
@@ -749,4 +782,10 @@ if [ "$state" = ACTIVE ] || [ "$state" = DEGRADED ]; then
   else
     echo 'rules_report=UNAVAILABLE'
   fi
+fi
+
+# Completion evidence for the confirming Termux client; never emitted mid-reset.
+if [ "$ACTION" = reset-counters ]; then
+  echo "counter_reset_recorded=${reset_recorded:-NO}"
+  echo 'counter_reset=READY'
 fi

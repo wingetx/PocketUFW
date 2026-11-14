@@ -1,15 +1,16 @@
 # Optional Termux companion
 
-`pufw` is a small, on-demand, read-only companion for a rooted phone with
-PocketUFW installed. It reads the installed app's engine; it does not enable,
-disable, repair, reset, or reauthorize anything. It is separate from the
+`pufw` is a small, on-demand companion for a rooted phone with PocketUFW
+installed. Its four diagnostic views are read-only. `pufw clear` resets only
+PocketUFW-owned counters after explicit confirmation; it does not enable,
+disable, repair, or reauthorize filtering. It is separate from the
 experimental `pufw-inspect` packet-sampling tool and does not capture packets.
 
 ## Optional installation
 
-The helper is included in the Beta8 APK and installed into Termux only when you
-choose. No separate download, repository checkout, or storage permission is
-needed.
+The helper has been bundled since Beta8; Beta8.1 includes
+`pufw clear`. It is installed into Termux only when you choose. No separate
+download, repository checkout, or storage permission is needed.
 
 1. In PocketUFW, open **Firewall → Termux quick commands → Install the helper**.
 2. Tap **Copy installation command**.
@@ -57,7 +58,7 @@ updater or background process.
 To remove it, run `rm "$PREFIX/bin/pufw"` in Termux. Neither action changes rules
 or the app. No APK installation is part of this procedure.
 
-## Four views
+## Four read-only views
 
 | Command | What it reads |
 | --- | --- |
@@ -66,7 +67,7 @@ or the app. No APK installation is part of this procedure.
 | `pufw stats` | One native `pocketufw activity`: separate physical/tunnel statistics, with IPv4, IPv6, and combined counts for DROP packets, dropped bytes, and established/related return packets |
 | `pufw raw` | The native `pocketufw inspect` key/value output, without summary formatting |
 
-Each invocation uses one `su` session and one engine command. `inspect` and
+Each read-only invocation uses one `su` session and one engine command. `inspect` and
 `activity` already use the same rule verifier as `pocketufw verify`, so the
 helper does not run another redundant `verify` pass. `inspect` also obtains
 address evidence in its existing bounded probe. The helper allows at most
@@ -107,10 +108,49 @@ Earlier Android ACCEPT rules and unsupported interfaces remain coverage
 boundaries. Use the app's **Coverage details** or **Activity → Kernel rules**
 for that evidence. The existing Wi-Fi calling compatibility warning still applies.
 
-Exit status: `0` for a complete normal read (including intentionally inactive
+For these views, exit status: `0` for a complete normal read (including intentionally inactive
 protection), `1` for failed/incomplete inspection or a reported condition needing
 attention, and `2` for invalid arguments. Raw output is diagnostic evidence;
 check its exit status and any error text before relying on partial output.
+
+## Reset counters with `pufw clear`
+
+Available in **0.1.0-beta8.1**. The published Beta8 helper does not
+include this command. After installing the updated app, tap **Recheck** and
+reinstall its bundled helper before using `clear`.
+
+Run `pufw clear`, read the scope notice, then type **yes** and Enter to confirm.
+Any other answer, an empty line, or end-of-input cancels before requesting root.
+There is no `--yes` flag. Copying the command in the app only copies text.
+
+Clear uses one root session to call the installed app's `android-bridge
+reset-counters` action. The bridge invokes the same engine reset as **Activity →
+Reset counters**, with the existing lifecycle lock and verification. Both IPv4
+and IPv6 owned rules must verify before counters are touched. Only the owned
+physical, Tailscale child, and installed tunnel chain counters are zeroed;
+Android/OEM counters, firewall rules, tunnel pins, authorization, filtering state,
+UDP exceptions, and boot opt-in are unchanged. Packets can increment counts
+immediately, so a successful reset does not promise displayed zeroes.
+
+A verified successful reset atomically records its time in the app-private
+`engine/counter-reset-at` file, readable through the root bridge. App resets use
+the same record. **Refresh counters** or **Recheck** reads that time into the
+app's **Last manual counter reset** display; no background polling is added.
+The legacy app preference remains a fallback for an older reset record.
+
+Insights stores the latest sample's metadata in app memory, not a persistent
+history database. Raw packet bytes are not saved. Counter reset does not call
+**Clear sample**, erase the latest result, or delete exported/standalone
+records. The existing Insights sampling and reset locks still serialize their
+operations; a refused/busy reset is reported without retries.
+
+Root denial, missing bridge/engine, inactive/degraded rules, incomplete output,
+and partial failures return nonzero. A timeout reports that some counters may
+already have reset and that completion is unknown. Timestamp-write failure is
+reported explicitly even if the counters reset. Check `pufw stats` and the error
+before deciding whether to retry; the helper never automatically retries.
+Only a complete successful response with the saved time returns `0`.
+Cancellation/failure returns `1`; invalid arguments return `2`.
 
 ## Engine location
 
@@ -128,9 +168,11 @@ PUFW_ENGINE=/absolute/path/to/pocketufw pufw
 ```
 
 Paths must be absolute and contain only letters, digits, `/`, `.`, `_`, or `-`.
-Keep the matching `vpn-probe` beside a standalone engine. The helper does not
+Keep the matching `vpn-probe` beside a standalone engine. `clear` also requires
+the matching app bridge and its companion scripts in that directory. The helper does not
 search for or fall back to an old Magisk boot snapshot. It does not modify
-engine files, boot preferences, counters, firewall rules, or network state.
+engine scripts, boot preferences, firewall rules, or network state. Only the
+confirmed `clear` action changes counters and reset-time metadata.
 Native inspections may create/use the engine's existing synchronization lock;
 this is not a service or a firewall/network change.
 
@@ -148,5 +190,22 @@ Host tests exercise the generated installation command against disposable ZIPs
 and temporary Termux directories, including quoting, checksums, interrupted and
 failed extraction, unavailable tools, and atomic replacement. Compose tests
 cover the bundled asset, copy feedback, failure feedback, and large text in
-light/dark themes. The new installation flow has not been installed or run on
-the phone; only rootless APK access was checked there.
+light/dark themes. The published Beta8 one-command installer was subsequently
+verified in normal, rootless Termux on Frankenpixel; its four read-only commands
+were exercised there. See the [historical Beta8 validation](releases/0.1.0-beta8.md#validation).
+
+The Beta8.1 `clear` command has host coverage for confirmation/cancellation,
+root denial, missing scripts, timeouts, incomplete replies, timestamp failures,
+and the real app bridge/engine on disposable mock rules. Those checks verify
+that only owned counters reset, that the shared time reaches subsequent app
+reads, and that rules, pins, boot state and saved diagnostic files are retained.
+Compose coverage includes copying `pufw clear`, swipe conflicts and preserving
+an active Insights sample across tab changes. Swipe navigation, button conflicts,
+vertical scrolling, and retained tab state passed native input tests on Frankenpixel
+with the Beta8 debug polish build. The phone used three-button navigation; Android
+system Back in gesture-navigation mode still needs a spot-check.
+
+Live `pufw clear` and cross-client reset-time verification on Frankenpixel remain
+pending. After the candidate is signed and installed, reinstall its bundled helper
+and tap **Recheck** before exercising `clear`, then refresh the app's counters to
+check its reset time. Host results do not substitute for that device check.

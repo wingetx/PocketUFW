@@ -1,18 +1,20 @@
 #!/system/bin/sh
-# Optional Termux companion. Only existing native read commands are reachable.
+# Optional Termux companion. Reads plus an explicitly confirmed native counter reset.
 set -u
 
 usage() {
     cat <<'HELP'
-Usage: pufw [tunnel|stats|raw]
+Usage: pufw [tunnel|stats|clear|raw]
   pufw         Verified rules, tunnel summary and counters
   pufw tunnel  Tunnel mode, saved authorization and current address verification
   pufw stats   Physical/tunnel DROP packets, bytes and established/related returns
+  pufw clear   Reset only PocketUFW counters after explicit confirmation
   pufw raw     Native inspect output (read-only; no packet sampling)
 
 Requires root and an installed PocketUFW app opened at least once with Recheck.
 Optional engine override: PUFW_ENGINE=/absolute/path/to/pocketufw
-No changes, background polling or connection tests. See docs/termux.md.
+Only clear changes counters; rules and Insights samples are kept.
+No background polling or connection tests. See docs/termux.md.
 HELP
 }
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
@@ -21,6 +23,7 @@ case "$view" in
     status) [ "$#" -eq 0 ] || { usage >&2; exit 2; }; native=inspect ;;
     stats) native=activity ;;
     tunnel) native=tunnel-status ;;
+    clear) native=reset-counters ;;
     raw) native=inspect ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -33,20 +36,63 @@ case "$engine" in
     *) echo 'pufw: PUFW_ENGINE must be an absolute path.' >&2; exit 2 ;;
 esac
 for tool in su timeout awk; do
-    command -v "$tool" >/dev/null 2>&1 || { echo "pufw: Required command unavailable: $tool. No inspection performed." >&2; exit 1; }
+    command -v "$tool" >/dev/null 2>&1 || { echo "pufw: Required command unavailable: $tool. No operation performed." >&2; exit 1; }
 done
 
-# One root session, one native inspection. No app bridge, extra verify pass,
-# or fallback to a different engine copy.
+if [ "$view" = clear ]; then
+    printf '%s\n' 'Reset only PocketUFW-owned physical and tunnel counters?' \
+        'Firewall rules, tunnel pins, authorization and Insights samples will be kept.' >&2
+    printf '%s' 'Type yes to reset counters: ' >&2
+    if ! IFS= read -r confirmation || [ "$confirmation" != yes ]; then
+        echo 'pufw: Cancelled. No counters reset.' >&2
+        exit 1
+    fi
+fi
+
+# Read views call the engine once. Clear uses the app bridge's existing reset
+# action, verification and shared timestamp. Never fall back to another copy.
+runner=$engine
+[ "$view" != clear ] || runner=${engine%/*}/android-bridge
 output=$(timeout -s KILL 30 su -c "
     [ \"\$(id -u)\" = 0 ] || { echo 'pufw: Root access was not granted.' >&2; exit 77; }
     [ -f '$engine' ] && [ -r '$engine' ] || {
         echo 'pufw: PocketUFW engine unavailable. Open the installed app and tap Recheck first; check PUFW_ENGINE for another Android user or a standalone installation.' >&2
         exit 66
     }
-    exec sh '$engine' '$native'
+    [ -f '$runner' ] && [ -r '$runner' ] || {
+        echo 'pufw: App reset bridge unavailable. Open the updated app and tap Recheck first.' >&2
+        exit 66
+    }
+    exec sh '$runner' '$native'
 " 2>&1)
 result=$?
+if [ "$view" = clear ]; then
+    case "$result" in
+        124|137)
+            echo 'pufw: Counter reset timed out. Some counters may have reset; completion is unknown. Check pufw stats before deciding whether to retry.' >&2
+            exit 1 ;;
+    esac
+    if printf '%s\n' "$output" | awk -v result="$result" '
+        { last = $0 }
+        /^(root|operation|state|last_counter_reset_at|counter_reset_recorded|counter_reset)=/ {
+            pos = index($0, "="); key = substr($0, 1, pos - 1)
+            if (++seen[key] != 1) bad = 1
+            value[key] = substr($0, pos + 1)
+        }
+        END { exit !(result == 0 && !bad && last == "counter_reset=READY" &&
+            value["root"] == "GRANTED" && value["operation"] == "SUCCESS" &&
+            value["state"] == "ACTIVE" && value["counter_reset_recorded"] == "YES" &&
+            value["last_counter_reset_at"] ~ /^[1-9][0-9]*$/ && length(value["last_counter_reset_at"]) <= 13) }
+    '; then
+        printf '%s\n' 'PocketUFW counters reset; newly arriving packets may already be counted.' \
+            'Reset time saved. Refresh counters or Recheck in the app to see it.' \
+            'Rules, tunnel authorization and Insights samples are unchanged.'
+        exit 0
+    fi
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    echo 'pufw: Counter reset failed or could not be confirmed. Some counters may have reset. Check root access and pufw stats; no automatic retry was attempted.' >&2
+    exit 1
+fi
 case "$result" in
     124|137) echo 'pufw: Inspection timed out. Current state is unknown; try again.' >&2; exit 1 ;;
     66|77) printf '%s\n' "$output" >&2; exit 1 ;;

@@ -14,7 +14,7 @@
 > [!CAUTION]
 > **Confirmed Wi-Fi calling compatibility issue:** On a Pixel 9a running Android 17, PocketUFW's physical firewall caused incoming calls over Wi-Fi calling to fail silently while the carrier's UDP 4500 connection-tracking entry was absent. Calls succeeded with PocketUFW off and when that entry existed. If you rely on Wi-Fi calling to receive calls, **do not use PocketUFW's physical firewall until this is resolved**. If cellular reception is reliable, disabling Wi-Fi calling is a workaround. Confirmed on this device; other phones and carriers have not been tested.
 
-**Latest signed beta:** [PocketUFW 0.1.0-beta8](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta8) is an **experimental prerelease** (versionCode 30), with calmer coverage wording, verified boot-toggle feedback, and a bundled, optional [read-only Termux companion](docs/termux.md) with a one-command rootless installer. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta8/PocketUFW-0.1.0-beta8.apk), [check its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta8/SHA256SUMS.txt), and read the [Beta8 release notes](docs/releases/0.1.0-beta8.md). The **Wi-Fi calling warning above remains important**; verified rules do not guarantee universal traffic coverage.
+**Latest signed beta:** [PocketUFW 0.1.0-beta8.1](https://github.com/wingetx/PocketUFW/releases/tag/v0.1.0-beta8.1) is an **experimental prerelease** (versionCode 31), adding horizontal swipe navigation, Tide UI cleanup, and `pufw clear` with confirmation and an app-synchronized reset timestamp. [Download the signed APK](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta8.1/PocketUFW-0.1.0-beta8.1.apk), [check its SHA-256](https://github.com/wingetx/PocketUFW/releases/download/v0.1.0-beta8.1/SHA256SUMS.txt), and read the [Beta8.1 release notes](docs/releases/0.1.0-beta8.1.md). The **Wi-Fi calling warning above remains important**; verified rules do not guarantee universal traffic coverage.
 
 **Insights limitation:** Android/OEM firewall changes can cause a sample to be withheld safely. Ordinary firewall enforcement remains in place; strict capture cleanup and verification still apply.
 
@@ -31,6 +31,8 @@
 | **Quick Settings tile** | Deliberate toggle with a fresh state check; long-press opens PocketUFW |
 | **Boot restoration** | Optional one-shot **Magisk** restore for physical filtering only |
 | **Network compatibility** | Does not use `VpnService`, leaving the VPN slot available for apps such as Tailscale or Proton VPN |
+
+Swipe left or right inside the content to move through **Firewall → Activity → Insights → Settings**. Bottom navigation and each tab's scroll/disclosure state stay synchronized. Vertical scrolling, child drag controls, and system back edges retain priority.
 
 Tide includes a single primary firewall switch, an **Activity** page for all counters, an **Insights** sampling page, a labeled **Recheck** action, progress indicators, and separate controls for advanced tunnel and VPN settings. Resetting counters clears PocketUFW-owned measurements without rebuilding the firewall or changing Android/OEM rules.
 
@@ -107,10 +109,14 @@ See [hardware validation](docs/hardware-validation.md), [compatibility notes](do
 
 For initial testing, keep a trusted recovery route (such as USB ADB), especially when your phone depends on cellular, Wi-Fi calling, local services, or VPN connectivity. Installing or opening PocketUFW does not itself install firewall rules.
 
-### Optional Termux companion (Beta8)
+### Optional Termux companion (Beta8.1)
 
 The optional `pufw` helper offers four read-only terminal views: quick status,
-`pufw tunnel`, `pufw stats`, and `pufw raw`. The helper is bundled in the APK.
+`pufw tunnel`, `pufw stats`, and `pufw raw`. Beta8.1 adds `pufw clear`: type
+`yes` to reset only PocketUFW-owned counters through the app reset mechanism.
+Rules, tunnel pins, authorization, filtering state, and Insights samples are retained.
+The shared reset time appears in the app after **Refresh counters** or **Recheck**.
+The helper is bundled in the APK; reinstall it after updating the app to get the new command.
 Open **Firewall → Termux quick commands → Install the helper**, tap
 **Copy installation command**, then paste and run it in normal Termux.
 Installation needs no root or download; it verifies the bundled helper before

@@ -1,4 +1,4 @@
-"""Optional Termux companion: fake su responses and existing mock-kernel reads only."""
+"""Optional Termux companion: fake su responses and disposable mock-kernel operations only."""
 import os
 from pathlib import Path
 import subprocess
@@ -42,6 +42,7 @@ class PufwCliTests(unittest.TestCase):
         self.response = self.base / 'response'
         self.engine = self.base / 'pocketufw'
         self.engine.write_text('#!/bin/sh\necho "$1" >> "$CLI_LOG"\ncat "$CLI_RESPONSE"\nexit "${CLI_EXIT:-0}"\n')
+        (self.base / 'android-bridge').write_text(self.engine.read_text())
         self.script('su', SU)
         self.script('id', '#!/bin/sh\necho "${CLI_UID:-0}"\n')
         self.env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}',
@@ -52,7 +53,7 @@ class PufwCliTests(unittest.TestCase):
         path.write_text(text)
         path.chmod(0o755)
 
-    def run_cli(self, *args, values=None, text=None, native_exit=0, extra=None):
+    def run_cli(self, *args, values=None, text=None, native_exit=0, extra=None, confirmation=""):
         if values is None:
             values = snapshot()
         if text is None:
@@ -60,10 +61,69 @@ class PufwCliTests(unittest.TestCase):
             text += 'tunnel_status=READY\n' if args == ('tunnel',) else '' if args == ('stats',) else 'inspection=READY\n'
         self.response.write_text(text)
         return subprocess.run(['/bin/sh', str(HELPER), *args], text=True, capture_output=True, timeout=5,
-                              env=self.env | {'CLI_EXIT': str(native_exit)} | (extra or {}))
+                              env=self.env | {'CLI_EXIT': str(native_exit)} | (extra or {}), input=confirmation)
 
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def reset_response(self):
+        return ('root=GRANTED\noperation=SUCCESS\nstate=ACTIVE\n'
+                'last_counter_reset_at=1700000000000\ncounter_reset_recorded=YES\ncounter_reset=READY\n')
+
+    def test_clear_requires_exact_explicit_confirmation_before_root(self):
+        for answer in ['', '\n', 'no\n', 'y\n', 'YES\n', 'yes \n', 'yes']:
+            result = self.run_cli('clear', confirmation=answer)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('Cancelled', result.stderr)
+            self.assertEqual(self.calls(), [])
+        for args in [('clear', '--yes'), ('clear', 'yes'), ('clear;enable',)]:
+            self.assertEqual(self.run_cli(*args, confirmation='yes\n').returncode, 2)
+            self.assertEqual(self.calls(), [])
+
+    def test_clear_uses_only_the_existing_app_reset_and_requires_completion(self):
+        # A direct engine reset would fail: this must dispatch through the app bridge.
+        self.engine.write_text('exit 99\n')
+        result = self.run_cli('clear', confirmation='yes\n', text=self.reset_response())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(), ['su', 'reset-counters'])
+        self.assertIn('Reset time saved', result.stdout)
+        self.assertIn('Insights samples are unchanged', result.stdout)
+        self.assertIn('Type yes', result.stderr)
+
+    def test_clear_failure_partial_response_and_bad_timestamp_never_claim_success(self):
+        good = self.reset_response()
+        for response, code in [(good, 1), ('', 0), (good.replace('counter_reset=READY\n', ''), 0),
+                               (good + 'trailing\n', 0), (good + 'operation=SUCCESS\n', 0),
+                               (good.replace('SUCCESS', 'FAILED'), 0),
+                               (good.replace('GRANTED', 'DENIED'), 0),
+                               (good.replace('ACTIVE', 'DEGRADED'), 0),
+                               (good.replace('recorded=YES', 'recorded=NO'), 0),
+                               (good.replace('1700000000000', 'garbage'), 0)]:
+            self.log.unlink(missing_ok=True)
+            result = self.run_cli('clear', confirmation='yes\n', text=response, native_exit=code)
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn('Reset time saved', result.stdout)
+            self.assertIn('Some counters may have reset', result.stderr)
+            self.assertEqual(self.calls(), ['su', 'reset-counters'])
+
+    def test_clear_root_denial_missing_bridge_and_timeout_do_not_retry(self):
+        result = self.run_cli('clear', confirmation='yes\n', extra={'CLI_UID': '2000'})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Root access was not granted', result.stderr)
+        self.assertEqual(self.calls(), ['su'])
+        self.log.unlink()
+        (self.base / 'android-bridge').unlink()
+        result = self.run_cli('clear', confirmation='yes\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('reset bridge unavailable', result.stderr)
+        self.assertEqual(self.calls(), ['su'])
+        self.log.unlink()
+        self.script('timeout', '#!/bin/sh\necho counter_reset=READY\nexit 137\n')
+        result = self.run_cli('clear', confirmation='yes\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('completion is unknown', result.stderr)
+        self.assertNotIn('Reset time saved', result.stdout)
+        self.assertEqual(self.calls(), [])
 
     def test_four_views_each_make_only_one_native_read(self):
         for args, native in [((), 'inspect'), (('tunnel',), 'tunnel-status'), (('stats',), 'activity'), (('raw',), 'inspect')]:
